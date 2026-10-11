@@ -76,6 +76,20 @@ def test_isolated_pptx_flow(tmp_path):
             first_id = first['material']['id']
             preview = client.get(f'/api/v1/materials/{first_id}/deletion-preview').json()
             assert preview['pages'] == 1 and preview['user_notes_protected'] >= 1
+            assert preview['active_jobs'] >= 1
+            assert client.delete(f'/api/v1/materials/{first_id}').status_code == 409
+            # Parsing now also registers an independent cross-course task.
+            # Drain that real durable queue before exercising deletion/restore.
+            while run_once():
+                pass
+            from sqlalchemy import select
+            from app.db.database import SessionLocal
+            from app.db.models import ForestJob
+            with SessionLocal() as db:
+                forest_jobs = list(db.scalars(select(ForestJob)).all())
+                assert forest_jobs
+                assert all(job.status == 'failed' and '未配置' in job.error_message for job in forest_jobs)
+            assert client.get(f'/api/v1/materials/{first_id}/deletion-preview').json()['active_jobs'] == 0
             assert client.delete(f'/api/v1/materials/{first_id}').status_code == 200
             assert client.get(f'/api/v1/materials/{first_id}/pages').status_code == 404
             assert client.post(f'/api/v1/materials/{first_id}/restore').status_code == 200

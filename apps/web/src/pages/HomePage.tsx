@@ -160,6 +160,8 @@ export function HomePage() {
           </div>
         </form>
 
+        <button className="home-forest-entry" type="button" onClick={() => navigate('/forest')}><span aria-hidden="true">❧</span><span><strong>走进知识森林</strong><small>按学期漫步课程，从一片叶子回到笔记</small></span><span aria-hidden="true">↝</span></button>
+
         <div className="home-lower-grid">
           <section className="home-content-panel home-recent-panel" aria-labelledby="recent-notes-title">
             <header className="home-panel-heading">

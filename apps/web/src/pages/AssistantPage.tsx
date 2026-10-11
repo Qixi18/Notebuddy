@@ -33,6 +33,7 @@ export function AssistantPage() {
     setSelectedMaterialId,
     pages,
     setSelectedPageNumber,
+    openMaterialSource,
     teacherPersona,
     conversation,
   } = useWorkspace()

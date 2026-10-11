@@ -99,12 +99,13 @@ export function featurePath(courseId: string, feature: Feature): string {
 }
 
 export function AppLayout() {
-  const { courseId, course, courses, coursesLoading, error, setError, noteDirty } = useWorkspace()
+  const { courseId, course, courses, coursesLoading, error, setError, noteDirty, setEditingNote } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const isHome = location.pathname === '/'
+  const isForest = location.pathname === '/forest'
   const isAssistantPage = location.pathname.endsWith('/assistant')
-  const showAssistantDock = !isHome && !isAssistantPage
+  const showAssistantDock = !isHome && !isAssistantPage && !isForest
   const activeFeature = location.pathname.split('/')[3] as Feature | undefined
   const isCoursesPage = location.pathname === '/courses' || /^\/courses\/[^/]+$/.test(location.pathname)
   const isNotesLibrary = location.pathname === '/notes' || location.pathname.startsWith('/courses/') && (location.pathname.includes('/notes/') || location.pathname.endsWith('/notebook'))
@@ -136,7 +137,7 @@ export function AppLayout() {
   }
 
   return (
-    <div className={`app-shell${isHome ? ' app-shell-home' : showAssistantDock ? ' app-shell-with-assistant' : ''}${sidebarCollapsed ? ' app-shell-sidebar-collapsed' : ''}`}>
+    <div className={`app-shell${isHome ? ' app-shell-home' : isForest ? ' app-shell-forest' : showAssistantDock ? ' app-shell-with-assistant' : ''}${sidebarCollapsed ? ' app-shell-sidebar-collapsed' : ''}`}>
       <aside className={`app-sidebar${isHome ? ' app-sidebar-home' : ''}`}>
         <button className="brand-lockup" onClick={() => navigate('/')} aria-label="返回首页">
           <span className="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.7 3.8c-7 .3-12.4 2.4-14.6 6.8-1.5 3 .1 6.1 3.2 6.4 4.9.5 9.1-4.7 11.4-13.2Z"/><path d="M4.6 21c1.9-5.4 5.3-8.9 10.4-11.8"/></svg></span>
@@ -154,6 +155,9 @@ export function AppLayout() {
         <button className={`sidebar-link ${isCoursesPage ? 'sidebar-link-active' : ''}`} onClick={() => navigate('/courses')}>
           <span className="sidebar-link-icon" aria-hidden="true">⌂</span><span>课程</span>
         </button>
+        <button className={`sidebar-link ${isForest ? 'sidebar-link-active' : ''}`} onClick={() => navigate('/forest')} title={sidebarCollapsed ? '知识森林' : undefined}>
+          <span className="sidebar-link-icon" aria-hidden="true">❧</span><span>知识森林</span>
+        </button>
         {(Object.keys(featureLabels) as Feature[]).map((feature) => (
           <button
             className={`sidebar-link ${((feature === 'notes' && isNotesLibrary) || (feature !== 'notes' && activeFeature === feature)) ? 'sidebar-link-active' : ''}`}
@@ -168,7 +172,7 @@ export function AppLayout() {
           </button>
         ))}
 
-        {!isHome && !isNotesLibrary && !isCoursesPage && <CourseSwitcher
+        {!isHome && !isNotesLibrary && !isCoursesPage && !isForest && <CourseSwitcher
           course={course}
           courses={courses}
           loading={coursesLoading}
@@ -195,7 +199,7 @@ export function AppLayout() {
         </div>
       </aside>
 
-      <main className={`app-main${isHome ? ' app-main-home' : ''}`}>
+      <main className={`app-main${isHome ? ' app-main-home' : isForest ? ' app-main-forest' : ''}`}>
         {error && (
           <div className="global-alert" role="alert">
             <span>{error}</span>

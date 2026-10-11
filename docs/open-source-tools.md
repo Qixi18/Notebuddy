@@ -12,7 +12,17 @@
 | python-docx | DOCX 章节、段落与表格读取 | [python-openxml/python-docx](https://github.com/python-openxml/python-docx) |
 | pypdf | PDF 读取及原生文字提取 | [py-pdf/pypdf](https://github.com/py-pdf/pypdf) |
 
-本轮继续使用上述现有依赖，没有新增运行时库。适用许可证以锁定版本随包附带的 LICENSE 为准；分发安装包时纳入第三方许可证。文档库可读取格式，不等于复杂公式、扫描页或 OCR 的质量已经验收。
+2026-10-08 笔记本专项继续使用上述现有依赖，没有新增运行时库。适用许可证以锁定版本随包附带的 LICENSE 为准；分发安装包时纳入第三方许可证。文档库可读取格式，不等于复杂公式、扫描页或 OCR 的质量已经验收。
+
+2026-10-11 自然手绘知识森林新增以下小型模块，版本与 ISC 许可证已核对安装包元数据和 LICENSE；不引入完整 D3 包，没有复制第三方实现源码。手绘树形和地形由项目自行绘制。
+
+| 运行时工具（锁定版本） | 本项目用途 | 来源 / 许可证 |
+| --- | --- | --- |
+| d3-zoom 3.0.0 | 鼠标、触摸缩放和平移 | [d3/d3-zoom](https://github.com/d3/d3-zoom)，ISC |
+| d3-selection 3.0.0 | 绑定/移除缩放行为，相机变换 | [d3/d3-selection](https://github.com/d3/d3-selection)，ISC |
+| d3-shape 3.2.0 | 树枝与跨课程藤蔓曲线 | [d3/d3-shape](https://github.com/d3/d3-shape)，ISC |
+
+对应 `@types/d3-*` 仅为开发类型依赖，package-lock.json 固定传递依赖；分发时保留随包版权与许可通知。复用公开 API，不依赖模型或云服务即可浏览森林；培养方案解析和跨课 AI 候选使用原有解析器与本地配置的模型接口。
 
 Playwright CLI 仅用于本轮浏览器检查，未添加为产品运行依赖。
 

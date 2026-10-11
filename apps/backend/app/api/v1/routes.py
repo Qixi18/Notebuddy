@@ -7,6 +7,8 @@ from app.api.v1 import (
     conversations,
     courses,
     feedback,
+    forest,
+    forest_imports,
     jobs,
     knowledge,
     materials,
@@ -16,5 +18,5 @@ from app.api.v1 import (
 )
 
 router = APIRouter()
-for module in (config, courses, materials, jobs, knowledge, notes, notebook, assistant, conversations, feedback, backup, terms):
+for module in (config, courses, materials, jobs, knowledge, notes, notebook, assistant, conversations, feedback, backup, terms, forest, forest_imports):
     router.include_router(module.router)

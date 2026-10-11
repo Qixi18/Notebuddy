@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { api } from '../api'
 import { EmptyState } from '../components/EmptyState'
 import { CoverageGrid } from '../components/CoverageGrid'
@@ -8,6 +8,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useWorkspace } from '../components/AppLayout'
 import type { Capabilities } from '../api/config'
 import type { Coverage, DeletionPreview, PageEvidence } from '../types'
+import type { ForestCourse } from '../features/forest/types'
 
 const statusLabels: Record<string, string> = { pending: '等待处理', processing: '解析中', completed: '已完成', failed: '解析失败' }
 
@@ -42,6 +43,11 @@ export function MaterialsPage() {
   const [materialRemoval, setMaterialRemoval] = useState<{ id: string; impact: DeletionPreview }>()
   const [deletionPreviewingId, setDeletionPreviewingId] = useState<string>()
   const [deletingMaterialId, setDeletingMaterialId] = useState<string>()
+  const [startLearningCourse, setStartLearningCourse] = useState<ForestCourse>()
+  const [startingLearning, setStartingLearning] = useState(false)
+  const currentCourseId = useRef(course?.id)
+  currentCourseId.current = course?.id
+  useEffect(() => { setStartLearningCourse(undefined) }, [course?.id])
 
   useEffect(() => {
     let active = true
@@ -92,12 +98,23 @@ export function MaterialsPage() {
       await uploadMaterial(file, lectureTitle, topicTitle, allowDuplicate)
       setFile(undefined)
       setAllowDuplicate(false)
+      if (course) {
+        void api.getForest().then(({ courses }) => { if (currentCourseId.current === course.id) setStartLearningCourse(courses.find((item) => item.course_id === course.id && item.learning_state === 'planned')) }).catch(() => { /* Upload success remains visible even if the optional forest prompt is unavailable. */ })
+      }
     } catch {
       // The workspace displays the API error; keep the file for a corrected retry.
     }
   }
 
   const selectedPage = pages.find((page) => page.page_number === selectedPageNumber)
+
+  async function startLearning() {
+    if (!startLearningCourse) return
+    setStartingLearning(true)
+    try { await api.updateForestCourse(startLearningCourse.course_id, { expected_revision: startLearningCourse.revision, learning_state: 'learning' }); setStartLearningCourse(undefined) }
+    catch (cause) { setMaterialActionError(cause instanceof Error ? cause.message : '学习状态保存失败') }
+    finally { setStartingLearning(false) }
+  }
 
   useEffect(() => {
     if (!selectedMaterialId) { setWebSources([]); return }
@@ -136,6 +153,8 @@ export function MaterialsPage() {
           </div>
         </details>
       </form>
+
+      {startLearningCourse && <div className="materials-forest-start"><span>已上传第一讲，要将森林中的这门课设为“在学”吗？</span><button type="button" disabled={startingLearning} onClick={() => void startLearning()}>{startingLearning ? '保存中…' : '开始学习'}</button><button type="button" disabled={startingLearning} onClick={() => setStartLearningCourse(undefined)}>稍后</button></div>}
 
       <ProcessingStatus job={job?.material_id === selectedMaterialId ? job : undefined} material={materials.find((item) => item.id === selectedMaterialId)} />
       {materialActionError && <p className="form-error" role="alert">{materialActionError}</p>}

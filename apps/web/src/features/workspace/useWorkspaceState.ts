@@ -4,6 +4,7 @@ import { matchPath, useLocation } from 'react-router-dom'
 import { api } from '../../api'
 import { useConversation } from '../conversation/useConversation'
 import { useNoteEditor } from '../notes/useNoteEditor'
+import { mergeNotebookNotes } from '../notebook/navigation'
 import { useTeacherCharacter } from '../persona/useTeacherCharacter'
 import type { Course, Job, KnowledgeGraph, Material, Note, Page } from '../../types'
 

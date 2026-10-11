@@ -74,6 +74,18 @@ for node, raw_relations in pending_relations:
 
 回归测试见 `tests/test_knowledge_relations.py`，其中 `test_cross_page_relation_resolves_after_all_nodes_exist` 精确复现上述 bug 场景。
 
+## 自然手绘知识森林（2026-10-11）
+
+新增全局 `/forest` 场景。React 管理 SVG 节点，`d3-zoom` 与 `d3-selection` 管理视口，`d3-shape` 生成植物曲线。装饰性树形和业务叶子分层，叶子绑定现有 Note ID；森林只按可见区域读取笔记本目录，避免加载所有课程正文。课程层级、顺序、学习状态与独立修订保存在 `ForestCourseProfile`，视口和布局缓存保存在浏览器。
+
+`CrossCourseRelation` 独立表示两门课具体笔记之间的藤蔓，绑定两端课程、笔记版本和来源。手动连接是显式确认；AI 生成 pending 候选，确认前不展示藤蔓。笔记改变或来源失效需要复核。原 `KnowledgeEdge` 仍仅用于课程内知识关系，原答疑接口继续校验课程归属。
+
+`CurriculumImport` 保存 PDF/DOCX 或文本导入、原文件、来源位置、模式、告警与预览行；确认后创建或关联课程。培养方案不进入 Material/课程讲次。新增 `ForestJob` 持久队列由 `app.workers.runner` 同一独立进程处理，承担培养方案解析与跨课程候选生成。资料成功生成笔记后登记任务，API 不在请求进程内执行 AI。
+
+全量备份与迁移/删除检查点保留培养方案原文件；单课程备份过滤全局培养方案和外课引用。旧库升级使用新 Alembic 迁移，保留原节点、笔记正文、来源、版本和入口。
+
+设计见 [专项设计](superpowers/specs/2026-10-11-knowledge-forest-design.md)，实际验证状态见 [专项交接](handoffs/2026-10-11-knowledge-forest.md)。
+
 ## 后续扩展
 
 ## 当前数据关系

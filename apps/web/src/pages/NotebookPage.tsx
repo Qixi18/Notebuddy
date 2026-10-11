@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { useWorkspace } from '../components/AppLayout'
 import { adjacentSection, notebookPath, resolveSection } from '../features/notebook/navigation'
@@ -13,6 +13,8 @@ export function NotebookPage() {
   const { courseId = '' } = useParams()
   const [query] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  const forestReturn = (location.state as { fromForest?: boolean; forestReturn?: string } | null)?.fromForest ? (location.state as { forestReturn?: string }).forestReturn ?? '/forest' : undefined
   const { notes, materials, job, upsertNotes, setSelectedNoteId, courseContentLoading, noteDirty } = useWorkspace()
   const [outline, setOutline] = useState<Notebook>()
   const [error, setError] = useState<string>()
@@ -95,6 +97,7 @@ export function NotebookPage() {
     </article>
   }
   return <div className="notebook-page page-enter">
+    {forestReturn && <Link className="notebook-forest-return" to={forestReturn}>❧ 返回知识森林</Link>}
     <header className="notebook-header"><div><Link to="/notes">← 课程书架</Link><h1>{outline.title}</h1><p>{outline.chapters.length} 章 · 按讲次阅读与积累</p></div><div className="notebook-modes" role="group" aria-label="阅读模式"><button className={mode === 'chapter' ? 'primary-button' : 'secondary-button'} onClick={() => navigate(notebookPath(courseId, selected))}>章节阅读</button><button className={mode === 'book' ? 'primary-button' : 'secondary-button'} onClick={() => navigate(notebookPath(courseId, selected, 'book'))}>整本阅读</button></div></header>
     {error && <p role="alert" className="form-error">{error}</p>}
     <div className="notebook-layout"><nav className="notebook-outline" aria-label="笔记本目录"><h2>目录</h2>

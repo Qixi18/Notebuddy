@@ -20,6 +20,23 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def referenced_original_names(connection: sqlite3.Connection, *, include_removed: bool = True) -> set[str]:
+    """Read only stored originals; old databases need no forest tables."""
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    names = set()
+    if "materials" in tables:
+        suffix = "" if include_removed else " WHERE deleted_at IS NULL"
+        names.update(row[0] for row in connection.execute("SELECT stored_filename FROM materials" + suffix))
+    if "curriculum_imports" in tables:
+        names.update(row[0] for row in connection.execute("SELECT stored_filename FROM curriculum_imports WHERE stored_filename IS NOT NULL"))
+    return names
+
+
+def validate_original_name(name: str) -> None:
+    if not isinstance(name, str) or not name or name in {".", ".."} or any(character in name for character in ("/", "\\", ":")) or Path(name).name != name:
+        raise ValueError("Unsafe stored filename in database")
+
+
 def create_checkpoint(data_dir: Path, destination: Path) -> Path:
     """Snapshot SQLite online, then copy immutable originals into a new directory."""
     database = data_dir / "notebook.sqlite3"
@@ -37,15 +54,9 @@ def create_checkpoint(data_dir: Path, destination: Path) -> Path:
         originals.mkdir()
         files = []
         with closing(sqlite3.connect(destination / "notebook.sqlite3")) as snapshot:
-            has_materials = snapshot.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='materials'"
-            ).fetchone()
-            filenames = sorted({row[0] for row in snapshot.execute(
-                "SELECT stored_filename FROM materials"
-            )}) if has_materials else []
+            filenames = sorted(referenced_original_names(snapshot))
         for name in filenames:
-            if Path(name).name != name:
-                raise ValueError("Unsafe stored filename in database")
+            validate_original_name(name)
             source = data_dir / "originals" / name
             if not source.is_file() or source.is_symlink():
                 raise ValueError(f"Original missing or unsafe: {name}")
@@ -76,10 +87,12 @@ def verify_checkpoint(checkpoint: Path) -> dict:
     with closing(sqlite3.connect(database)) as connection:
         if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("Checkpoint database integrity check failed")
+        manifest_names = {entry["name"] for entry in manifest["originals"]}
+        if referenced_original_names(connection) - manifest_names:
+            raise ValueError("Checkpoint database references an unlisted original")
     for entry in manifest["originals"]:
         name = entry["name"]
-        if Path(name).name != name:
-            raise ValueError("Unsafe original filename in checkpoint")
+        validate_original_name(name)
         path = checkpoint / "originals" / name
         if path.stat().st_size != entry["bytes"] or _sha256(path) != entry["sha256"]:
             raise ValueError(f"Checkpoint original hash mismatch: {name}")

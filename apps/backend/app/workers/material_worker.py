@@ -16,6 +16,7 @@ from app.db.models import (
     SourceRef,
     WebSource,
 )
+from app.forest.jobs import enqueue_relations
 from app.knowledge.extractor import extract_material_knowledge
 from app.knowledge.proposals import create_note_suggestion
 from app.parsers.document import parse_document
@@ -222,6 +223,9 @@ def process_material(job_id: str) -> None:
         job.phase = "completed"
         job.progress = 100
         job.finished_at = datetime.now(UTC)
+        # A successful lecture creates a durable candidate request in the same
+        # transaction as completion. Retries use actual note IDs/revisions.
+        enqueue_relations(db, material.course_id, material_id=material.id)
         db.commit()
     except Exception as exc:
         db.rollback()
