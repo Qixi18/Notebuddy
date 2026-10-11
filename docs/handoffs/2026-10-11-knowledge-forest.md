@@ -69,6 +69,6 @@ uv run python ../../scripts/seed_forest_qa.py
 
 当前边界：跨课 AI 候选先按全部有效笔记标题的词面关系排序，再选本课最多30条、外课最多18条有可核对来源的笔记；不能解释为全量语义关联。布局优先保留已有课程位置，新加的更早学期课程若没有空位会追加到尾部；显式调整学期或排序会重新排列。PDF 复杂表格的课程与先修抽取仍需在预览里人工核对，DOCX 标题列可核对明确先修栏。
 
-功能提交：`a1583ba`；以 mawenzhe33 身份推送 `feature/knowledge-forest`，提交 GitHub PR（当前链接将在分支命名更新后登记），目标 main `3ab07b7`。工作树保留供审查修改；本轮不合并 main。本轮隔离 API/Web/worker 与浏览器会话在交付后停止，样例目录和本地截图保留。
+功能提交：`a1583ba`；以 mawenzhe33 身份推送 `feature/knowledge-forest`，创建 [PR #5](https://github.com/Qixi18/Notebuddy/pull/5)，目标 main `3ab07b7`。工作树保留供审查修改；本轮不合并 main。本轮隔离 API/Web/worker 与浏览器会话在交付后停止，样例目录和本地截图保留。
 
 真实培养方案、连续三讲真实课件、真实 AI 调用质量、10 条真实用户编辑保护与 30 条真实来源抽查尚未验收。合成材料与模拟模型证据不能替代这些质量检查。
