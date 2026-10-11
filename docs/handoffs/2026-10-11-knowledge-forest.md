@@ -1,7 +1,7 @@
 # 自然手绘知识森林交接
 
 日期：2026-10-11。分支：`feature/knowledge-forest`；初始基线：`5693415`；已同步 GitHub 最新 main：`3ab07b7`。
-使用独立工作树；本机位置通过 `git worktree list` 查看。
+开发验证使用过独立工作树；按用户要求，任务分支现已切回原 NoteBuddy 项目目录。
 
 ## 需求决定
 
@@ -72,3 +72,11 @@ uv run python ../../scripts/seed_forest_qa.py
 功能提交：`a1583ba`；以 mawenzhe33 身份推送 `feature/knowledge-forest`，创建 [PR #5](https://github.com/Qixi18/Notebuddy/pull/5)，目标 main `3ab07b7`。工作树保留供审查修改；本轮不合并 main。本轮隔离 API/Web/worker 与浏览器会话在交付后停止，样例目录和本地截图保留。
 
 真实培养方案、连续三讲真实课件、真实 AI 调用质量、10 条真实用户编辑保护与 30 条真实来源抽查尚未验收。合成材料与模拟模型证据不能替代这些质量检查。
+
+## 原目录交付
+
+用户要求把代码更新到原 NoteBuddy 文件夹。原目录已切到 `feature/knowledge-forest`，旧开发工作树保留同一提交的 detached HEAD。GitHub PR仍保持待合并状态，没有修改 main。
+
+原来的 AGENTS.md 与 agent.md 本地修改已逐项核对，内容全部包含在更新版本中；更新前字节副本留在 `data/backups/workspace-update-*`。三份未跟踪需求文件更新前后 SHA256 一致，未暂存。原目录 `npm ci` 完成；`npm test` 为15条 Node与23条 Vitest全部通过，`npm run build` 通过。
+
+原目录的本地数据目录尚无数据库和课程；原演示的60门合成课程留在开发工作树，不写入用户数据库。旧演示服务已停止，已从原目录启动 API、独立执行器和 Web，并使用原目录本地配置；数据库通过现有迁移正常初始化。健康接口、森林接口、页面及森林页面模块均正常响应；课程库当前为空，用户可导入培养方案或创建课程。运行进程记录在本地忽略的 `output/playwright/local-processes.json`。
