@@ -41,6 +41,10 @@ PHASE_THREE_TABLES = {
     "knowledge_proposals", "knowledge_changes", "note_suggestions",
     "feedback", "backup_records", "provider_calls",
 }
+FOREST_TABLES = {
+    "forest_course_profiles", "curriculum_imports", "forest_jobs", "cross_course_relations",
+}
+MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES
 LEGACY_COLUMNS = {
     "materials": {"topic_title": "VARCHAR(200)"},
     "processing_jobs": {
@@ -65,7 +69,7 @@ def _prepare_legacy_schema() -> None:
     if not found or found == {"alembic_version"}:
         return
     required = {table.name for table in Base.metadata.sorted_tables} - {
-        "web_sources", "note_source_mappings", *PHASE_THREE_TABLES,
+        "web_sources", "note_source_mappings", *MIGRATED_TABLES,
     }
     if not required.issubset(found):
         raise RuntimeError(f"Unsupported legacy schema; missing tables: {sorted(required - found)}")
@@ -80,12 +84,12 @@ def _prepare_legacy_schema() -> None:
     # attempt to create tables that this compatibility bridge already made.
     Base.metadata.create_all(
         engine,
-        tables=[table for table in Base.metadata.sorted_tables if table.name not in PHASE_THREE_TABLES],
+        tables=[table for table in Base.metadata.sorted_tables if table.name not in MIGRATED_TABLES],
     )
     with engine.connect() as connection:
         inspector = inspect(connection)
         for table in Base.metadata.sorted_tables:
-            if table.name in PHASE_THREE_TABLES:
+            if table.name in MIGRATED_TABLES:
                 continue
             existing = {column["name"] for column in inspector.get_columns(table.name)}
             baseline = {column.name for column in table.columns} - PHASE_ONE_COLUMNS.get(table.name, set()) - PHASE_TWO_COLUMNS.get(table.name, set()) - NOTEBOOK_COLUMNS.get(table.name, set())

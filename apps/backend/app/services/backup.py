@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.security import validate_archive_member
+from app.db.checkpoint import referenced_original_names, validate_original_name
 
 FORMAT_VERSION = 2
 MAX_FILES = 2000
@@ -49,6 +50,12 @@ def _filter_snapshot_to_course(database: Path, course_id: str) -> None:
         connection.execute("PRAGMA foreign_keys=ON")
         if connection.execute("SELECT 1 FROM courses WHERE id = ?", (course_id,)).fetchone() is None:
             raise ValueError("course does not exist in backup snapshot")
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        # Forest jobs and plans coordinate the whole curriculum; no partial export
+        # may carry external course references in their JSON or evidence snapshots.
+        for table in ("cross_course_relations", "forest_jobs", "curriculum_imports"):
+            if table in tables:
+                connection.execute(f"DELETE FROM {table}")
         connection.execute("DELETE FROM courses WHERE id != ?", (course_id,))
         connection.commit()
 
@@ -57,8 +64,8 @@ def _original_names(database: Path) -> tuple[list[str], int, int]:
     with closing(sqlite3.connect(database)) as connection:
         courses = int(connection.execute("SELECT COUNT(*) FROM courses WHERE deleted_at IS NULL").fetchone()[0])
         materials = int(connection.execute("SELECT COUNT(*) FROM materials WHERE deleted_at IS NULL").fetchone()[0])
-        rows = connection.execute("SELECT stored_filename FROM materials WHERE deleted_at IS NULL").fetchall()
-    return sorted({str(row[0]) for row in rows}), courses, materials
+        names = referenced_original_names(connection, include_removed=False)
+    return sorted(names), courses, materials
 
 
 def create_backup_archive(data_dir: Path, destination: Path, *, course_id: str | None = None) -> dict:
@@ -78,8 +85,7 @@ def create_backup_archive(data_dir: Path, destination: Path, *, course_id: str |
         names, course_count, material_count = _original_names(snapshot)
         files: list[dict] = []
         for name in names:
-            if Path(name).name != name:
-                raise ValueError(f"unsafe stored filename: {name}")
+            validate_original_name(name)
             source = originals_dir / name
             if not source.is_file() or source.is_symlink():
                 raise ValueError(f"original missing or unsafe: {name}")
@@ -118,7 +124,8 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
         if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
             raise TypeError("backup manifest contains an invalid original entry")
         name = entry["name"]
-        if Path(name).name != name or not entry.get("sha256") or not isinstance(entry.get("bytes"), int):
+        validate_original_name(name)
+        if not entry.get("sha256") or not isinstance(entry.get("bytes"), int):
             raise ValueError(f"backup manifest contains an unsafe original: {name}")
     return manifest
 
@@ -210,9 +217,7 @@ def preview_backup(path: Path, *, current_database: Path | None = None) -> dict:
                     errors.append(f"sqlite foreign key errors: {len(foreign_keys)}")
                 tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 if {"courses", "materials"}.issubset(tables):
-                    references = {row[0] for row in connection.execute(
-                        "SELECT stored_filename FROM materials WHERE deleted_at IS NULL"
-                    )}
+                    references = referenced_original_names(connection, include_removed=False)
                     missing = sorted(references - manifest_names)
                     errors.extend(f"database references missing original: {name}" for name in missing[:50])
                     conflicts.extend(_course_conflicts(temp_path, current_database))

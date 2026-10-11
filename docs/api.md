@@ -70,3 +70,25 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 | 请求 OCR | `POST /materials/{material_id}/ocr` | 对活动 PDF 扫描候选页启动受限 OCR 任务；未启用或缺少 Tesseract/PyMuPDF 时返回明确的 `501`，不改变原有可浏览页面 |
 
 扫描型 PDF 没有文字层时只记录 OCR 候选和待检查告警，不生成伪造的文本或来源。OCR 是独立的可选适配器，受 `NOTEBOOK_OCR_ENABLED`、`NOTEBOOK_OCR_MAX_PAGES` 和 `NOTEBOOK_OCR_LANGUAGE` 控制。
+
+## 知识森林接口
+
+以下地址均加 `/api/v1` 前缀。固定类型和请求字段见 [知识森林契约](superpowers/specs/2026-10-11-knowledge-forest-design.md)。
+
+| 能力 | 接口 | 行为 |
+| --- | --- | --- |
+| 森林课程概览 | `GET /forest` | 返回轻量课程信息、学期/层级/状态/顺序/独立版本与笔记数量，不包含笔记正文 |
+| 全局标题搜索 | `GET /forest/search?q=...` | 最多40条有效课程/笔记标题命中与稳定定位ID，过滤软删除资料，不返回正文 |
+| 修改课程树信息 | `PATCH /forest/courses/{course_id}` | 提交 `expected_revision`，旧版本返回 409；不复用笔记本排序版本 |
+| 藤蔓与候选 | `GET/POST /forest/relations` | 查询状态；显式手动连接两个不同课程的真实笔记 |
+| 审核/移除关系 | `POST /forest/relations/{id}/review`、`DELETE /forest/relations/{id}` | 确认或拒绝 AI 候选；版本或来源变化时需复核；移除不改笔记正文 |
+| 培养方案导入 | `POST /forest/curriculum-imports` | multipart `file`（PDF/DOCX）或 `text`，登记独立待处理任务，201 返回导入记录 |
+| 导入列表/预览 | `GET /forest/curriculum-imports`、`GET /forest/curriculum-imports/{id}` | 显示解析模式、告警、可修改课程行、来源位置与错误 |
+| 导入确认/重试 | `POST /forest/curriculum-imports/{id}/confirm`、`POST /forest/curriculum-imports/{id}/retry` | 确认 `{rows:[...]}` 才关联或建课；失败可重试，已有课程和笔记不删除 |
+| 关系分析任务 | `POST /forest/courses/{course_id}/suggest-relations` | 手动重跑分析；资料生成笔记后也自动登记任务 |
+| 最近课程关联任务 | `GET /forest/courses/{course_id}/latest-job` | 返回最近持久任务或 null；聚焦课程时显示自动任务错误和原任务重试入口 |
+| 森林任务查询/重试 | `GET /forest/jobs/{id}`、`POST /forest/jobs/{id}/retry` | 持久任务状态和可读错误，失败重试由独立执行器领取 |
+
+详细课程树复用 `/courses/{id}/notebook` 轻量目录；叶子复用 `chapter` 与 `section` 查询参数定位原笔记。关系两端需真实笔记 ID，不能拿概念 ID 代替同一概念在各讲的具体笔记。
+
+自动资料任务按本讲笔记修订幂等登记；显式再次分析会创建新的待处理任务，重复点击仍复用活动任务。候选先对有效笔记的轻量标题排序，再读取最多30个本课与18个外课笔记的可验证来源片段；不读取全森林笔记正文。候选有数量与标题匹配范围限制，不能视为完整的跨学科语义关系识别。

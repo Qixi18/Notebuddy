@@ -8,11 +8,13 @@ import { conversationApi } from './api/conversations'
 import { feedbackApi } from './api/feedback'
 import { backupApi } from './api/backup'
 import { termsApi } from './api/terms'
+import { forestApi } from './api/forest'
 
 export { ApiError } from './api/http'
 export type { Capabilities, ConnectivityTestPayload, OCRStatus, ProviderCall, ProviderStatus } from './api/config'
 
 export const api = {
+  ...forestApi,
   ...courseApi,
   ...materialApi,
   ...noteApi,

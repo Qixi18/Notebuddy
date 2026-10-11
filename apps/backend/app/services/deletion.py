@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.checkpoint import create_checkpoint
 from app.db.models import (
     Course,
+    ForestJob,
     KnowledgeNode,
     Material,
     MaterialPage,
@@ -57,12 +58,22 @@ def impact_preview(db: Session, *, course_id: str, material_id: str | None = Non
         ProcessingJob.material_id.in_(material_ids),
         ProcessingJob.status.in_(["pending", "processing"])
     )) if material_ids else 0
+    # A running relation job may be reading evidence from any target course.
+    # Pending jobs only pin their source course; completed/failed jobs never pin it.
+    forest_active = db.scalar(select(func.count(ForestJob.id)).where(
+        ForestJob.kind == "cross_course_relations",
+        or_(
+            and_(ForestJob.course_id == course_id,
+                 ForestJob.status.in_(["pending", "processing"])),
+            ForestJob.status == "processing",
+        ),
+    )) or 0
     return {
         "course_id": course_id, "material_id": material_id,
         "materials": len(materials), "pages": pages or 0, "source_refs": refs or 0,
         "knowledge_nodes_touched": len(node_ids), "user_notes_protected": locked or 0,
         "original_bytes": sum(item.size_bytes for item in materials),
-        "active_jobs": active or 0,
+        "active_jobs": (active or 0) + forest_active,
         "action": "soft_delete_with_checkpoint",
     }
 

@@ -38,6 +38,7 @@ export function CourseOverviewPage() {
           <p>{course.description || '把课程资料、学习笔记和知识结构整理在一起。'}</p>
         </div>
         <div className="course-workspace-actions">
+          <Link className="secondary-button link-button" to={`/forest?course=${courseId}`}>在知识森林中查看</Link>
           <button className="secondary-button" type="button" onClick={() => navigate('/', { state: { openCreateCourse: true } })}>＋ 新建课程</button>
           <Link className="primary-button link-button" to={featurePath(courseId, 'materials')}>上传课程资料</Link>
         </div>

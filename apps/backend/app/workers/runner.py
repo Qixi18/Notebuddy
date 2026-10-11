@@ -15,6 +15,11 @@ from app.core.config import settings
 from app.db.database import SessionLocal
 from app.db.migrate import migrate_database
 from app.db.models import Material, ProcessingJob
+from app.forest.jobs import (
+    claim_next_forest_job,
+    mark_interrupted_forest_jobs,
+    process_forest_job,
+)
 from app.workers.material_worker import process_material
 
 STOP = False
@@ -69,7 +74,11 @@ def claim_next_job() -> str | None:
 def run_once() -> bool:
     job_id = claim_next_job()
     if job_id is None:
-        return False
+        forest_job_id = claim_next_forest_job()
+        if forest_job_id is None:
+            return False
+        process_forest_job(forest_job_id)
+        return True
     process_material(job_id)
     return True
 
@@ -114,6 +123,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _stop)
     with exclusive_runner_lock(settings.data_dir / "worker.lock"):
         mark_interrupted_jobs(force=True)
+        mark_interrupted_forest_jobs(force=True)
         while not STOP:
             if not run_once():
                 time.sleep(0.5)

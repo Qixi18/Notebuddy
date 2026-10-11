@@ -1,4 +1,5 @@
 import { Link, Navigate, Route, Routes } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
 
 import { AppLayout, WorkspaceProvider } from './components/AppLayout'
 import { CourseRouteGuard } from './components/CourseGate'
@@ -11,6 +12,8 @@ import { NotesLibraryPage } from './pages/NotesLibraryPage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { NotesPage } from './pages/NotesPage'
 import { NotebookPage } from './pages/NotebookPage'
+
+const ForestPage = lazy(() => import('./pages/ForestPage').then((module) => ({ default: module.ForestPage })))
 
 function NotFoundPage() {
   return (
@@ -32,6 +35,7 @@ function App() {
         <Route element={<AppLayout />}>
           <Route index element={<HomePage />} />
           <Route path="/courses" element={<CourseLibraryPage />} />
+          <Route path="/forest" element={<Suspense fallback={<p role="status">正在打开知识森林…</p>}><ForestPage /></Suspense>} />
           <Route path="/courses/:courseId" element={<CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard>} />
           <Route path="/notes" element={<NotesLibraryPage />} />
           <Route path="/courses/:courseId/notebook" element={<CourseRouteGuard><NotebookPage /></CourseRouteGuard>} />

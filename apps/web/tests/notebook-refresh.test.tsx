@@ -40,5 +40,5 @@ test('whole book includes every historical section in order', async () => {
   // The selected section uses the real reader in the app; the other section must still render its body.
   await screen.findByRole('button', { name: 'Old two' })
   expect(screen.getByText('Second historical body')).toBeTruthy()
-  expect(api.getNote).toHaveBeenCalledWith('h2')
+  await waitFor(() => expect(api.getNote).toHaveBeenCalledWith('h2'))
 })

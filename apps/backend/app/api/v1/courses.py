@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.db.models import (
     Course,
 )
+from app.forest.service import ensure_profile
 from app.schemas.api import (
     CourseCreate,
     CourseRead,
@@ -28,6 +29,8 @@ router = APIRouter()
 def create_course(payload: CourseCreate, db: Session = Depends(get_db)) -> Course:
     course = Course(name=payload.name.strip(), description=payload.description)
     db.add(course)
+    db.flush()
+    ensure_profile(db, course)
     db.commit()
     db.refresh(course)
     return course

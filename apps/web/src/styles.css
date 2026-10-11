@@ -32,6 +32,14 @@ h1, h2, h3, h4, p { margin: 0; }
 a { color: inherit; text-decoration: none; }
 
 .app-shell { display: grid; grid-template-columns: 244px minmax(0, 1fr); min-height: 100vh; }
+.home-forest-entry { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; border: 1px solid #dce5cd; border-radius: 10px; padding: 14px 18px; margin: 22px 0 0; background: #f5f8ed; color: #647e53; cursor: pointer; }
+.home-forest-entry > span:first-child { font-size: 32px; color: #91a874; }
+.home-forest-entry strong { display: block; font: 600 18px 'STKaiti', 'KaiTi', serif; margin-bottom: 4px; }
+.home-forest-entry small { font-size: 11px; color: #93a280; }
+.home-forest-entry > span:last-child { margin-left: auto; font-size: 20px; }
+.notebook-forest-return { display: block; font-size: 12px; margin-top: 9px; color: #6e885b; }
+.materials-forest-start { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #f1f6e8; color: #71865d; padding: 10px 15px; border: 1px solid #dbe6cc; border-radius: 7px; margin-bottom: 16px; font-size: 12px; }
+.materials-forest-start button { border: 0; background: #6c8758; border-radius: 5px; padding: 6px 10px; color: #fff; cursor: pointer; }
 .app-sidebar { position: sticky; top: 0; display: flex; height: 100vh; min-height: 560px; flex-direction: column; border-right: 1px solid var(--line); padding: 25px 17px 18px; background: white; }
 .brand-lockup { display: flex; align-items: center; gap: 11px; border: 0; padding: 0 7px; text-align: left; color: var(--ink); background: transparent; }
 .brand-lockup strong, .brand-lockup small { display: block; }

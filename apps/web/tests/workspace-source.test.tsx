@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
+vi.mock('../src/features/conversation/useConversation', () => ({ useConversation: () => ({ busy: false }) }))
 import { useWorkspaceState } from '../src/features/workspace/useWorkspaceState'
 
 vi.mock('../src/features/assistant/useAssistantState', () => ({ useAssistantState: () => ({}) }))
