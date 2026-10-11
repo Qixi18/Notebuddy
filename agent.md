@@ -14,6 +14,3 @@
 - [知识森林交接与验证状态](docs/handoffs/2026-10-11-knowledge-forest.md)
 
 实现和验收状态以交接记录为准；设计确认不表示真实课件与 AI 质量已验收。
-
-`AGENTS.md` 使用 Codex 默认识别的项目说明文件名：
-[OpenAI 官方加载说明](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
