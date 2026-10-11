@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -58,3 +60,12 @@ class SettingsUpdateResponse(SettingsSection):
     backup_path: str | None = None
     status: SettingsStatus
     warnings: list[str] = Field(default_factory=list)
+
+
+class ProviderConnectivityTestRequest(SettingsSection):
+    """单项连通性测试：使用面板草稿值（不落盘），各 API 相互独立。"""
+
+    provider: Literal["deepseek", "embedding"]
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None

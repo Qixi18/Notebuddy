@@ -293,6 +293,10 @@ export type ConversationMessage = {
   failure_type?: string | null
   created_at: string
   evidence: MessageEvidence[]
+  /** 回答模式，取值与 /assistant 直连回答一致（deepseek-rag / persona-general / …） */
+  mode?: string | null
+  /** 可点击的来源卡片；由后端从 evidence 反推，与直连回答同结构 */
+  sources?: AssistantSource[]
 }
 
 export type KnowledgeProposal = {

@@ -28,7 +28,7 @@ Tao:
 - 阶段一开发已接入 Alembic 迁移、数据库待处理任务与独立本地执行器、可恢复逻辑删除和基础数据检查点；配置状态仅表示配置/主动测试结果，不等于外部服务完整验收
 - 阶段三已加入课程级持久答疑会话、有限历史窗口、课程优先检索、证据映射、跨讲知识整合提案和用户确认流程；阶段四已加入反馈去重、配置诊断、完整备份包、哈希/SQLite 校验和隔离恢复
 - 阶段三、四的代码已覆盖本地降级路径、结论证据映射、用户笔记建议、反馈处理状态和外部调用审计；真实三讲引用质量、真实外部服务联调和干净目录发布验收仍需按 [`docs/acceptance.md`](docs/acceptance.md) 记录
-- 左下角设置面板提供脱敏配置状态和受白名单保护的本地配置写入；API Key 写入需显式开启并使用设置口令。课程卡片右键菜单支持重命名和可恢复的软删除。
+- 左下角设置面板提供脱敏配置状态和受白名单保护的本地配置写入；本地单用户默认可直接在页面写入 DeepSeek / Embedding API Key（自动备份到 `data/backups/`），仅需加固时配置 `NOTEBOOK_SETTINGS_TOKEN` 开启口令校验。课程卡片右键菜单支持重命名和可恢复的软删除。
 
 ### 本地启动
 
@@ -63,6 +63,8 @@ npm run dev
 ### 大模型与检索配置
 
 复制 `.env.example` 为根目录 `.env`，再填写配置。密钥只放在本地 `.env`，不要提交到 Git：
+
+> 也可不编辑文件：启动后在页面左下角"设置"面板直接填写 DeepSeek Key 等配置，保存时后端会自动写入 `.env` 并备份原配置。
 
 ```text
 DEEPSEEK_API_KEY=你的 DeepSeek API Key
@@ -186,3 +188,13 @@ EMBEDDING_MODEL=
 - 详细功能清单与优先级排期
 - 3人分工方案
 - 8-10周开发里程碑
+
+## 七、AI 教师待机动画(连续帧雪碧图)
+
+首页 AI 教师支持三个形象切换(精灵教师 / 豆包助手 / 肥鱼),待机动画由连续帧合成的雪碧图驱动。**克隆仓库即可直接使用**,无需额外素材:
+
+- 雪碧图(构建产物,已提交):`apps/web/public/assets/teacher/*.webp`
+- 切换入口:首页人物框右上角 `⇄` 按钮,选择存 localStorage
+- 源帧放在本机 `data/frames/<人物>/`(约 90MB,不提交 Git,源文件走网盘共享),仓库附带构建脚本可随时重新生成
+- 重建:`python scripts/build_teacher_sheets.py`(可只重建单个,如 `python scripts/build_teacher_sheets.py doubao-idle`)
+- 新增人物:① `data/frames/<名字>/` 放入帧序列 ② 脚本 `CHARACTERS` 表加一行(网格/单帧尺寸/输出名)③ `TeacherCharacter.tsx` 的 `TeacherCharacterId` 与 `characterLabels` 各加一项 ④ 网格或帧数变化时同步 `styles.css` 的 keyframes 与 `background-size`

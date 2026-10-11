@@ -43,7 +43,12 @@ from app.schemas.materials import (
 from app.schemas.notes import NoteRead, NoteRevisionRead, NoteUpdate
 from app.schemas.proposals import KnowledgeProposalRead, NoteSuggestionRead, ProposalReview
 from app.schemas.provider import ProviderCallRead
-from app.schemas.settings import SettingsStatus, SettingsUpdate, SettingsUpdateResponse
+from app.schemas.settings import (
+    ProviderConnectivityTestRequest,
+    SettingsStatus,
+    SettingsUpdate,
+    SettingsUpdateResponse,
+)
 from app.schemas.terms import TermExplanationRequest, TermExplanationResponse, TermExplanationSource
 
 __all__ = [
@@ -86,6 +91,7 @@ __all__ = [
     'PageRead',
     'ProposalReview',
     'ProviderCallRead',
+    'ProviderConnectivityTestRequest',
     'RestoreRequest',
     'SettingsStatus',
     'SettingsUpdate',

@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { Outlet, useBlocker, useLocation, useNavigate } from 'react-router-dom'
 
 import type {
-  AssistantResponse,
   Course,
   Job,
   KnowledgeGraph,
@@ -10,23 +9,15 @@ import type {
   Note,
   Page,
 } from '../types'
+import type { ConversationState } from '../features/conversation/useConversation'
 import { AssistantDock } from './AssistantDock'
 import { ConfirmDialog } from './ConfirmDialog'
 import { CourseSwitcher } from './CourseSwitcher'
+import type { TeacherCharacterId } from './TeacherCharacter'
 import { SettingsPanel } from '../SettingsPanel'
 import { shouldBlockNoteNavigation } from '../features/notebook/navigation'
 
 export type Feature = 'notes' | 'materials' | 'assistant'
-
-export type ChatMessage = {
-  role: 'user' | 'assistant'
-  content: string
-  sources?: AssistantResponse['sources']
-  claims?: AssistantResponse['claims']
-  mode?: string
-  status?: 'idle' | 'thinking' | 'explaining' | 'error'
-  webSearchStatus?: 'unavailable' | 'failed' | 'no_results' | 'completed' | 'disabled_by_request' | 'daily_limit'
-}
 
 export type WorkspaceContextValue = {
   courses: Course[]
@@ -51,8 +42,12 @@ export type WorkspaceContextValue = {
   setEditingNote: (editing: boolean) => void
   graph: KnowledgeGraph
   job?: Job
+  /** 当前选中的 AI 教师，决定答疑回答的表达风格 */
+  teacherPersona: TeacherCharacterId
+  setTeacherPersona: (id: TeacherCharacterId) => void
+  /** 答疑的唯一状态源：首页「问 AI」、答疑页、悬浮答疑坞共用同一份会话 */
+  conversation: ConversationState
   busy: boolean
-  assistantBusy: boolean
   noteSaving: boolean
   noteDirty: boolean
   reloadNote: () => Promise<void>
@@ -64,10 +59,6 @@ export type WorkspaceContextValue = {
   reparseMaterial: (materialId: string) => Promise<void>
   requestOCR: (materialId: string) => Promise<void>
   saveNote: () => Promise<void>
-  messages: ChatMessage[]
-  question: string
-  setQuestion: (value: string) => void
-  askQuestion: (materialId?: string, pageNumber?: number) => Promise<void>
   refreshCourses: () => Promise<void>
   refreshCurrentMaterials: () => Promise<void>
 }
@@ -108,7 +99,7 @@ export function featurePath(courseId: string, feature: Feature): string {
 }
 
 export function AppLayout() {
-  const { courseId, course, courses, coursesLoading, error, setError, noteDirty, setEditingNote, messages, question, setQuestion, askQuestion, assistantBusy } = useWorkspace()
+  const { courseId, course, courses, coursesLoading, error, setError, noteDirty } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const isHome = location.pathname === '/'
@@ -213,7 +204,7 @@ export function AppLayout() {
         )}
         <Outlet />
       </main>
-      {showAssistantDock && <AssistantDock course={course} courseId={courseId} courses={courses} messages={messages} question={question} setQuestion={setQuestion} askQuestion={askQuestion} assistantBusy={assistantBusy} />}
+      {showAssistantDock && <AssistantDock />}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {blocker.state === 'blocked' && <ConfirmDialog
         eyebrow="未保存的笔记"

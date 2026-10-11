@@ -8,11 +8,12 @@ import {
   useWorkspace,
 } from '../components/AppLayout'
 import { TeacherCharacter } from '../components/TeacherCharacter'
+import { cycleTeacherCharacter, useTeacherCharacter } from '../features/persona/useTeacherCharacter'
 import { api } from '../api'
 import type { Course, Material, Note } from '../types'
 
 export function HomePage() {
-  const { courses, coursesLoading, createCourse, busy, question, setQuestion } = useWorkspace()
+  const { courses, coursesLoading, createCourse, busy } = useWorkspace()
   const [requestedFeature, setRequestedFeature] = useState<Feature>()
   const [newCourseName, setNewCourseName] = useState('')
   const [creating, setCreating] = useState(false)
@@ -20,8 +21,10 @@ export function HomePage() {
   const [attentionMaterials, setAttentionMaterials] = useState<Material[]>([])
   const [materialCounts, setMaterialCounts] = useState<Record<string, number>>({})
   const [recentNotes, setRecentNotes] = useState<Array<{ note: Note; course: Course }>>([])
+  const [homeQuestion, setHomeQuestion] = useState('')
   const [questionCourseId, setQuestionCourseId] = useState('')
   const [showCreateCourseDialog, setShowCreateCourseDialog] = useState(false)
+  const [teacherCharacter] = useTeacherCharacter()
   const location = useLocation()
   const navigate = useNavigate()
   const isModalOpen = showCreateCourseDialog
@@ -106,9 +109,9 @@ export function HomePage() {
 
   function handleQuestionSubmit(event: FormEvent) {
     event.preventDefault()
-    if (!questionCourse || !question.trim()) return
-    const initialQuestion = question.trim()
-    setQuestion(initialQuestion)
+    if (!questionCourse || !homeQuestion.trim()) return
+    const initialQuestion = homeQuestion.trim()
+    setHomeQuestion('')
     navigate(featurePath(questionCourse.id, 'assistant'), { state: { initialQuestion } })
   }
 
@@ -131,8 +134,8 @@ export function HomePage() {
         <form className="home-question-composer" onSubmit={handleQuestionSubmit}>
           <textarea
             aria-label="课程问题"
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
+            value={homeQuestion}
+            onChange={(event) => setHomeQuestion(event.target.value)}
             placeholder={questionCourse ? `问问「${questionCourse.name}」里的内容…` : '先创建或选择一门课程，再提问…'}
             rows={3}
           />
@@ -151,7 +154,7 @@ export function HomePage() {
                 </select>
               ) : questionCourse ? <span className="home-question-course">{questionCourse.name}</span> : null}
             </div>
-            <button className="home-question-send" type="submit" disabled={!questionCourse || !question.trim()}>
+            <button className="home-question-send" type="submit" disabled={!questionCourse || !homeQuestion.trim()}>
               发送 <span aria-hidden="true">➤</span>
             </button>
           </div>
@@ -203,7 +206,12 @@ export function HomePage() {
       </div>
 
       <aside className="home-teacher-column" aria-label="AI 教师">
-        <div className="home-teacher-frame"><TeacherCharacter /></div>
+        <div className="home-teacher-frame">
+          <button className="home-teacher-switch" type="button" onClick={cycleTeacherCharacter} title="切换教师形象" aria-label="切换教师形象">
+            ⇄
+          </button>
+          <TeacherCharacter animated character={teacherCharacter} />
+        </div>
       </aside>
 
       {requestedFeature && (

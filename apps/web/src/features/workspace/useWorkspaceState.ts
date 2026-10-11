@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { matchPath, useLocation } from 'react-router-dom'
 
 import { api } from '../../api'
-import { useAssistantState } from '../assistant/useAssistantState'
+import { useConversation } from '../conversation/useConversation'
 import { useNoteEditor } from '../notes/useNoteEditor'
-import { mergeNotebookNotes } from '../notebook/navigation'
+import { useTeacherCharacter } from '../persona/useTeacherCharacter'
 import type { Course, Job, KnowledgeGraph, Material, Note, Page } from '../../types'
 
 const emptyGraph: KnowledgeGraph = { nodes: [], edges: [] }
@@ -39,10 +39,12 @@ export function useWorkspaceState() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
+  const [teacherPersona, setTeacherPersona] = useTeacherCharacter()
+
   const course = courses.find((item) => item.id === courseId)
   const selectedNote = notes.find((note) => note.id === selectedNoteId)
   const { noteDraft, setNoteDraft, editingNote, setEditingNote, noteSaving, noteDirty, saveNote, reloadNote } = useNoteEditor(selectedNote, setNotes, setError)
-  const { question, setQuestion, assistantBusy, messages, askQuestion } = useAssistantState(courseId)
+  const conversation = useConversation(courseId, teacherPersona)
 
   useEffect(() => {
     if (courseId) localStorage.setItem(`notebuddy.course.${courseId}.lastVisited`, new Date().toISOString())
@@ -254,8 +256,10 @@ export function useWorkspaceState() {
     setEditingNote,
     graph,
     job,
-    busy: busy || assistantBusy,
-    assistantBusy,
+    teacherPersona,
+    setTeacherPersona,
+    conversation,
+    busy: busy || conversation.busy,
     noteSaving,
     noteDirty,
     reloadNote,
@@ -267,13 +271,9 @@ export function useWorkspaceState() {
     reparseMaterial,
     requestOCR,
     saveNote,
-    messages,
-    question,
-    setQuestion,
-    askQuestion,
     refreshCourses,
     refreshCurrentMaterials: () => courseId ? refreshMaterials(courseId) : Promise.resolve(),
-  }), [courses, courseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, busy, assistantBusy, noteSaving, noteDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, messages, question, askQuestion, refreshCourses])
+  }), [courses, courseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, teacherPersona, conversation, busy, noteSaving, noteDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
 
   return workspace
 }

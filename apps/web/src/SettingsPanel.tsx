@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { api } from './api'
+import type { ProviderStatus } from './api'
 import type { SettingsStatus } from './types'
 
 type SettingsPanelProps = {
@@ -24,6 +25,26 @@ type SecretDraft = {
 
 const EMPTY_SECRETS: SecretDraft = { DEEPSEEK_API_KEY: '', EMBEDDING_API_KEY: '' }
 
+type ConnectiveProvider = 'deepseek' | 'embedding'
+
+function connectionLabel(status: string | undefined): string {
+  switch (status) {
+    case 'connected': return '连接成功'
+    case 'authentication_failed': return '认证失败（Key 无效）'
+    case 'rate_limited': return '触发限流，请稍后再试'
+    case 'timeout': return '连接超时'
+    case 'unavailable': return '服务不可达'
+    case 'configured_untested': return '已保存，尚未验证'
+    case 'unconfigured': return '未配置 Key，无法测试'
+    default: return status ?? '未知状态'
+  }
+}
+
+function isFailure(status: string | undefined): boolean {
+  return status === 'authentication_failed' || status === 'rate_limited'
+    || status === 'timeout' || status === 'unavailable'
+}
+
 function buildDraft(status: SettingsStatus): Draft {
   return {
     DEEPSEEK_BASE_URL: status.deepseek.base_url ?? '',
@@ -44,6 +65,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState<ConnectiveProvider | null>(null)
+  const [testResults, setTestResults] = useState<Partial<Record<ConnectiveProvider, ProviderStatus>>>({})
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
 
@@ -84,9 +107,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     (key) => secrets[key].trim().length > 0,
   )
 
-  /** 密钥写入需要后端开关 + 口令；未开启时直接给出可操作的提示。 */
+  /** 密钥写入：默认本地开放；仅当后端配置了口令时才要求填入口令。 */
   const secretWriteReady =
-    status?.limits.secret_write_enabled && status?.limits.token_required && token.trim().length > 0
+    status?.limits.secret_write_enabled &&
+    (status.limits.token_required ? token.trim().length > 0 : true)
 
   const changeCount = dirty.length + secretTouched.length
 
@@ -94,7 +118,9 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     if (changeCount === 0) return
     if (secretTouched.length > 0 && !secretWriteReady) {
       setError(
-        '当前无法写入密钥：需要 .env 中 NOTEBOOK_ALLOW_SECRET_WRITE=true 且配置 NOTEBOOK_SETTINGS_TOKEN，并在下方填入口令。',
+        status?.limits.secret_write_enabled
+          ? '后端已开启口令校验：请先在下方填入口令，再保存密钥。'
+          : '密钥写入未开启：需在 .env 中设置 NOTEBOOK_ALLOW_SECRET_WRITE=true 后重启后端。',
       )
       return
     }
@@ -131,6 +157,36 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   function updateSecret(key: keyof SecretDraft, value: string) {
     setSecrets((current) => ({ ...current, [key]: value }))
+  }
+
+  /** 点击"测试连接"：用当前表单草稿值单选测一个 API（不落盘、互不影响）。 */
+  async function handleTest(provider: ConnectiveProvider) {
+    try {
+      setTesting(provider)
+      setError(undefined)
+      setNotice(undefined)
+      const isDeepseek = provider === 'deepseek'
+      const result = await api.testConnectivity(
+        isDeepseek
+          ? {
+              provider,
+              api_key: secrets.DEEPSEEK_API_KEY.trim() || undefined,
+              base_url: draft?.DEEPSEEK_BASE_URL,
+              model: draft?.DEEPSEEK_MODEL,
+            }
+          : {
+              provider,
+              api_key: secrets.EMBEDDING_API_KEY.trim() || undefined,
+              base_url: draft?.EMBEDDING_BASE_URL,
+              model: draft?.EMBEDDING_MODEL,
+            },
+      )
+      setTestResults((current) => ({ ...current, [provider]: result }))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '连接测试失败')
+    } finally {
+      setTesting(null)
+    }
   }
 
   return (
@@ -183,17 +239,19 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </div>
                     <small>{status.embedding.configured ? `Key ${status.embedding.masked_key}` : '当前仅关键词检索'}</small>
                   </div>
-                  <div className={`status-card ${status.limits.secret_write_enabled && status.limits.token_required ? 'status-on' : 'status-off'}`}>
+                  <div className={`status-card ${status.limits.secret_write_enabled ? 'status-on' : 'status-off'}`}>
                     <div className="status-card-top">
                       <strong>密钥写入</strong>
                       <span className="status-pill">
-                        {status.limits.secret_write_enabled && status.limits.token_required ? '已开启' : '已关闭'}
+                        {status.limits.secret_write_enabled ? '已开启' : '已关闭'}
                       </span>
                     </div>
                     <small>
-                      {status.limits.secret_write_enabled && status.limits.token_required
-                        ? '填入口令后可写入 API Key'
-                        : '需在 .env 中开启开关并配置口令'}
+                      {status.limits.secret_write_enabled
+                        ? status.limits.token_required
+                          ? '填入口令后可写入 API Key'
+                          : '可直接在页面写入 DeepSeek / Embedding Key'
+                        : '需在 .env 中开启开关'}
                     </small>
                   </div>
                 </div>
@@ -245,6 +303,22 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     spellCheck={false}
                   />
                 </label>
+                <div className="field actions-row">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={testing !== null}
+                    onClick={() => void handleTest('deepseek')}
+                  >
+                    {testing === 'deepseek' ? '测试中…' : '测试连接'}
+                  </button>
+                  <span className="actions-hint">按当前表单值测，支持在 DeepSeek / Embedding 间分别测试，无需先保存</span>
+                  {testResults.deepseek && (
+                    <em className={isFailure(testResults.deepseek.status) ? 'field-existing test-bad' : 'field-existing'}>
+                      测试结果：{testResults.deepseek.message ?? connectionLabel(testResults.deepseek.status)}
+                    </em>
+                  )}
+                </div>
               </section>
 
               <section className="settings-section">
@@ -284,6 +358,21 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     spellCheck={false}
                   />
                 </label>
+                <div className="field actions-row">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={testing !== null}
+                    onClick={() => void handleTest('embedding')}
+                  >
+                    {testing === 'embedding' ? '测试中…' : '测试连接'}
+                  </button>
+                  {testResults.embedding && (
+                    <em className={isFailure(testResults.embedding.status) ? 'field-existing test-bad' : 'field-existing'}>
+                      测试结果：{testResults.embedding.message ?? connectionLabel(testResults.embedding.status)}
+                    </em>
+                  )}
+                </div>
                 <p className="field-hint">
                   三项（地址 / 密钥 / 模型）齐全后语义检索才会生效，否则自动回退为关键词检索。
                 </p>
@@ -351,6 +440,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                       autoComplete="off"
                     />
                   </label>
+                ) : status.limits.secret_write_enabled ? (
+                  <p className="field-hint">
+                    本地模式已默认允许密钥写入：在上方直接填入 DeepSeek / Embedding Key 并保存即可，
+                    无需编辑 .env。如需加固，可在 .env 中配置{' '}
+                    <code>NOTEBOOK_SETTINGS_TOKEN</code> 开启口令校验。
+                  </p>
                 ) : (
                   <p className="field-hint">
                     要开启密钥写入，请在 .env 中设置 NOTEBOOK_ALLOW_SECRET_WRITE=true 与

@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.service_checks import check_provider, provider_status
+from app.core.service_checks import check_provider, provider_status, test_connectivity
 from app.core.settings_store import (
     SettingsVerifyError,
     SettingsWriteError,
@@ -17,6 +17,7 @@ from app.db.models import ProviderCall
 from app.parsers.ocr import status as ocr_status
 from app.schemas.api import (
     ProviderCallRead,
+    ProviderConnectivityTestRequest,
     SettingsStatus,
     SettingsUpdate,
     SettingsUpdateResponse,
@@ -94,6 +95,30 @@ def check_config_provider(provider: str, db: Session = Depends(get_db)) -> dict:
     if provider not in ("deepseek", "embedding", "tavily"):
         raise HTTPException(status_code=404, detail="服务类型不存在")
     return check_provider(provider, db)
+
+
+@router.post("/config/test-connectivity")
+def test_api_connectivity(
+    payload: ProviderConnectivityTestRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """单项连通性测试：用请求中的草稿值（不落盘）独立验证某个 API。"""
+    api_key = payload.api_key
+    base_url = payload.base_url
+    model = payload.model
+    if api_key and len(api_key.strip()) < 8:
+        raise HTTPException(status_code=422, detail="API Key 长度过短")
+    if base_url and not base_url.strip().startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="服务地址必须以 http:// 或 https:// 开头")
+    if model and model.strip() and not model.strip().replace("-", "").isalnum():
+        raise HTTPException(status_code=422, detail="模型名只能包含字母、数字和连字符")
+    return test_connectivity(
+        payload.provider,
+        db,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+    )
 
 
 @router.get("/config/diagnostics")

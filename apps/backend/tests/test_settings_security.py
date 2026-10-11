@@ -50,12 +50,28 @@ def test_non_whitelisted_key_is_rejected() -> None:
     assert response.status_code in {400, 403, 422}
 
 
-def test_secret_write_blocked_without_permission(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_secret_write_allowed_without_token_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """本地单用户默认允许写入密钥，无需先编辑 .env。"""
+    from app.core import settings_store
+
     monkeypatch.delenv("NOTEBOOK_ALLOW_SECRET_WRITE", raising=False)
     monkeypatch.delenv("NOTEBOOK_SETTINGS_TOKEN", raising=False)
-    response = client.patch("/api/v1/settings", json={"DEEPSEEK_API_KEY": "sk-attacker-value"})
-    assert response.status_code == 403
-    assert "密码" in response.text or "密钥" in response.text
+    monkeypatch.setenv("NOTEBOOK_SKIP_KEY_VERIFY", "true")
+    monkeypatch.setattr(settings_store, "ENV_PATH", tmp_path / ".env")
+    monkeypatch.setattr(settings_store, "_atomic_write", lambda env_values: None)
+    monkeypatch.setattr(settings_store, "_apply_to_process", lambda sanitized: None)
+
+    outcome = settings_store.apply_updates({"DEEPSEEK_API_KEY": "sk-test-key-123456"}, None)
+    assert "DEEPSEEK_API_KEY" in outcome.updated
+
+
+def test_secret_write_blocked_when_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core import settings_store
+
+    monkeypatch.setenv("NOTEBOOK_ALLOW_SECRET_WRITE", "false")
+    monkeypatch.delenv("NOTEBOOK_SETTINGS_TOKEN", raising=False)
+    with pytest.raises(SettingsWriteError):
+        settings_store.apply_updates({"DEEPSEEK_API_KEY": "sk-attacker-value"}, None)
 
 
 def test_secret_write_blocked_with_wrong_token(monkeypatch: pytest.MonkeyPatch) -> None:

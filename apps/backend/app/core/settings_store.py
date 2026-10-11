@@ -71,7 +71,13 @@ def skip_key_verification() -> bool:
 
 
 def allow_secret_write() -> bool:
-    return os.getenv("NOTEBOOK_ALLOW_SECRET_WRITE", "").strip().lower() in {"1", "true", "yes"}
+    """本地单用户场景默认允许密钥写入，显式设置为 0/false/no/off 才关闭。
+
+    远端共享/加固场景可在 .env 中设置 NOTEBOOK_ALLOW_SECRET_WRITE=false，
+    并配置 NOTEBOOK_SETTINGS_TOKEN，此时写入仍需口令。
+    """
+    value = os.getenv("NOTEBOOK_ALLOW_SECRET_WRITE", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
 
 
 def settings_token() -> str | None:
@@ -300,9 +306,8 @@ def apply_updates(updates: dict[str, object], token: str | None) -> WriteOutcome
             raise SettingsWriteError(
                 "当前未开启密钥写入。需在 .env 中设置 NOTEBOOK_ALLOW_SECRET_WRITE=true 后重启后端。"
             )
-        if settings_token() is None:
-            raise SettingsWriteError("未配置 NOTEBOOK_SETTINGS_TOKEN，出于安全考虑拒绝写入密钥。")
-        if not verify_token(token):
+        # 本地单用户：未配置口令时默认信任本机回环写入；配置了口令则必须校验。
+        if settings_token() is not None and not verify_token(token):
             raise SettingsWriteError("设置口令校验失败，拒绝写入密钥。")
 
     sanitized: dict[str, str] = {}

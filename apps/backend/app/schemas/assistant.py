@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+TeacherPersonaId = Literal["elf", "doubao", "feiyu"]
 
 
 class AssistantRequest(BaseModel):
@@ -11,6 +14,7 @@ class AssistantRequest(BaseModel):
     page_number: int | None = None
     allow_web: bool = True
     learning_goal: str | None = Field(default=None, max_length=60)
+    teacher_persona: TeacherPersonaId = "elf"
 
 
 class AssistantSource(BaseModel):

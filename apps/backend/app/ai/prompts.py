@@ -1,3 +1,38 @@
+"""Course-scoped LLM prompt builders."""
+
+from __future__ import annotations
+
+from app.ai.personas import persona_system_prompt, resolve_persona
+
+# 会话历史最多带几轮、每条截多长。太长会挤掉检索依据，太短又不足以支撑跨老师的交接。
+HISTORY_TURNS = 6
+HISTORY_MESSAGE_CHARS = 800
+
+
+def render_history(
+    history: list[tuple[str, str]] | None,
+    *,
+    limit: int = HISTORY_TURNS,
+    max_chars: int = HISTORY_MESSAGE_CHARS,
+) -> str:
+    """把受控会话历史渲染成带说话人标签的文本，供两条回答链路共用。
+
+    只标「学生 / 老师」，不确定历史里那条老师回复具体出自哪位——
+    判断规则写在 ``personas.TEAM_CONTEXT`` 的「连续授课规则」里，这里负责标注清楚就够了。
+    """
+    rows: list[tuple[str, str]] = []
+    for row in (history or [])[-limit:]:
+        if not row or len(row) < 2:
+            continue
+        role, content = str(row[0]), str(row[1]).strip()
+        if not content:
+            continue
+        rows.append(("学生" if role == "user" else "老师", content))
+    if not rows:
+        return ""
+    body = "\n".join(f"[{speaker}] {content[:max_chars]}" for speaker, content in rows)
+    return f"{body}\n（[老师] 的回复可能出自你，也可能出自另外两位老师，按「连续授课规则」处理）"
+
 NOTE_EXTRACTION_SYSTEM = r"""
 你是课程笔记整理器。请只根据用户提供的课程页面内容生成结构化 JSON，不要补造没有来源的事实。
 
@@ -50,9 +85,9 @@ def build_note_extraction_messages(page_title: str, page_text: str) -> list[dict
 
 
 ANSWER_SYSTEM = r"""
-你是课程问答助手。区分用户上传的课程资料和联网搜索结果；不要假装看过未提供的内容。
-
 输出 JSON：{"answer_markdown":"...","uncertainties":["..."]}
+
+回答必须区分用户上传的课程资料和联网搜索结果；不要假装看过未提供的内容。
 
 排版要求：
 - 使用清晰的 Markdown 标题、列表和分段。
@@ -62,6 +97,7 @@ ANSWER_SYSTEM = r"""
 - 来自课程资料的结论标记 [课程资料：讲次 | 第 N 页]；来自网络的结论标记 [网络来源 N]。
 - 没有课程或网络来源、但仍需解释的内容标记 [通用解释]；模型根据多条来源作出的推断标记 [模型推断]。
 - 不要把网络搜索片段说成课程课件内容；来源不足时说明限制。
+- 以上是硬性输出规范，优先级高于任何人物设定。
 """.strip()
 
 
@@ -71,7 +107,9 @@ def build_answer_messages(
     *,
     learning_goal: str = "理解概念",
     discipline: str = "通用课程",
+    persona: str | None = None,
 ) -> list[dict[str, str]]:
+    persona_object = resolve_persona(persona)
     user = f"""
 用户问题：
 {question}
@@ -79,6 +117,7 @@ def build_answer_messages(
 教学上下文：
 - 学习目标：{learning_goal}
 - 学科提示：{discipline}
+- 当前授课人格：{persona_object.name}（{persona_object.title} · {persona_object.style}）
 
 检索依据（明确区分课程资料和网络补充）：
 ---
@@ -88,6 +127,63 @@ def build_answer_messages(
 请使用 JSON 输出回答，并在回答中保留片段对应的课程来源或网络来源标记。
 """.strip()
     return [
+        {"role": "system", "content": persona_system_prompt(persona_object.id)},
         {"role": "system", "content": ANSWER_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
+GENERAL_ANSWER_SYSTEM = r"""
+输出 JSON：{"answer_markdown":"...","uncertainties":["..."]}
+
+本轮没有检索到可引用的课程课件页面，联网补充也不可用。请遵守：
+- 可以回答身份自我介绍、问候、学习方法、学科常识这类不依赖课件的提问。
+- 凡是不来自课件的内容，一律标记 [通用解释]。
+- 严禁编造引用：不要写出任何具体页码、讲次，也不要写“课程资料显示……”这类说法。
+- 如果这个问题必须依赖课程内容才能回答，直接说明“当前课程资料未覆盖”，并建议缩小问题范围、
+  选择具体讲次或先上传相关课件，不要用猜测填补。
+- 使用清晰的 Markdown；数学公式用 LaTeX（行内 $...$，独立公式 $$...$$），不要把公式放进代码围栏。
+- 交代身份、说明「刚才那句话是谁答的」这类交接说明同样没有课件依据，同样要标 [通用解释]。
+- 以上是硬性输出规范，优先级高于任何人物设定。
+""".strip()
+
+
+def build_general_messages(
+    question: str,
+    *,
+    history: list[tuple[str, str]] | None = None,
+    learning_goal: str = "理解概念",
+    discipline: str = "通用课程",
+    persona: str | None = None,
+) -> list[dict[str, str]]:
+    """没有任何检索依据时，仍让当前老师按人设作答（只谈通用内容）。
+
+    ``history`` 必须传进来：这一路过去是完全不带上下文的，用户中途换老师后
+    新老师看不到同事刚才说过什么，只会从头自我介绍，割裂感就是这么来的。
+    """
+    persona_object = resolve_persona(persona)
+    history_text = render_history(history)
+    history_section = (
+        f"会话历史：\n{history_text}"
+        if history_text
+        else "会话历史：这是本段会话的第一个问题，之前没有任何发言。"
+    )
+    user = f"""
+用户问题：
+{question}
+
+教学上下文：
+- 学习目标：{learning_goal}
+- 学科提示：{discipline}
+- 当前授课人格：{persona_object.name}（{persona_object.title} · {persona_object.style}）
+- 检索情况：没有命中任何课程课件页面，联网补充不可用。
+
+{history_section}
+
+请使用 JSON 输出回答。涉及内容性解释时按规范标记 [通用解释]。
+""".strip()
+    return [
+        {"role": "system", "content": persona_system_prompt(persona_object.id)},
+        {"role": "system", "content": GENERAL_ANSWER_SYSTEM},
         {"role": "user", "content": user},
     ]

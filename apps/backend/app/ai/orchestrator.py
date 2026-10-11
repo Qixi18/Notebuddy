@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from app.ai.deepseek import DeepSeekClient, DeepSeekError
 from app.ai.discipline import infer_context
 from app.ai.evidence import claim_payload, extract_claims
-from app.ai.prompts import build_answer_messages
+from app.ai.personas import DEFAULT_PERSONA_ID, resolve_persona
+from app.ai.prompts import build_answer_messages, build_general_messages, render_history
 from app.core.config import settings
 from app.db.models import Material, WebSource
 from app.retrieval.rerank import rerank
@@ -42,7 +43,9 @@ def run_answer(
     allow_web: bool = True,
     learning_goal: str | None = None,
     history: list[tuple[str, str]] | None = None,
+    teacher_persona: str = DEFAULT_PERSONA_ID,
 ) -> dict:
+    persona = resolve_persona(teacher_persona)
     teaching_context = infer_context(question, learning_goal)
     selected_material = db.get(Material, material_id) if material_id else None
     chunks = rerank(
@@ -124,11 +127,66 @@ def run_answer(
         web_status = "unavailable"
 
     if not chunks and not web_results:
+        # 没有课件依据时不要直接回一句固定文案：先让当前老师在“通用解释”约束下作答，
+        # 这样自我介绍、学习方法这类提问才能体现人物风格；模型不可用时再退回固定提示。
+        client = DeepSeekClient()
+        if client.configured:
+            audit, started = begin_call(
+                db,
+                provider="deepseek",
+                operation="chat_completion",
+                course_id=course_id,
+                model=settings.deepseek_model,
+            )
+            try:
+                response = client.complete_json(
+                    build_general_messages(
+                        question,
+                        history=history,
+                        learning_goal=teaching_context.learning_goal,
+                        discipline=teaching_context.discipline,
+                        persona=persona.id,
+                    ),
+                    max_tokens=1200,
+                )
+                answer = str(response.get("answer_markdown") or "").strip()
+                usage = client.last_usage or {}
+                finish_call(
+                    db,
+                    audit,
+                    started,
+                    status="success",
+                    request_units=usage.get("prompt_tokens"),
+                    response_units=usage.get("completion_tokens"),
+                    estimated_cost_usd=estimate_token_cost(
+                        usage,
+                        input_rate_per_million=settings.deepseek_input_cost_per_million,
+                        output_rate_per_million=settings.deepseek_output_cost_per_million,
+                    ),
+                )
+                if answer:
+                    return {
+                        "answer": answer, "chunks": [], "web_results": [], "claims": [],
+                        "mode": "persona-general", "web_search_status": web_status,
+                        "learning_goal": teaching_context.learning_goal,
+                        "discipline": teaching_context.discipline,
+                        "teacher_persona": persona.id,
+                        "model_version": settings.deepseek_model,
+                    }
+            except DeepSeekError as exc:
+                finish_call(
+                    db,
+                    audit,
+                    started,
+                    status=provider_status_from_error(exc),
+                    error_type=type(exc).__name__,
+                )
         return {
             "answer": (
                 "当前课程资料没有找到直接依据，且联网补充不可用。请缩小问题范围、选择具体讲次，或先上传相关课件。"
             ),
             "chunks": [], "web_results": [], "claims": [], "mode": "no-evidence", "web_search_status": web_status,
+            "teacher_persona": persona.id,
         }
 
     local_context = build_context(chunks)
@@ -136,7 +194,7 @@ def run_answer(
         f"[网络来源 {index + 1} | {item['title']} | {item['url']} | 检索日期 {datetime.now(UTC):%Y-%m-%d}]\n{item['snippet']}"
         for index, item in enumerate(web_results)
     )
-    history_context = "\n".join(f"[{role}] {content[:800]}" for role, content in (history or [])[-6:])
+    history_context = render_history(history)
     context = "\n\n".join(part for part in (
         "【受控会话历史】\n" + history_context if history_context else "",
         "【课程课件】\n" + local_context if local_context else "",
@@ -158,6 +216,7 @@ def run_answer(
                     context,
                     learning_goal=teaching_context.learning_goal,
                     discipline=teaching_context.discipline,
+                    persona=persona.id,
                 ),
                 max_tokens=2400,
             )
@@ -183,6 +242,7 @@ def run_answer(
                         "mode": "deepseek-rag", "web_search_status": web_status,
                         "learning_goal": teaching_context.learning_goal,
                         "discipline": teaching_context.discipline,
+                        "teacher_persona": persona.id,
                         "model_version": settings.deepseek_model}
         except DeepSeekError as exc:
             finish_call(
@@ -209,6 +269,7 @@ def run_answer(
             "mode": "local-retrieval-fallback", "web_search_status": web_status,
             "learning_goal": teaching_context.learning_goal,
             "discipline": teaching_context.discipline,
+            "teacher_persona": persona.id,
             "model_version": "keyword-or-hybrid-fallback"}
 
 

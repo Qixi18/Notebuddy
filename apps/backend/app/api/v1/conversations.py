@@ -29,7 +29,73 @@ from app.schemas.api import (
 router = APIRouter()
 
 
-def _message_read(message: ConversationMessage) -> ConversationMessageRead:
+def _sources_from_evidence(db: Session, message: ConversationMessage) -> list[dict]:
+    """会话消息落库时只保存了 evidence，这里还原成前端可直接渲染的来源卡片。
+
+    与 ``/courses/{id}/assistant`` 返回的 sources 保持同一结构，合并答疑链路后
+    悬浮答疑坞与答疑页才能拿到完全一致的来源信息（此前会话链路没有 sources）。
+    """
+    sources: list[dict] = []
+    seen: set[str] = set()
+    for item in message.evidence:
+        ref = item.source_ref
+        if ref is not None and ref.page_block is not None:
+            key = f"ref:{ref.id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            page = ref.page_block.page
+            material = db.get(Material, page.material_id) if page is not None else None
+            sources.append({
+                "source_type": "course_material",
+                "source_ref_id": ref.id,
+                "material_id": page.material_id if page is not None else None,
+                "lecture_title": material.lecture_title if material is not None else None,
+                "page_number": page.page_number if page is not None else None,
+                "location_label": ref.page_block.location_label or (page.location_label if page is not None else None),
+                "snippet": ref.quote,
+                "support_level": item.support_level,
+            })
+            continue
+        web = item.web_source
+        if web is not None:
+            key = f"web:{web.id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append({
+                "source_type": "web",
+                "title": web.title,
+                "url": web.url,
+                "site_name": web.site_name,
+                "snippet": web.snippet,
+                "retrieved_at": web.retrieved_at,
+                "published_at": web.published_at,
+                "support_level": item.support_level,
+            })
+    return sources
+
+
+def _mode_from_evidence(message: ConversationMessage) -> str:
+    """反推回答模式，取值与 ``app.ai.orchestrator`` 返回的 mode 对齐。
+
+    落库字段只有 evidence 与 model_version，因此按「证据类型 + 模型版本」还原：
+    有课件/网络证据即 RAG；只有 general_explanation 时，有模型版本说明走的是
+    人设通用分支（persona-general），没有则说明模型当时不可用（no-evidence）。
+    """
+    if message.status == "failed":
+        return "failed"
+    if message.model_version == "keyword-or-hybrid-fallback":
+        return "local-retrieval-fallback"
+    evidence_types = {item.evidence_type for item in message.evidence}
+    if evidence_types & {"course_direct", "course_related", "web_supplement"}:
+        return "deepseek-rag"
+    if "general_explanation" in evidence_types:
+        return "persona-general" if message.model_version else "no-evidence"
+    return ""
+
+
+def _message_read(db: Session, message: ConversationMessage) -> ConversationMessageRead:
     evidence = []
     for item in message.evidence:
         snippet = None
@@ -61,6 +127,8 @@ def _message_read(message: ConversationMessage) -> ConversationMessageRead:
         failure_type=message.failure_type,
         created_at=message.created_at,
         evidence=evidence,
+        mode=_mode_from_evidence(message),
+        sources=_sources_from_evidence(db, message),
     )
 
 
@@ -71,7 +139,10 @@ def _load_conversation(db: Session, conversation_id: str) -> Conversation:
             .selectinload(ConversationMessage.evidence)
             .selectinload(MessageEvidence.source_ref)
             .selectinload(SourceRef.page_block)
-            .selectinload(PageBlock.page)
+            .selectinload(PageBlock.page),
+            selectinload(Conversation.messages)
+            .selectinload(ConversationMessage.evidence)
+            .selectinload(MessageEvidence.web_source),
         )
     )
     if conversation is None:
@@ -107,7 +178,7 @@ def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[C
             selectinload(ConversationMessage.evidence).selectinload(MessageEvidence.web_source),
         ).order_by(ConversationMessage.created_at)
     ).all())
-    return [_message_read(message) for message in messages]
+    return [_message_read(db, message) for message in messages]
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=ConversationMessageRead, status_code=201)
@@ -130,7 +201,7 @@ def send_message(
                 ConversationMessage.created_at >= existing.created_at,
             ).order_by(ConversationMessage.created_at).limit(1))
             if answer is not None:
-                return _message_read(answer)
+                return _message_read(db, answer)
 
     selected = db.get(Material, payload.material_id) if payload.material_id else None
     if payload.material_id and (selected is None or selected.course_id != conversation.course_id or selected.deleted_at is not None):
@@ -154,6 +225,7 @@ def send_message(
             allow_web=payload.allow_web,
             learning_goal=payload.learning_goal,
             history=history,
+            teacher_persona=payload.teacher_persona,
         )
         assistant = ConversationMessage(
             conversation_id=conversation_id, role="assistant", content=result["answer"],
@@ -210,7 +282,7 @@ def send_message(
         conversation.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(assistant)
-        return _message_read(assistant)
+        return _message_read(db, assistant)
     except Exception as exc:
         db.rollback()
         failed = ConversationMessage(
@@ -221,4 +293,4 @@ def send_message(
         db.add(failed)
         db.commit()
         db.refresh(failed)
-        return _message_read(failed)
+        return _message_read(db, failed)

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkMath from 'remark-math'
@@ -6,9 +6,22 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { featurePath, useWorkspace } from '../components/AppLayout'
 import { SourceCard } from '../components/SourceCard'
-import { TeacherCharacter } from '../components/TeacherCharacter'
+import { TeacherCharacter, type TeacherStatus } from '../components/TeacherCharacter'
+import { teacherPersonaMeta } from '../features/persona/personas'
 import { api } from '../api'
-import type { Conversation, ConversationMessage } from '../types'
+
+/* 回答模式标签，取值与后端 app.ai.orchestrator 的 mode 一一对应 */
+const modeLabels: Record<string, string> = {
+  'deepseek-rag': 'AI 生成 · 参考当前课程来源',
+  'persona-general': '未匹配课程资料 · 老师通用回答',
+  'local-retrieval-fallback': '本地检索结果 · 模型回答暂不可用',
+}
+
+const noEvidenceLabels: Record<string, string> = {
+  'persona-general': '这轮没有命中课程页面，回答只是老师的通用说明，不能当作课件依据。',
+  'no-evidence': '当前课程资料没有找到直接依据，联网补充也不可用；请缩小问题范围或先上传相关课件。',
+  'local-retrieval-fallback': '模型当前不可用，下面是分层检索得到的原文摘录。',
+}
 
 export function AssistantPage() {
   const {
@@ -19,25 +32,19 @@ export function AssistantPage() {
     selectedMaterialId,
     setSelectedMaterialId,
     pages,
-    openMaterialSource,
-    messages,
-    assistantBusy,
-    question,
-    setQuestion,
-    askQuestion,
+    setSelectedPageNumber,
+    teacherPersona,
+    conversation,
   } = useWorkspace()
+  const { ask, ready: conversationReady, busy: conversationBusy, messages } = conversation
   const navigate = useNavigate()
   const location = useLocation()
   const chatEndRef = useRef<HTMLDivElement>(null)
   const initialQuestionSent = useRef(false)
   const [webStatus, setWebStatus] = useState<{ configured: boolean; status: string }>({ configured: false, status: 'unconfigured' })
+  const [draft, setDraft] = useState('')
   const [assistantMaterialId, setAssistantMaterialId] = useState<string>()
   const [assistantPageNumber, setAssistantPageNumber] = useState<number>()
-  const [conversations, setConversations] = useState<Conversation[]>([])
-  const [conversationId, setConversationId] = useState<string>()
-  const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([])
-  const [conversationBusy, setConversationBusy] = useState(false)
-  const [conversationReady, setConversationReady] = useState(false)
   const [pendingInitialQuestion, setPendingInitialQuestion] = useState<string>()
   const [learningGoal, setLearningGoal] = useState('理解概念')
   const [feedbackSaved, setFeedbackSaved] = useState<string>()
@@ -46,24 +53,11 @@ export function AssistantPage() {
   const [termExplanation, setTermExplanation] = useState<Awaited<ReturnType<typeof api.explainTerm>>>()
   const [termBusy, setTermBusy] = useState(false)
   const [termError, setTermError] = useState<string>()
+
   useEffect(() => { setAssistantMaterialId(undefined); setAssistantPageNumber(undefined) }, [courseId])
   useEffect(() => { void api.getWebSearchStatus().then(setWebStatus).catch(() => setWebStatus({ configured: false, status: 'unavailable' })) }, [])
-  useEffect(() => {
-    let active = true
-    setConversationReady(false)
-    if (!courseId) return () => { active = false }
-    void api.listConversations(courseId).then(async (items) => {
-      let next = items
-      if (next.length === 0) next = [await api.createConversation(courseId)]
-      if (!active) return
-      setConversations(next)
-      setConversationId(next[0].id)
-      const history = await api.listConversationMessages(next[0].id)
-      if (active) { setConversationMessages(history); setConversationReady(true) }
-    }).catch(() => { if (active) { setConversationMessages([]); setConversationReady(true) } })
-    return () => { active = false }
-  }, [courseId])
 
+  /* 首页「问 AI」带来的问题：等会话就绪后走同一条落库链路 */
   useEffect(() => {
     const state = location.state as { initialQuestion?: unknown } | null
     if (typeof state?.initialQuestion !== 'string' || !state.initialQuestion.trim()) return
@@ -73,40 +67,14 @@ export function AssistantPage() {
   }, [location.key, location.pathname, location.state, navigate])
 
   useEffect(() => {
-    if (!pendingInitialQuestion || !courseId || !conversationId || !conversationReady || initialQuestionSent.current) return
+    if (!pendingInitialQuestion || !conversationReady || initialQuestionSent.current) return
     const text = pendingInitialQuestion
     initialQuestionSent.current = true
     setPendingInitialQuestion(undefined)
-    setQuestion('')
-    setConversationBusy(true)
-    void api.sendConversationMessage(conversationId, {
-      question: text,
-      material_id: assistantMaterialId,
-      page_number: assistantPageNumber,
-      learning_goal: learningGoal,
-      allow_web: true,
-      idempotency_key: `${conversationId}-${Date.now()}`,
-    }).then((answer) => {
-      setConversationMessages((current) => [...current,
-        { id: `local-${Date.now()}`, conversation_id: conversationId, role: 'user', content: text, learning_goal: learningGoal, status: 'completed', model_version: null, failure_type: null, created_at: new Date().toISOString(), evidence: [] },
-        answer,
-      ])
-    }).catch(() => setQuestion(text)).finally(() => setConversationBusy(false))
-  }, [pendingInitialQuestion, courseId, conversationId, conversationReady, assistantMaterialId, assistantPageNumber, learningGoal, setQuestion])
-  async function selectConversation(id: string) {
-    setConversationId(id)
-    setConversationMessages(await api.listConversationMessages(id))
-  }
-  async function sendPersistentQuestion() {
-    if (!courseId || !conversationId || !question.trim()) return
-    const text = question.trim()
-    setQuestion('')
-    setConversationBusy(true)
-    try {
-      const answer = await api.sendConversationMessage(conversationId, { question: text, material_id: assistantMaterialId, page_number: assistantPageNumber, learning_goal: learningGoal, allow_web: true, idempotency_key: `${conversationId}-${Date.now()}` })
-      setConversationMessages((current) => [...current, { id: `local-${Date.now()}`, conversation_id: conversationId, role: 'user', content: text, learning_goal: learningGoal, status: 'completed', model_version: null, failure_type: null, created_at: new Date().toISOString(), evidence: [] }, answer])
-    } catch { setQuestion(text) } finally { setConversationBusy(false) }
-  }
+    void ask(text, { materialId: assistantMaterialId, pageNumber: assistantPageNumber, learningGoal })
+      .then((sent) => { if (!sent) setDraft(text) })
+  }, [pendingInitialQuestion, conversationReady, ask, assistantMaterialId, assistantPageNumber, learningGoal])
+
   async function explainTerm(event: FormEvent) {
     event.preventDefault()
     if (!courseId || !term.trim() || termBusy) return
@@ -121,22 +89,26 @@ export function AssistantPage() {
       setTermBusy(false)
     }
   }
-  const displayMessages = conversationMessages.length ? conversationMessages.map((message) => ({
-    role: message.role, content: message.content, status: message.status === 'completed' ? (message.role === 'assistant' ? 'explaining' : 'idle') : 'error', claims: undefined,
-    persistedId: message.id, evidence: message.evidence, sources: undefined, mode: undefined, webSearchStatus: undefined,
-  })) : messages.map((message) => ({ ...message, persistedId: undefined, evidence: [], sources: message.sources, mode: message.mode, webSearchStatus: message.webSearchStatus }))
-  const lastAssistantMessage = [...displayMessages].reverse().find((message) => message.role === 'assistant')
-  const teacherStatus = assistantBusy || conversationBusy ? 'thinking' : (lastAssistantMessage?.status as 'idle' | 'thinking' | 'explaining' | 'error' | undefined) ?? 'idle'
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [displayMessages.length])
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    if (conversationId) void sendPersistentQuestion()
-    else void askQuestion(assistantMaterialId, assistantPageNumber)
+    const text = draft.trim()
+    if (!text || conversationBusy) return
+    setDraft('')
+    void ask(text, { materialId: assistantMaterialId, pageNumber: assistantPageNumber, learningGoal })
+      .then((sent) => { if (!sent) setDraft(text) })
   }
+
+  const lastAssistantMessage = [...messages].reverse().find((message) => message.role === 'assistant')
+  const hasAsked = messages.some((message) => message.role === 'user')
+  const teacherStatus: TeacherStatus = conversationBusy
+    ? 'thinking'
+    : lastAssistantMessage?.status === 'failed' ? 'error'
+      : hasAsked ? 'explaining' : 'idle'
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+  }, [messages.length])
 
   return (
     <div className="feature-page page-enter assistant-page">
@@ -147,8 +119,8 @@ export function AssistantPage() {
 
       <section className="assistant-workspace" aria-label="课程答疑对话">
         <div className="assistant-context-bar">
-          <TeacherCharacter status={teacherStatus} compact />
-          <div><strong>NoteBuddy 教学助手</strong><small>当前课程：{course?.name ?? '未选择课程'}</small><span className="assistant-teacher-status" aria-live="polite" aria-atomic="true">{assistantBusy ? '正在检索本课程内容并组织回答…' : teacherStatus === 'error' ? '刚才的回答未能完成，可稍后重试' : teacherStatus === 'explaining' ? '已根据课程内容生成回答' : '等待你的课程问题'}</span></div>
+          <TeacherCharacter status={teacherStatus} compact character={teacherPersona} />
+          <div><strong>{teacherPersonaMeta(teacherPersona).name} · 教学助手</strong><small>当前课程：{course?.name ?? '未选择课程'}</small><span className="assistant-teacher-status" aria-live="polite" aria-atomic="true">{conversationBusy ? '正在检索本课程内容并组织回答…' : teacherStatus === 'error' ? '刚才的回答未能完成，可稍后重试' : teacherStatus === 'explaining' ? (lastAssistantMessage?.mode === 'persona-general' ? '这轮没有命中课程页面，老师只作了通用说明' : '已根据课程内容生成回答') : '等待你的课程问题'}</span></div>
           <details className="assistant-options">
             <summary>答疑设置</summary>
             <div className="assistant-options-grid">
@@ -159,8 +131,8 @@ export function AssistantPage() {
                 </select>
               </label>
               <label className="assistant-material-scope">会话
-                <select value={conversationId ?? ''} onChange={(event) => void selectConversation(event.target.value)} aria-label="选择答疑会话">
-                  {conversations.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+                <select value={conversation.conversationId ?? ''} onChange={(event) => void conversation.selectConversation(event.target.value)} aria-label="选择答疑会话">
+                  {conversation.conversations.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
                 </select>
               </label>
               <label className="assistant-material-scope">学习目标
@@ -183,16 +155,14 @@ export function AssistantPage() {
         </div>
 
         <div className="assistant-conversation" aria-live="polite">
-          {displayMessages.map((message, index) => (
-            <article className={`conversation-message conversation-${message.role}`} key={`${message.role}-${index}`}>
-              <span className="conversation-author">{message.role === 'assistant' ? 'NoteBuddy' : '你'}</span>
+          {messages.map((message, index) => (
+            <article className={`conversation-message conversation-${message.role}`} key={`${message.id}-${index}`}>
+              <span className="conversation-author">{message.role === 'assistant' ? teacherPersonaMeta(teacherPersona).name : '你'}</span>
               {message.role === 'assistant' ? <div className="assistant-answer-content"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown></div> : <p>{message.content}</p>}
-              {message.status === 'explaining' && <span className="answer-mode-label">{message.mode === 'deepseek-rag' ? 'AI 生成 · 参考当前课程来源' : message.mode === 'local-retrieval-fallback' ? '本地检索结果 · 模型回答暂不可用' : '当前课程资料检索'}</span>}
-              {message.status === 'explaining' && message.webSearchStatus && <span className="web-search-result-label">{message.webSearchStatus === 'completed' ? '网络补充：已检索并列出来源' : message.webSearchStatus === 'no_results' ? '网络补充：没有找到达到相关性要求的来源' : message.webSearchStatus === 'failed' ? '网络补充：本次检索失败' : message.webSearchStatus === 'disabled_by_request' ? '网络补充：按本次请求关闭' : message.webSearchStatus === 'daily_limit' ? '网络补充：已达到今日查询上限' : '网络补充：未配置，当前仅使用课程资料'}</span>}
-              {message.role === 'assistant' && message.status === 'explaining' && (!message.sources || message.sources.length === 0) && <span className="answer-no-evidence">{message.webSearchStatus === 'failed' ? '课程资料没有匹配页面，联网检索本次失败。' : message.webSearchStatus === 'no_results' ? '课程资料没有匹配页面，联网检索也没有找到可靠来源。' : '这次回答没有找到可直接引用的课程页面；联网搜索尚未配置。'}</span>}
-              {message.claims && message.claims.length > 0 && <div className="answer-evidence-list"><span>回答中的结论分类</span>{message.claims.map((claim) => <small key={claim.claim_key}>{claim.claim_key} · {claim.evidence_type} · {claim.support_level} · {claim.source_indexes.length} 条来源</small>)}</div>}
-              {'evidence' in message && message.evidence.length > 0 && <details className="answer-evidence-details"><summary>查看详细依据 · {message.evidence.length}</summary><div className="answer-evidence-list">{message.evidence.map((item) => <small key={item.id}>{item.claim_key} · {item.evidence_type} · {item.location_label ?? '来源位置'} · {item.support_level}</small>)}</div></details>}
-              {'persistedId' in message && message.role === 'assistant' && message.status === 'explaining' && <div className="answer-feedback-actions"><button type="button" onClick={() => courseId && void api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: message.persistedId!, category: 'helpful' }).then(() => setFeedbackSaved(message.persistedId))}>有帮助</button><button type="button" onClick={() => courseId && void api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: message.persistedId!, category: 'not_helpful' }).then(() => setFeedbackSaved(message.persistedId))}>需改进</button>{feedbackSaved === message.persistedId && <small>反馈已保存</small>}</div>}
+              {message.role === 'assistant' && message.status !== 'failed' && message.mode ? <span className="answer-mode-label">{modeLabels[message.mode] ?? '当前课程资料检索'}</span> : null}
+              {message.role === 'assistant' && message.status !== 'failed' && message.mode && !(message.sources?.length) ? <span className="answer-no-evidence">{noEvidenceLabels[message.mode] ?? '这次回答没有找到可直接引用的课程页面。'}</span> : null}
+              {message.evidence.length > 0 && <details className="answer-evidence-details"><summary>查看详细依据 · {message.evidence.length}</summary><div className="answer-evidence-list">{message.evidence.map((item) => <small key={item.id}>{item.claim_key} · {item.evidence_type} · {item.location_label ?? '来源位置'} · {item.support_level}</small>)}</div></details>}
+              {message.role === 'assistant' && message.status !== 'failed' && message.id !== 'local-greeting' && <div className="answer-feedback-actions"><button type="button" onClick={() => courseId && void api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: message.id, category: 'helpful' }).then(() => setFeedbackSaved(message.id))}>有帮助</button><button type="button" onClick={() => courseId && void api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: message.id, category: 'not_helpful' }).then(() => setFeedbackSaved(message.id))}>需改进</button>{feedbackSaved === message.id && <small>反馈已保存</small>}</div>}
               {message.sources?.length ? (
                 <div className="answer-sources"><span>回答依据 · 课程课件与网络补充（分开标注）</span>
                   {message.sources.map((source) => (
@@ -210,8 +180,8 @@ export function AssistantPage() {
 
         {courseContentLoading ? <div className="assistant-no-materials" role="status">正在读取课程资料…</div> : materials.length === 0 && <div className="assistant-no-materials">这门课程还没有资料。上传并解析课件后，答疑才能引用课程内容。{courseId && <Link className="secondary-button link-button" to={featurePath(courseId, 'materials')}>去上传课程资料</Link>}</div>}
         <form className="assistant-question-form" onSubmit={handleSubmit}>
-          <textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="问问当前课程……" rows={3} aria-label="课程问题" />
-          <div className="assistant-question-footer"><span>课程检索限定当前课程；{webStatus.configured ? '网络结果会与课件来源分开标注。' : '未配置 Tavily 时只检索课程资料。'}</span><button className="primary-button" type="submit" disabled={!question.trim() || assistantBusy || conversationBusy}>{assistantBusy || conversationBusy ? '正在思考…' : '发送问题'} <span aria-hidden="true">↑</span></button></div>
+          <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="问问当前课程……" rows={3} aria-label="课程问题" />
+          <div className="assistant-question-footer"><span>课程检索限定当前课程；{webStatus.configured ? '网络结果会与课件来源分开标注。' : '未配置 Tavily 时只检索课程资料。'}</span><button className="primary-button" type="submit" disabled={!draft.trim() || conversationBusy}>{conversationBusy ? '正在思考…' : '发送问题'} <span aria-hidden="true">↑</span></button></div>
         </form>
       </section>
     </div>
