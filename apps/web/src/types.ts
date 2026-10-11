@@ -7,6 +7,7 @@ export type Course = {
 }
 
 export type Material = {
+  chapter_order?: number
   id: string
   course_id: string
   lecture_title: string
@@ -177,6 +178,9 @@ export type TermExplanation = {
 }
 
 export type Note = {
+  material_id: string | null
+  section_key: string | null
+  section_order: number
   id: string
   course_id: string
   knowledge_node_id: string
@@ -188,6 +192,10 @@ export type Note = {
   created_at: string
   updated_at: string
 }
+
+export type NotebookSection = Pick<Note, 'id' | 'knowledge_node_id' | 'material_id' | 'section_key' | 'section_order' | 'title' | 'revision_number' | 'user_locked' | 'updated_at'>
+export type NotebookChapter = { id: string; title: string; chapter_order: number; status: string; deleted_at: string | null; sections: NotebookSection[] }
+export type Notebook = { course_id: string; title: string; order_revision: number; chapters: NotebookChapter[]; historical_sections: NotebookSection[]; removed_chapters: NotebookChapter[] }
 
 export type NoteRevision = {
   id: string
@@ -238,6 +246,7 @@ export type KnowledgeEdge = {
 }
 
 export type KnowledgeGraph = {
+  occurrences?: Array<{ id: string; note_id: string; knowledge_node_id: string; material_id: string | null; section_key: string | null; section_order: number; title: string }>
   nodes: KnowledgeNode[]
   edges: KnowledgeEdge[]
 }

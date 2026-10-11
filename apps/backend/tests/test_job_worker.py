@@ -52,8 +52,6 @@ def _material(db: Session) -> str:
     )
     db.add(material)
     db.flush()
-    job = ProcessingJob(material_id=material.id, kind="parse_material", status="pending")
-    db.add(job)
     db.commit()
     return material.id
 
@@ -93,6 +91,7 @@ def test_recover_leaves_completed_jobs_alone(session_factory) -> None:
     """已完成的任务不应被自愈逻辑重新排队。"""
     db = session_factory()
     material_id = _material(db)
+    _add_job(db, material_id, "pending")
     done_id = _add_job(db, material_id, "completed", progress=100)
     db.close()
 
@@ -130,7 +129,7 @@ def test_recover_clears_previous_error_message(session_factory) -> None:
 
 def test_claim_takes_pending_job_and_marks_processing(session_factory) -> None:
     db = session_factory()
-    _material(db)
+    _add_job(db, _material(db), "pending")
     pending_id = db.scalar(select(ProcessingJob.id).where(ProcessingJob.status == "pending"))
     db.close()
 
@@ -144,7 +143,7 @@ def test_claim_takes_pending_job_and_marks_processing(session_factory) -> None:
 
 def test_claim_returns_none_when_queue_empty(session_factory) -> None:
     db = session_factory()
-    _material(db)
+    _add_job(db, _material(db), "pending")
     # 把唯一的任务置为已完成，队列应为空
     db.execute(update(ProcessingJob).values(status="completed"))
     db.commit()
@@ -156,7 +155,7 @@ def test_claim_returns_none_when_queue_empty(session_factory) -> None:
 def test_claim_does_not_take_processing_job(session_factory) -> None:
     """正在处理中的任务不能被再次取走（否则会重复执行）。"""
     db = session_factory()
-    _material(db)
+    _add_job(db, _material(db), "pending")
     db.execute(update(ProcessingJob).values(status="processing"))
     db.commit()
     db.close()
@@ -168,9 +167,10 @@ def test_claim_is_fifo_by_creation_time(session_factory) -> None:
     """按创建时间先到先服务，避免后上传的任务插队。"""
     db = session_factory()
     material_id = _material(db)
+    _add_job(db, material_id, "pending")
     first_id = db.scalar(select(ProcessingJob.id).where(ProcessingJob.status == "pending"))
     # 再压一条更晚的任务，claim 必须仍取第一条
-    _add_job(db, material_id, "pending")
+    _add_job(db, _material(db), "pending")
     db.close()
 
     claimed = JobWorker()._claim_next_job()
@@ -186,6 +186,7 @@ def test_claim_marks_exactly_one_job(session_factory) -> None:
     db = session_factory()
     material_id = _material(db)
     _add_job(db, material_id, "pending")
+    _add_job(db, _material(db), "pending")
     db.close()
 
     JobWorker()._claim_next_job()

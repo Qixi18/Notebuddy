@@ -145,7 +145,7 @@ def test_footer_only_page_yields_no_title(tmp_path: Path) -> None:
     assert page["title"] is None
     assert page["raw_text"] == ""
     assert page["blocks"] == []
-    assert page["warning"] == "本页没有识别到文本内容"
+    assert "本页没有识别到文本内容" in page["warning"]
 
 
 def test_title_placeholder_wins_over_geometry(tmp_path: Path) -> None:

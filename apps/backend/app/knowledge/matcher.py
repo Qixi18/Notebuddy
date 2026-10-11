@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
@@ -20,7 +21,9 @@ class MatchCandidate:
 
 
 def normalize_name(value: str) -> str:
-    return re.sub(r"[^\w\u4e00-\u9fff]+", "", value.casefold())
+    value = unicodedata.normalize("NFKC", value).strip().casefold()
+    value = re.sub(r"[（(【\[]\s*[一二三四五六七八九十百上下中0-9]+\s*[）)】\]]\s*$", "", value)
+    return re.sub(r"[^\w\u4e00-\u9fff]+", "", value)
 
 
 def similarity(left: str, right: str) -> float:

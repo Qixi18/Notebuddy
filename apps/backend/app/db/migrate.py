@@ -17,6 +17,11 @@ from app.db.checkpoint import create_checkpoint
 from app.db.database import Base, engine
 
 INITIAL_REVISION = "964d70a06320"
+NOTEBOOK_COLUMNS = {
+    "courses": {"notebook_order_revision"},
+    "materials": {"chapter_order"},
+    "notes": {"material_id", "section_key", "section_order"},
+}
 PHASE_ONE_COLUMNS = {
     "courses": {"deleted_at"},
     "materials": {"content_hash", "deleted_at"},
@@ -83,7 +88,7 @@ def _prepare_legacy_schema() -> None:
             if table.name in PHASE_THREE_TABLES:
                 continue
             existing = {column["name"] for column in inspector.get_columns(table.name)}
-            baseline = {column.name for column in table.columns} - PHASE_ONE_COLUMNS.get(table.name, set()) - PHASE_TWO_COLUMNS.get(table.name, set())
+            baseline = {column.name for column in table.columns} - PHASE_ONE_COLUMNS.get(table.name, set()) - PHASE_TWO_COLUMNS.get(table.name, set()) - NOTEBOOK_COLUMNS.get(table.name, set())
             if not baseline.issubset(existing):
                 raise RuntimeError(f"Unsupported legacy columns in {table.name}: {sorted(baseline - existing)}")
 

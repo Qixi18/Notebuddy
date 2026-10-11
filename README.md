@@ -14,6 +14,8 @@ Tao:
 
 ## 当前开发状态
 
+2026-10-08 课程笔记本方案 A：笔记书架按课程显示，每讲一个章节；支持章节/整本阅读、目录重排、小节独立编辑与来源历史。同名知识点在各讲保留不同正文，叶子和旧笔记链接定位到对应小节。旧库由 Alembic 自动迁移，跨讲共享旧笔记进入历史整理。详见 [交接与验收](docs/handoffs/2026-10-08-course-notebook.md)、[接口](docs/api.md) 和 [开源工具复用](docs/open-source-tools.md)。真实课件与外部 AI 质量仍需正式验收。
+
 仓库已经加入初版本地 Web Demo 骨架：
 
 - `apps/web`：React + TypeScript + Vite 三栏学习工作区
@@ -37,6 +39,8 @@ Tao:
 ```
 
 首次使用前分别在 `apps/backend` 执行 `uv sync`，在 `apps/web` 执行 `npm install`。手动分终端启动时，除 API 和前端外还必须在 `apps/backend` 运行 `uv run python -m app.workers.runner`，否则上传后的任务会保持等待处理。
+
+Web 开发与测试使用 Node.js 22.12 或以上版本。在 `apps/web` 执行 `npm test` 运行导航与 React 交互回归，执行 `npm run build` 检查类型并构建。测试工具只属于开发依赖。
 
 原有分终端方式如下，但需同时启动上述执行器：
 

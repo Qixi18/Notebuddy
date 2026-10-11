@@ -61,7 +61,7 @@ export function CourseOverviewPage() {
               <span className="course-entry-copy"><strong>课程资料</strong><small>{materialCount ? `${materialCount} 份资料 · 查看解析状态与页码来源` : '上传课件并查看解析状态与页码来源'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>
             </Link>
-            <Link className="course-entry-row" to="/notes">
+            <Link className="course-entry-row" to={featurePath(courseId, 'notes')}>
               <span className="course-entry-icon course-entry-icon-notes" aria-hidden="true">▤</span>
               <span className="course-entry-copy"><strong>课程笔记</strong><small>{notes.length ? `${notes.length} 条笔记 · 阅读、编辑并核对引用` : '阅读整理内容，或从已解析的资料开始生成'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>

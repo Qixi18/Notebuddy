@@ -45,6 +45,7 @@ class KnowledgeEdgeRead(BaseModel):
 class KnowledgeGraphRead(BaseModel):
     nodes: list[KnowledgeNodeWithSourcesRead]
     edges: list[KnowledgeEdgeRead]
+    occurrences: list[dict] = []
 
 
 class KnowledgeChangeRead(BaseModel):

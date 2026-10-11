@@ -26,7 +26,7 @@ def test_pptx_tables_have_stable_objects(tmp_path):
     document = parse_pptx_document(path)
     assert document.format == "pptx"
     assert document.pages[0].stable_location_key == "slide:1"
-    assert document.pages[0].blocks[0].extraction_method == "table_parse"
+    assert next(block for block in document.pages[0].blocks if block.block_type == "table").extraction_method == "table_parse"
     assert "字段" in document.pages[0].raw_text
 
 

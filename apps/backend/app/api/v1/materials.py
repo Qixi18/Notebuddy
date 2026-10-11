@@ -15,6 +15,7 @@ from app.db.models import (
     SourceRef,
     WebSource,
 )
+from app.notes.notebook import bump_order_revision
 from app.parsers.ocr import status as ocr_status
 from app.schemas.api import (
     BlockRead,
@@ -84,6 +85,7 @@ def restore_material(material_id: str, db: Session = Depends(get_db)) -> Materia
         raise HTTPException(status_code=404, detail="待恢复资料不存在")
     ensure_course(db, material.course_id)
     material.deleted_at = None
+    bump_order_revision(db, material.course_id)
     db.commit()
     db.refresh(material)
     return material

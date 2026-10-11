@@ -6,12 +6,14 @@ import { EmptyState } from '../components/EmptyState'
 import { featurePath, useWorkspace } from '../components/AppLayout'
 import { SourceCard } from '../components/SourceCard'
 import type { KnowledgeProposal, NoteSourceRef } from '../types'
+import { notebookPath } from '../features/notebook/navigation'
 
 export function CourseKnowledgeStructure() {
   const { courseId = '' } = useParams()
-  const { course, courseContentLoading, graph, notes, materials, setSelectedMaterialId, setSelectedPageNumber, setSelectedNoteId } = useWorkspace()
+  const { course, courseContentLoading, graph, notes, materials, openMaterialSource } = useWorkspace()
   const [query, setQuery] = useState('')
   const [selectedNodeId, setSelectedNodeId] = useState<string>()
+  const [selectedOccurrenceId, setSelectedOccurrenceId] = useState<string>()
   const [sources, setSources] = useState<NoteSourceRef[]>([])
   const [webSources, setWebSources] = useState<import('../types').WebSource[]>([])
   const [sourcesLoading, setSourcesLoading] = useState(false)
@@ -28,23 +30,20 @@ export function CourseKnowledgeStructure() {
     const normalized = query.trim().toLocaleLowerCase()
     return graph.nodes.filter((node) => {
       const matchesQuery = !normalized || `${node.name} ${node.summary ?? ''}`.toLocaleLowerCase().includes(normalized)
-      const matchesLecture = lectureFilter === 'all' || node.sources.some((source) => source.material_id === lectureFilter)
+      const matchesLecture = lectureFilter === 'all' || graph.occurrences?.some((s) => s.knowledge_node_id === node.id && s.material_id === lectureFilter)
       return matchesQuery && matchesLecture
     })
-  }, [graph.nodes, query, lectureFilter])
+  }, [graph.nodes, graph.occurrences, query, lectureFilter])
   const lectureOptions = useMemo(() => materials.map((material) => ({ id: material.id, title: material.lecture_title })), [materials])
   const topicGroups = useMemo(() => {
-    const groups = new Map<string, { title: string; materialIds: string[] }>()
-    for (const material of materials) {
-      const title = material.topic_title?.trim() || material.lecture_title
-      const group = groups.get(title) ?? { title, materialIds: [] }
-      group.materialIds.push(material.id)
-      groups.set(title, group)
-    }
-    return [...groups.entries()].map(([id, group]) => ({ id, ...group }))
+    return materials.slice().sort((a, b) => (a.chapter_order ?? 0) - (b.chapter_order ?? 0))
+      .map((material) => ({ id: material.id, title: material.lecture_title, materialIds: [material.id] }))
   }, [materials])
   const selectedNode = visibleNodes.find((node) => node.id === selectedNodeId) ?? visibleNodes[0]
-  const selectedNote = selectedNode && notes.find((item) => item.knowledge_node_id === selectedNode.id)
+  const conceptOccurrences = (graph.occurrences ?? []).filter((s) => s.knowledge_node_id === selectedNode?.id)
+  const filteredOccurrences = conceptOccurrences.filter((s) => lectureFilter === 'all' || s.material_id === lectureFilter)
+  const selectedOccurrence = filteredOccurrences.find((s) => s.id === selectedOccurrenceId) ?? filteredOccurrences[0]
+  const selectedNote = notes.find((item) => item.id === selectedOccurrence?.id)
   const relatedEdges = selectedNode ? graph.edges.filter((edge) => edge.source_node_id === selectedNode.id || edge.target_node_id === selectedNode.id) : []
   const selectedChanges = selectedNode ? changes.filter((change) => change.node_id === selectedNode.id) : []
   const coreCutoff = 2
@@ -81,13 +80,11 @@ export function CourseKnowledgeStructure() {
 
   function openNodeNote() {
     if (!selectedNote) return
-    setSelectedNoteId(selectedNote.id)
-    navigate(`/courses/${courseId}/notes/${selectedNote.id}`)
+    navigate(notebookPath(courseId, selectedNote))
   }
 
   function openSource(source: NoteSourceRef) {
-    setSelectedMaterialId(source.material_id)
-    setSelectedPageNumber(source.page_number)
+    openMaterialSource(source.material_id, source.page_number)
     navigate(featurePath(courseId, 'materials'))
   }
 
@@ -115,11 +112,16 @@ export function CourseKnowledgeStructure() {
               <div className={`knowledge-node-list ${view === 'relations' ? 'knowledge-node-list-relations' : 'knowledge-node-list-tree'}`} role={view === 'tree' ? 'tree' : 'list'} aria-label="课程知识结构" style={{ '--tree-zoom': zoom } as React.CSSProperties}>
                 {view === 'tree' && <div className="tree-root" role="treeitem" aria-level={1}><span className="tree-root-icon">⌂</span><strong>{course?.name ?? '当前课程'}</strong><small>{visibleNodes.length} 个知识点</small></div>}
                 {view === 'tree' ? topicGroups.map((topic) => {
-                  const lectureNodes = visibleNodes.filter((node) => node.sources.some((source) => topic.materialIds.includes(source.material_id)))
+                  if (lectureFilter !== 'all' && topic.id !== lectureFilter) return null
+                  const lectureNodes = (graph.occurrences ?? []).filter((s) => topic.materialIds.includes(s.material_id ?? '') && visibleNodes.some((node) => node.id === s.knowledge_node_id))
                   if (!lectureNodes.length) return null
                   return <section className="tree-lecture-group" role="group" key={topic.id}>
                     <div className="tree-lecture" role="treeitem" aria-level={2}><span className="tree-branch-line" /><span className="tree-lecture-icon">▱</span><strong>{topic.title}</strong><small>{topic.materialIds.length} 个讲次 · {lectureNodes.length} 个知识点</small></div>
-                    <div className="tree-node-children" role="group">{lectureNodes.map((node, index) => <TreeNode key={node.id} node={node} index={index} active={selectedNode?.id === node.id} relationCount={graph.edges.filter((edge) => edge.source_node_id === node.id || edge.target_node_id === node.id).length} coreCutoff={coreCutoff} onSelect={() => setSelectedNodeId(node.id)} materials={materials} sourceMaterialIds={topic.materialIds} />)}</div>
+                    <div className="tree-node-children" role="group">{lectureNodes.map((s, index) => {
+                      const node = visibleNodes.find((n) => n.id === s.knowledge_node_id)!
+                      const summary = notes.find((n) => n.id === s.id)?.content_markdown.replace(/^#.*\n/, '').trim().slice(0, 160) ?? '点击阅读本讲小节'
+                      return <TreeNode key={s.id} node={{ ...node, name: s.title, summary }} index={index} active={selectedNote?.id === s.id} relationCount={graph.edges.filter((e) => e.source_node_id === node.id || e.target_node_id === node.id).length} coreCutoff={coreCutoff} onSelect={() => { setSelectedOccurrenceId(s.id); setSelectedNodeId(node.id); navigate(notebookPath(courseId, s)) }} materials={materials} sourceMaterialIds={topic.materialIds} />
+                    })}</div>
                   </section>
                 }) : visibleNodes.map((node, index) => {
                   const connectedCount = graph.edges.filter((edge) => edge.source_node_id === node.id || edge.target_node_id === node.id).length
@@ -132,7 +134,7 @@ export function CourseKnowledgeStructure() {
                     </article>
                   )
                 })}
-                {view === 'tree' && visibleNodes.filter((node) => !node.sources.length || !node.sources.some((source) => materials.some((material) => material.id === source.material_id))).length > 0 && <section className="tree-lecture-group"><div className="tree-lecture"><span className="tree-branch-line" /><span className="tree-lecture-icon">?</span><strong>尚未关联讲次</strong></div><div className="tree-node-children">{visibleNodes.filter((node) => !node.sources.length || !node.sources.some((source) => materials.some((material) => material.id === source.material_id))).map((node, index) => <TreeNode key={node.id} node={node} index={index} active={selectedNode?.id === node.id} relationCount={graph.edges.filter((edge) => edge.source_node_id === node.id || edge.target_node_id === node.id).length} coreCutoff={coreCutoff} onSelect={() => setSelectedNodeId(node.id)} materials={materials} />)}</div></section>}
+                {view === 'tree' && lectureFilter === 'all' && <section className="tree-lecture-group"><div className="tree-lecture"><strong>历史整理</strong></div><div className="tree-node-children">{(graph.occurrences ?? []).filter((s) => s.material_id === null && visibleNodes.some((n) => n.id === s.knowledge_node_id)).map((s, index) => <TreeNode key={s.id} node={{ ...visibleNodes.find((n) => n.id === s.knowledge_node_id)!, name: s.title }} index={index} active={selectedNote?.id === s.id} relationCount={0} coreCutoff={coreCutoff} onSelect={() => navigate(notebookPath(courseId, s))} materials={materials} />)}</div></section>}
               </div>
               </>
             )}
@@ -149,6 +151,7 @@ export function CourseKnowledgeStructure() {
                 {materials[0] && <Link className="text-button" to={featurePath(courseId, 'materials')}>浏览课程资料</Link>}
               </div>
               <div className="node-detail-section"><strong>关联知识点</strong>
+                {conceptOccurrences.length > 0 && <div className="relation-list" aria-label="各讲中的同一知识点">{conceptOccurrences.map((s) => <Link className="relation-row" key={s.id} to={notebookPath(courseId, s)}><strong>{s.title}</strong><span>{materials.find((m) => m.id === s.material_id)?.lecture_title ?? '历史整理'}</span><span>→</span></Link>)}</div>}
                 {relatedEdges.length ? <div className="relation-list">{relatedEdges.map((edge) => {
                   const otherId = edge.source_node_id === selectedNode.id ? edge.target_node_id : edge.source_node_id
                   const otherNode = graph.nodes.find((node) => node.id === otherId)
@@ -160,7 +163,7 @@ export function CourseKnowledgeStructure() {
               </div>}
               {selectedNote && <div className="node-detail-section"><strong>网络补充（与课件区分）</strong>{webSources.length ? <div className="source-card-list">{webSources.map((source) => <a className="source-card" key={source.id} href={source.url} target="_blank" rel="noreferrer"><span className="source-card-icon">↗</span><span className="source-card-body"><small className="source-card-meta">{source.site_name} · {new Date(source.retrieved_at).toLocaleDateString('zh-CN')}</small><strong>{source.title}</strong><small>{source.snippet}</small></span></a>)}</div> : <p className="muted-copy">没有保存的网络来源。</p>}</div>}
               <div className="node-detail-section"><strong>知识变更历史</strong>{selectedChanges.length ? <div className="proposal-list">{selectedChanges.slice(0, 6).map((change) => <article className="proposal-card" key={change.id}><strong>{change.change_type}</strong><small>{new Date(change.created_at).toLocaleString('zh-CN')}</small><p>{change.reason || '已记录来源或摘要变化。'}</p></article>)}</div> : <p className="muted-copy">当前节点还没有已记录的变更。</p>}</div>
-              <div className="node-detail-section"><strong>待确认整合</strong>{proposalError && <p className="evidence-error">{proposalError}</p>}{proposals.length ? proposals.slice(0, 4).map((proposal) => <article className="proposal-card" key={proposal.id}><strong>{proposal.candidate_name}</strong><small>{proposal.kind} · 置信度 {Math.round(proposal.confidence * 100)}%</small><p>{proposal.rationale}</p><div><button className="secondary-button" onClick={() => void reviewProposal(proposal.id, 'confirm')}>确认合并</button><button className="text-button" onClick={() => void reviewProposal(proposal.id, 'reject')}>拒绝</button></div></article>) : <p className="muted-copy">当前没有需要人工确认的跨讲整合。</p>}</div>
+              <div className="node-detail-section"><strong>待确认整合</strong>{proposalError && <p className="evidence-error">{proposalError}</p>}{proposals.length ? proposals.slice(0, 4).map((proposal) => <article className="proposal-card" key={proposal.id}><strong>{proposal.candidate_name}</strong><small>{proposal.kind} · 置信度 {Math.round(proposal.confidence * 100)}%</small><p>{proposal.rationale}</p><div><button className="secondary-button" onClick={() => void reviewProposal(proposal.id, 'confirm')}>确认关系</button><button className="text-button" onClick={() => void reviewProposal(proposal.id, 'reject')}>拒绝</button></div></article>) : <p className="muted-copy">当前没有需要人工确认的跨讲整合。</p>}</div>
             </> : <p className="muted-copy">从列表中选择一个知识点，查看详细信息。</p>}
           </aside>
         </section>

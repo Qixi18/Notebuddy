@@ -123,6 +123,16 @@ def apply_proposal(db: Session, proposal: KnowledgeProposal, *, decision: str, n
         return proposal
 
     target = db.get(KnowledgeNode, proposal.target_node_id) if proposal.target_node_id else None
+    if proposal.kind == "deepen" and proposal.source_node_id and target is not None:
+        # Reviewing similarity links the concepts; each lecture body stays independent.
+        add_relation(db, course_id=proposal.course_id, source_node_id=proposal.source_node_id,
+                     target_node_id=target.id, relation_type="deepens",
+                     confidence=proposal.confidence, created_by="reviewed")
+        _record_change(db, proposal, node_id=proposal.source_node_id, change_type="relation_reviewed",
+                       before={}, after={"target": target.id, "relation_type": "deepens"},
+                       reason=proposal.rationale)
+        db.flush()
+        return proposal
     if target is None and proposal.kind in {"new", "deepen", "repeat"}:
         target = KnowledgeNode(
             course_id=proposal.course_id,

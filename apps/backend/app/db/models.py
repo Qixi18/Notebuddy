@@ -44,6 +44,7 @@ class Course(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    notebook_order_revision: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
 
     # 除了 materials，其余关联表只有 course_id 外键。显式声明 ORM 级联，
     # 这样即使引擎未开启 SQLite 外键（tests / 迁移脚本 / 换库），
@@ -97,6 +98,7 @@ class Material(Base):
     parser_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
     document_warning: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    chapter_order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="materials")
     pages: Mapped[list[MaterialPage]] = relationship(
@@ -226,7 +228,7 @@ class KnowledgeNode(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="knowledge_nodes")
-    note: Mapped[Note | None] = relationship(back_populates="knowledge_node", uselist=False)
+    notes: Mapped[list[Note]] = relationship(back_populates="knowledge_node")
     source_refs: Mapped[list[SourceRef]] = relationship(
         secondary=knowledge_node_source_refs, back_populates="knowledge_nodes"
     )
@@ -296,13 +298,19 @@ class WebSource(Base):
 
 class Note(Base):
     __tablename__ = "notes"
-    __table_args__ = (Index("ix_notes_course_id", "course_id"),)
+    __table_args__ = (
+        Index("ix_notes_course_id", "course_id"),
+        UniqueConstraint("material_id", "section_key", name="uq_notes_material_section"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
     knowledge_node_id: Mapped[str] = mapped_column(
-        ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), unique=True
+        ForeignKey("knowledge_nodes.id", ondelete="CASCADE")
     )
+    material_id: Mapped[str | None] = mapped_column(ForeignKey("materials.id", ondelete="SET NULL"), nullable=True)
+    section_key: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    section_order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     content_markdown: Mapped[str] = mapped_column(Text, default="", nullable=False)
     content_origin: Mapped[str] = mapped_column(String(30), default="ai", nullable=False)
@@ -312,7 +320,7 @@ class Note(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="notes")
-    knowledge_node: Mapped[KnowledgeNode] = relationship(back_populates="note")
+    knowledge_node: Mapped[KnowledgeNode] = relationship(back_populates="notes")
     revisions: Mapped[list[NoteRevision]] = relationship(
         back_populates="note", cascade="all, delete-orphan", order_by="NoteRevision.revision_number"
     )

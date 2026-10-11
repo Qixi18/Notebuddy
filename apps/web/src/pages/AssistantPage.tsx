@@ -167,8 +167,7 @@ export function AssistantPage() {
                 <div className="answer-sources"><span>回答依据 · 课程课件与网络补充（分开标注）</span>
                   {message.sources.map((source) => (
                     source.source_type === 'web' && source.url ? <a className="source-card web-source-card" key={source.url} href={source.url} target="_blank" rel="noreferrer"><span className="source-card-icon">↗</span><span className="source-card-body"><small className="source-card-meta">网络补充 · {source.site_name} · {source.published_at ? `发布于 ${source.published_at}` : ''} · 检索于 {source.retrieved_at ? new Date(source.retrieved_at).toLocaleDateString('zh-CN') : '刚刚'}</small><strong>{source.title}</strong><small>{source.snippet}</small></span></a> : source.material_id && source.page_number ? <SourceCard key={`${source.material_id}-${source.page_number}`} title={source.lecture_title ?? '课程资料'} pageNumber={source.page_number} quote={source.snippet} onOpen={() => {
-                      setSelectedMaterialId(source.material_id ?? undefined)
-                      setSelectedPageNumber(source.page_number ?? undefined)
+                      openMaterialSource(source.material_id!, source.page_number ?? undefined)
                       if (courseId) navigate(featurePath(courseId, 'materials'))
                     }} /> : null
                   ))}

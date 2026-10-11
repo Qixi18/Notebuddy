@@ -144,17 +144,21 @@ def test_rename_missing_course_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_delete_course_removes_every_related_row(client: TestClient, db_session: Session) -> None:
+def test_delete_course_preserves_rows_for_restore(client: TestClient, db_session: Session, monkeypatch) -> None:
+    # File checkpoint itself has dedicated integration tests; this fixture is in-memory.
+    monkeypatch.setattr("app.services.deletion._checkpoint", lambda: None)
     course_id = _seed_course(db_session)
 
     response = client.delete(f"/api/v1/courses/{course_id}")
     assert response.status_code == 200
     body = response.json()
-    assert body["deleted_course_id"] == course_id
-    assert body["deleted_materials"] == 1
-    assert body["deleted_pages"] == 1
-    assert body["deleted_knowledge_nodes"] == 1
-    assert body["deleted_notes"] == 1
+    assert body["course_id"] == course_id
+    assert body["materials"] == 1
+    assert body["pages"] == 1
+    assert body["knowledge_nodes_touched"] == 1
+    assert body["action"] == "soft_delete_with_checkpoint"
+    assert db_session.get(Course, course_id).deleted_at is not None
+    assert client.get("/api/v1/courses").json() == []
 
     db_session.expire_all()
     for model in (
@@ -169,11 +173,13 @@ def test_delete_course_removes_every_related_row(client: TestClient, db_session:
         NoteRevision,
     ):
         count = int(db_session.scalar(select(func.count()).select_from(model)) or 0)
-        assert count == 0, f"{model.__tablename__} 应被清空，实际剩 {count}"
+        assert count == 1, f"{model.__tablename__} 应保留以便恢复"
 
     for table in (note_source_refs, knowledge_node_source_refs):
         count = int(db_session.scalar(select(func.count()).select_from(table)) or 0)
-        assert count == 0, f"{table.name} 应被清空，实际剩 {count}"
+        assert count == 1, f"{table.name} 应保留以便恢复"
+    assert client.post(f"/api/v1/courses/{course_id}/restore").status_code == 200
+    assert client.get("/api/v1/courses").json()[0]["id"] == course_id
 
 
 def test_delete_missing_course_returns_404(client: TestClient) -> None:

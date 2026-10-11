@@ -10,10 +10,11 @@ from app.api.v1 import (
     jobs,
     knowledge,
     materials,
+    notebook,
     notes,
     terms,
 )
 
 router = APIRouter()
-for module in (config, courses, materials, jobs, knowledge, notes, assistant, conversations, feedback, backup, terms):
+for module in (config, courses, materials, jobs, knowledge, notes, notebook, assistant, conversations, feedback, backup, terms):
     router.include_router(module.router)

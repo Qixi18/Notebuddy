@@ -8,6 +8,7 @@ from app.schemas.jobs import JobRead
 
 
 class MaterialRead(BaseModel):
+    chapter_order: int = 0
     model_config = ConfigDict(from_attributes=True)
 
     id: str

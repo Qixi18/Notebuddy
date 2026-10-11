@@ -182,8 +182,10 @@ def process_material(job_id: str) -> None:
                         db.flush()
                         node_sources.append(source)
                         found += 1
-                    if node_sources and node.note is not None:
-                        append_web_references(db, node.note, node_sources)
+                    if node_sources:
+                        for note in node.notes:
+                            if note.material_id == material.id:
+                                append_web_references(db, note, node_sources)
                 job.web_search_status = "completed" if found else "no_results"
                 db.commit()
             except WebSearchError as exc:

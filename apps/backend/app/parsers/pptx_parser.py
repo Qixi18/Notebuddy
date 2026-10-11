@@ -244,7 +244,9 @@ def parse_pptx_document(path: Path) -> ParsedDocument:
                 # 整块都是页脚/装饰，跳过
                 continue
 
-            if _is_placeholder(shape, "TITLE", "CENTER_TITLE"):
+            if getattr(shape, "has_table", False):
+                block_type = "table"
+            elif _is_placeholder(shape, "TITLE", "CENTER_TITLE"):
                 block_type = "title"
             elif _is_footer_shape(shape, slide_height):
                 # 贴底窄条仍可能有少量正文，降级为 text 但保留内容

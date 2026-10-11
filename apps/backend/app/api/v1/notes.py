@@ -69,7 +69,14 @@ def get_note_revisions(note_id: str, db: Session = Depends(get_db)) -> list[Note
 @router.get("/notes/{note_id}/web-sources", response_model=list[WebSourceRead])
 def get_note_web_sources(note_id: str, db: Session = Depends(get_db)) -> list[WebSource]:
     note = ensure_note(db, note_id)
-    return list(db.scalars(select(WebSource).where(WebSource.knowledge_node_id == note.knowledge_node_id).order_by(WebSource.retrieved_at.desc())).all())
+    query = select(WebSource).where(WebSource.course_id == note.course_id,
+                                    WebSource.knowledge_node_id == note.knowledge_node_id)
+    if note.material_id is not None:
+        query = query.where(WebSource.material_id == note.material_id)
+    else:
+        material_ids = {source.page_block.page.material_id for source in note.source_refs}
+        query = query.where(WebSource.material_id.in_(material_ids))
+    return list(db.scalars(query.order_by(WebSource.retrieved_at.desc())).all())
 
 
 

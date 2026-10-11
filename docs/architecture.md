@@ -5,7 +5,7 @@
 初版先实现本地单用户 Web Demo：
 
 ```text
-课程 → 讲次资料 → 逐页解析 → PageBlock 来源引用 → 知识点/笔记 → 检索问答
+课程笔记本 → 讲次章节 → 逐页解析 → PageBlock 来源引用 → 小节笔记/概念关系 → 检索问答
 ```
 
 基础知识点提取、可编辑笔记、版本保护和可选外部模型调用已经接入；语义 Embedding 通过可配置的兼容接口启用。
@@ -78,16 +78,20 @@ for node, raw_relations in pending_relations:
 
 ## 当前数据关系
 
+课程就是笔记本，Material 就是章节，Note 就是小节。`Course.notebook_order_revision` 对章节重排做乐观并发保护；上传、删除和恢复也使该版本失效。`Material.chapter_order` 保留讲次顺序，`Note.material_id + section_key` 唯一定位本讲位置，`section_order` 控制小节顺序。`KnowledgeNode.notes` 为一对多：概念复用，各讲正文和叶子独立。图的 `occurrences` 以 Note ID 为身份，重复概念关系从同一 concept ID 派生。
+
+迁移先创建校验检查点；移除旧 notes 概念唯一约束时暂时关闭 SQLite 外键并检查迁移后引用，保留修订、建议和来源。只有来源归属单讲的旧笔记回填 material_id，多讲/无来源旧笔记保留历史整理。首次重解析在唯一可匹配的位置接续旧 Note ID；歧义旧笔记不自动拆分。多正文库拒绝有损降级。
+
 ```text
 Course
  ├─ Material ─ MaterialPage ─ PageBlock ─ SourceRef
  │                                  └─ RetrievalChunk
  ├─ KnowledgeNode ─ KnowledgeEdge ─ KnowledgeNode
- │       └─ Note ─ NoteRevision
+ │       └─ Notes（各讲独立）─ NoteRevision
  └─（知识点和笔记通过多对多关系引用 SourceRef）
 ```
 
-`Course` 对 `Material`、`KnowledgeNode`、`Note`、`KnowledgeEdge`、`RetrievalChunk` 均声明 `cascade="all, delete-orphan"`，删除课程即可整链清理，不依赖 SQLite 外键开关。
+`Course` 的 ORM 级联供显式物理清理使用；公开删除接口实际执行带检查点的软删除，正文和来源保留以便恢复。
 
 `Note.user_locked=true` 后，后续资料解析只会补充来源和知识节点摘要，不会覆盖用户笔记正文。`revision_number` 用于乐观并发保护，前端保存时必须携带当前版本号。
 
@@ -98,7 +102,7 @@ Course
 | 创建课程 | `POST /api/v1/courses` |
 | 课程列表 | `GET /api/v1/courses` |
 | 课程重命名 | `PATCH /api/v1/courses/{course_id}` |
-| 课程删除（级联） | `DELETE /api/v1/courses/{course_id}` |
+| 课程软删除（带检查点） | `DELETE /api/v1/courses/{course_id}` |
 | 课程知识图谱 | `GET /api/v1/courses/{course_id}/knowledge-graph` |
 | 课程笔记 | `GET /api/v1/courses/{course_id}/notes` |
 | 笔记编辑 | `PATCH /api/v1/notes/{note_id}` |
@@ -121,31 +125,18 @@ Course
 
 ### 密钥不进版本库
 
-`.env` 与 `data/` 均在 `.gitignore` 中，且仓库配置了 `core.hooksPath=.githooks`。`scripts/pre-commit` 提供四道拦截：① 暂存区出现 `.env` 实体文件 → 拒绝（`.env.example` 例外）；② 暂存 `data/` 下的数据库/课件/备份 → 拒绝；③ 新增行匹配 `sk-xxx`、`ghp_`、`AKIA`、`BEGIN PRIVATE KEY` 等密钥特征 → 拒绝（示例占位值白名单放行）；④ `.env` 脱离 ignore 状态 → 拒绝。确需绕过时用 `git commit --no-verify`。
+`.env` 与 `data/` 均在 `.gitignore` 中，且仓库提供 `.githooks/pre-commit`（启用状态须以 Git 配置核对）。`.githooks/pre-commit` 提供四道拦截：① 暂存区出现 `.env` 实体文件 → 拒绝（`.env.example` 例外）；② 暂存 `data/` 下的数据库/课件/备份 → 拒绝；③ 新增行匹配 `sk-xxx`、`ghp_`、`AKIA`、`BEGIN PRIVATE KEY` 等密钥特征 → 拒绝（示例占位值白名单放行）；④ `.env` 脱离 ignore 状态 → 拒绝。确需绕过时用 `git commit --no-verify`。
 
 安全测试见 `apps/backend/tests/test_settings_security.py`。
 
-## 课程重命名与级联删除
+## 课程生命周期
 
-课程卡片右键可打开操作菜单（重命名 / 删除课程），实现见 `apps/web/src/CourseContextMenu.tsx`。
-
-- **重命名**：`PATCH /api/v1/courses/{course_id}` 只接受 `name` 一个字段（`extra="forbid"`），服务端去首尾空白并在空名时返回 400。课程下的资料、知识点、笔记均保留。
-- **删除**：`DELETE /api/v1/courses/{course_id}` 会连带清除 `Material → MaterialPage → PageBlock → SourceRef / RetrievalChunk`、`KnowledgeNode → KnowledgeEdge → Note → NoteRevision` 以及两张多对多关联表。接口返回各表删除计数，前端据此展示提示条。磁盘上的原始课件文件在**数据库提交成功之后**才删除，避免出现"文件没了但记录还在"。
-- **二次确认**：删除对话框要求用户完整输入课程名才解锁确认按钮，降低误删整个学期积累的风险。
-
-### 级联不能只依赖 SQLite 外键 pragma
-
-除 `materials` 外，`knowledge_nodes`、`notes`、`knowledge_edges`、`retrieval_chunks` 早期只有 `course_id` 外键，没有任何 ORM relationship。这意味着删除课程时，这些表**完全依赖 `PRAGMA foreign_keys=ON`** 这一引擎级开关。
-
-`app/db/database.py` 确实注册了该 pragma 监听器，所以运行时是安全的；但一旦有人用别的 `create_engine`（测试夹具、迁移脚本、将来的异步驱动，或迁移到 PostgreSQL 时忘记等价设置），删除就会静默留下孤儿知识点和笔记——**不报错，但数据已经脏了**。
-
-修正：在 `Course` 上为这四类关联补全 `relationship(cascade="all, delete-orphan")` 并互相 `back_populates`，让删除语义由 ORM 表达，而不是靠引擎配置"碰巧成立"。回归测试见 `apps/backend/tests/test_course_lifecycle.py::test_delete_course_removes_every_related_row`，该用例的引擎**刻意不开启外键**，用来锁住这条约束。
+重命名只接受 name 字段，空白名称被拒绝。课程及资料删除先检查活动任务，再创建文件校验检查点，标记 deleted_at；列表隐藏已删除记录，恢复接口解除标记。公开删除不会清除用户正文、来源或原文件。ORM 物理级联与公开软删除是不同操作。
 
 ## 后续工作
 
-1. 增加 PDF/DOCX 解析和更细粒度的来源位置（段落、形状、坐标）。
-2. 接入真实 Embedding 服务并增加离线索引重建、向量库迁移和召回评测。
-3. 关系生成目前依赖模型显式给出的 `target_name`；可加入「同批次语义相似度」兜底，让模型未显式声明关系时也能发现潜在关联。
-4. 增加覆盖总览、来源点击回跳和笔记历史恢复 UI。
-5. Electron 包装继续接入后端进程生命周期和生产环境静态资源。
-6. 解析任务当前由 `BackgroundTasks` 在请求进程内执行，进程重启会丢失；后续应换成真正的任务队列（含重试与断点续传）。
+1. AI 选页补生成及明确的重点/难点处理。
+2. 知识树专项视觉设计和真实跨讲语义质量验收。
+3. 收起式应用内桌宠、阅读笔记与连续追问上下文、无课程证据时的通用解释。
+4. 真实 PPTX/PDF/DOCX 与 OCR、公式、来源质量验收。
+5. 外部模型与 Embedding 联调、性能评测、Electron 交付。

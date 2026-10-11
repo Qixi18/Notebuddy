@@ -370,7 +370,7 @@ def test_ensure_note_is_idempotent_for_same_node(db: Session) -> None:
     assert db.scalar(select(func.count()).select_from(Note)) == 1
     note = db.scalar(select(Note))
     assert note is not None
-    assert "第二页的内容" in note.content_markdown
+    assert "第一版内容" in note.content_markdown
 
 
 def test_ensure_note_survives_node_hit_by_multiple_pages(db: Session) -> None:
@@ -395,12 +395,13 @@ def test_ensure_note_records_revision_history(db: Session) -> None:
     node = _node(db, course.id, "矩阵")
 
     assert ensure_note(db, course.id, node, "第一版", []).revision_number == 1
-    assert ensure_note(db, course.id, node, "第二版", []).revision_number == 2
+    assert ensure_note(db, course.id, node, "第二版", []).revision_number == 1
     db.commit()
 
     revisions = db.scalars(select(NoteRevision).order_by(NoteRevision.revision_number)).all()
-    assert [r.revision_number for r in revisions] == [1, 2]
-    assert revisions[1].content_markdown == "第二版"
+    assert [r.revision_number for r in revisions] == [1]
+    from app.db.models import NoteSuggestion
+    assert db.scalar(select(NoteSuggestion)).proposed_markdown == "第二版"
 
 
 def test_ensure_note_does_not_overwrite_locked_note(db: Session) -> None:

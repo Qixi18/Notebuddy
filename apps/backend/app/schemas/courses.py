@@ -11,6 +11,7 @@ class CourseCreate(BaseModel):
 
 
 class CourseUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=200)
 
 

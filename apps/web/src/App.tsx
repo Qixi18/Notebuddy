@@ -10,6 +10,7 @@ import { HomePage } from './pages/HomePage'
 import { NotesLibraryPage } from './pages/NotesLibraryPage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { NotesPage } from './pages/NotesPage'
+import { NotebookPage } from './pages/NotebookPage'
 
 function NotFoundPage() {
   return (
@@ -33,6 +34,7 @@ function App() {
           <Route path="/courses" element={<CourseLibraryPage />} />
           <Route path="/courses/:courseId" element={<CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard>} />
           <Route path="/notes" element={<NotesLibraryPage />} />
+          <Route path="/courses/:courseId/notebook" element={<CourseRouteGuard><NotebookPage /></CourseRouteGuard>} />
           <Route path="/courses/:courseId/notes" element={<Navigate to="/notes" replace />} />
           <Route path="/courses/:courseId/notes/:noteId" element={<CourseRouteGuard><NotesPage /></CourseRouteGuard>} />
           <Route path="/courses/:courseId/materials" element={<CourseRouteGuard><MaterialsPage /></CourseRouteGuard>} />

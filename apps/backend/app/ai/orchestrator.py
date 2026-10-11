@@ -252,7 +252,6 @@ def run_answer(
                 status=provider_status_from_error(exc),
                 error_type=type(exc).__name__,
             )
-            pass
     local_excerpt = "\n\n".join(
         f"[课程资料：{chunk.lecture_title} | {chunk.location_label or f'第 {chunk.page_number} 页'}] {chunk.text[:240]}"
         for chunk in chunks

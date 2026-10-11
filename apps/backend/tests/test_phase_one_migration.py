@@ -13,6 +13,7 @@ def test_legacy_upgrade_preserves_note_and_source(tmp_path):
         import sqlite3
         from pathlib import Path
         from alembic import command
+        from alembic.script import ScriptDirectory
         from app.db.migrate import _config, migrate_database
         from app.db.checkpoint import verify_checkpoint
         from app.core.config import settings
@@ -42,7 +43,7 @@ def test_legacy_upgrade_preserves_note_and_source(tmp_path):
             assert db.execute('select content_markdown,revision_number from notes').fetchone() == ('# 用户正文',2)
             assert db.execute('select quote from source_refs').fetchone()[0] == '原文'
             assert db.execute('select note_id,source_ref_id from note_source_refs').fetchone() == ('n','s')
-            assert db.execute('select version_num from alembic_version').fetchone()[0] == 'e42af81c6d90'
+            assert db.execute('select version_num from alembic_version').fetchone()[0] == ScriptDirectory.from_config(_config()).get_current_head()
         print('legacy-upgrade-ok')
     """)
     env = os.environ.copy()

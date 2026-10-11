@@ -15,6 +15,7 @@ import { ConfirmDialog } from './ConfirmDialog'
 import { CourseSwitcher } from './CourseSwitcher'
 import type { TeacherCharacterId } from './TeacherCharacter'
 import { SettingsPanel } from '../SettingsPanel'
+import { shouldBlockNoteNavigation } from '../features/notebook/navigation'
 
 export type Feature = 'notes' | 'materials' | 'assistant'
 
@@ -30,7 +31,9 @@ export type WorkspaceContextValue = {
   pages: Page[]
   selectedPageNumber?: number
   setSelectedPageNumber: (page: number | undefined) => void
+  openMaterialSource: (materialId: string, page: number | undefined) => void
   notes: Note[]
+  upsertNotes: (notes: Note[]) => void
   selectedNote?: Note
   setSelectedNoteId: (id: string | undefined) => void
   noteDraft: string
@@ -91,7 +94,7 @@ const featureDescriptions: Record<Feature, string> = {
 }
 
 export function featurePath(courseId: string, feature: Feature): string {
-  if (feature === 'notes') return '/notes'
+  if (feature === 'notes') return `/courses/${courseId}/notebook`
   return `/courses/${courseId}/${feature}`
 }
 
@@ -104,10 +107,10 @@ export function AppLayout() {
   const showAssistantDock = !isHome && !isAssistantPage
   const activeFeature = location.pathname.split('/')[3] as Feature | undefined
   const isCoursesPage = location.pathname === '/courses' || /^\/courses\/[^/]+$/.test(location.pathname)
-  const isNotesLibrary = location.pathname === '/notes' || location.pathname.startsWith('/courses/') && location.pathname.includes('/notes/')
+  const isNotesLibrary = location.pathname === '/notes' || location.pathname.startsWith('/courses/') && (location.pathname.includes('/notes/') || location.pathname.endsWith('/notebook'))
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('notebuddy.sidebar-collapsed') === 'true')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => noteDirty && currentLocation.pathname !== nextLocation.pathname)
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => shouldBlockNoteNavigation(noteDirty, currentLocation, nextLocation))
 
   useEffect(() => {
     if (!noteDirty) return
@@ -210,7 +213,7 @@ export function AppLayout() {
         confirmLabel="放弃草稿并离开"
         cancelLabel="继续编辑"
         tone="danger"
-        onConfirm={() => blocker.proceed()}
+        onConfirm={() => { setEditingNote(false); blocker.proceed() }}
         onCancel={() => blocker.reset()}
       />}
     </div>

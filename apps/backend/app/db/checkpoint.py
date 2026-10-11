@@ -7,6 +7,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,14 +29,14 @@ def create_checkpoint(data_dir: Path, destination: Path) -> Path:
         raise FileExistsError(destination)
     destination.mkdir(parents=True)
     try:
-        with sqlite3.connect(database) as source, sqlite3.connect(
+        with closing(sqlite3.connect(database)) as source, closing(sqlite3.connect(
             destination / "notebook.sqlite3"
-        ) as target:
+        )) as target:
             source.backup(target)
         originals = destination / "originals"
         originals.mkdir()
         files = []
-        with sqlite3.connect(destination / "notebook.sqlite3") as snapshot:
+        with closing(sqlite3.connect(destination / "notebook.sqlite3")) as snapshot:
             has_materials = snapshot.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='materials'"
             ).fetchone()
@@ -72,7 +73,7 @@ def verify_checkpoint(checkpoint: Path) -> dict:
     database = checkpoint / "notebook.sqlite3"
     if manifest["format"] != 1 or _sha256(database) != manifest["database_sha256"]:
         raise ValueError("Checkpoint database hash mismatch")
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         if connection.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
             raise ValueError("Checkpoint database integrity check failed")
     for entry in manifest["originals"]:

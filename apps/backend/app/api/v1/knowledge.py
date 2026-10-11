@@ -11,7 +11,9 @@ from app.db.models import (
     KnowledgeEdge,
     KnowledgeNode,
     KnowledgeProposal,
+    Material,
     MaterialPage,
+    Note,
     PageBlock,
     SourceRef,
 )
@@ -64,12 +66,19 @@ def get_knowledge_graph(course_id: str, db: Session = Depends(get_db)) -> Knowle
                         page_number=source.page_block.page.page_number,
                     )
                     for source in node.source_refs
-                    if source.status == "active" and source.page_block.page.is_active
+                    if source.status == "active" and source.page_block.page.is_active and source.page_block.page.material.deleted_at is None
                 ],
             )
             for node in nodes
         ],
         edges=[KnowledgeEdgeRead.model_validate(edge) for edge in edges],
+        occurrences=[{
+            "id": note.id, "note_id": note.id, "knowledge_node_id": note.knowledge_node_id,
+            "material_id": note.material_id, "section_key": note.section_key,
+            "section_order": note.section_order, "title": note.title,
+        } for note in db.scalars(select(Note).outerjoin(Material, Note.material_id == Material.id)
+                                .where(Note.course_id == course_id, Material.deleted_at.is_(None))
+                                .order_by(Material.chapter_order, Note.section_order, Note.id)).all()],
     )
 
 

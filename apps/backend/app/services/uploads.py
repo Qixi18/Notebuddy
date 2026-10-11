@@ -8,11 +8,12 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from zipfile import BadZipFile, ZipFile
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import Material, ProcessingJob, new_id
+from app.notes.notebook import bump_order_revision
 
 
 class UploadRejected(ValueError):
@@ -102,6 +103,9 @@ def ingest_document(
         if duplicate is not None and not allow_duplicate:
             raise UploadRejected(f"该课程已上传相同文件：{duplicate.lecture_title}。如需作为新讲次导入，请确认。", 409)
         material_id = new_id()
+        # Serialize chapter allocation with reorders and other uploads.
+        bump_order_revision(db, course_id)
+        last_order = db.scalar(select(func.max(Material.chapter_order)).where(Material.course_id == course_id))
         destination = settings.originals_dir / f"{material_id}{extension}"
         os.replace(temporary, destination)
         temporary = None
@@ -112,6 +116,7 @@ def ingest_document(
             original_filename=Path(filename).name[:255], stored_filename=destination.name,
             media_type=media_type, size_bytes=size, content_hash=content_hash,
             status="pending",
+            chapter_order=0 if last_order is None else last_order + 1,
         )
         job = ProcessingJob(material_id=material_id, kind="parse_material", idempotency_key=key)
         db.add_all([material, job])

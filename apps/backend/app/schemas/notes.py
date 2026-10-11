@@ -11,6 +11,9 @@ class NoteRead(BaseModel):
     id: str
     course_id: str
     knowledge_node_id: str
+    material_id: str | None = None
+    section_key: str | None = None
+    section_order: int = 0
     title: str
     content_markdown: str
     content_origin: str

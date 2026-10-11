@@ -32,6 +32,25 @@ from app.services.provider_audit import (
 ALLOWED_RELATIONS = {"related", "prerequisite", "deepens"}
 
 
+def find_node_by_name(db: Session, course_id: str, name: str) -> KnowledgeNode | None:
+    """Compatibility lookup using the same normalization as candidate matching."""
+    normalized = normalize_name(name)
+    if not normalized:
+        return None
+    return next((node for node in db.scalars(select(KnowledgeNode).where(
+        KnowledgeNode.course_id == course_id
+    )).all() if normalize_name(node.name) == normalized), None)
+
+
+def find_or_create_node(db: Session, course_id: str, name: str, summary: str = "") -> KnowledgeNode:
+    node = find_node_by_name(db, course_id, name)
+    if node is None:
+        node = KnowledgeNode(course_id=course_id, name=clean_title(name), summary=summary)
+        db.add(node)
+        db.flush()
+    return node
+
+
 def extract_material_knowledge(db: Session, material_id: str) -> list[KnowledgeNode]:
     material = db.scalar(
         select(Material)
@@ -66,7 +85,9 @@ def extract_material_knowledge(db: Session, material_id: str) -> list[KnowledgeN
         candidates = find_candidates(db, course_id=material.course_id, name=title, summary=summary)
         best = candidates[0] if candidates else None
         exact_candidate = bool(best and normalize_name(best.node.name) == normalize_name(title))
-        if best and best.score >= 0.72 and not exact_candidate:
+        similar_candidate = bool(best and best.score >= 0.72 and not exact_candidate)
+        node = best.node if exact_candidate else find_or_create_node(db, material.course_id, title, summary)
+        if similar_candidate:
             create_knowledge_proposal(
                 db,
                 course_id=material.course_id,
@@ -78,21 +99,9 @@ def extract_material_knowledge(db: Session, material_id: str) -> list[KnowledgeN
                 rationale=f"候选知识点“{best.node.name}”与新页面相似；名称不同，不自动合并。",
                 source_ids=[source.id for source in source_refs],
                 target_node_id=best.node.id,
+                source_node_id=node.id,
                 proposed_delta={"summary": summary, "page_number": page.page_number},
             )
-            # Keep the source page searchable while requiring a person to decide
-            # whether the new material deepens the existing node.
-            continue
-        node = best.node if exact_candidate else db.scalar(
-            select(KnowledgeNode).where(
-                KnowledgeNode.course_id == material.course_id,
-                KnowledgeNode.name == title,
-            )
-        )
-        if node is None:
-            node = KnowledgeNode(course_id=material.course_id, name=title)
-            db.add(node)
-            db.flush()
 
         node.summary = summary or node.summary
         add_unique_sources(node.source_refs, source_refs)
@@ -104,7 +113,10 @@ def extract_material_knowledge(db: Session, material_id: str) -> list[KnowledgeN
             formulas=as_text_list(draft.get("formulas")),
             source_refs=source_refs,
         )
-        ensure_note(db, material.course_id, node, note_content, source_refs)
+        ensure_note(db, material.course_id, node, note_content, source_refs,
+                    material_id=material.id,
+                    section_key=page.stable_location_key or f"page:{page.page_number}",
+                    section_order=page.page_number)
         create_knowledge_proposal(
             db,
             course_id=material.course_id,
@@ -209,7 +221,6 @@ def extract_page_draft(
                     status=provider_status_from_error(exc),
                     error_type=type(exc).__name__,
                 )
-            pass
     return fallback_page_draft(title, text)
 
 
@@ -232,12 +243,39 @@ def ensure_note(
     node: KnowledgeNode,
     content: str,
     source_refs: list[SourceRef],
+    *,
+    material_id: str | None = None,
+    section_key: str | None = None,
+    section_order: int = 0,
 ) -> Note:
-    note = node.note
+    db.flush()
+    filters = [Note.course_id == course_id]
+    if material_id is None:
+        filters.extend([Note.material_id.is_(None), Note.knowledge_node_id == node.id])
+    else:
+        if not section_key:
+            raise ValueError("Lecture notes require a stable section key")
+        material = db.get(Material, material_id)
+        if material is None or material.course_id != course_id or node.course_id != course_id:
+            raise ValueError("Note, concept and material must belong to the same course")
+        filters.extend([Note.material_id == material_id, Note.section_key == section_key])
+    note = db.scalar(select(Note).where(*filters).order_by(Note.created_at, Note.id))
+    if note is None and material_id is not None:
+        migrated = db.scalars(select(Note).where(
+            Note.course_id == course_id, Note.material_id == material_id,
+            Note.knowledge_node_id == node.id, Note.section_order == section_order,
+            Note.section_key.like("legacy:%"),
+        )).all()
+        if len(migrated) == 1:
+            note = migrated[0]
+            note.section_key = section_key
     if note is None:
         note = Note(
             course_id=course_id,
             knowledge_node_id=node.id,
+            material_id=material_id,
+            section_key=section_key,
+            section_order=section_order,
             title=node.name,
             content_markdown=content,
             content_origin="ai",
@@ -302,12 +340,7 @@ def ensure_relations(
         target_name = clean_title(str(relation.get("target_name") or ""))
         if relation_type not in ALLOWED_RELATIONS or not target_name or target_name == node.name:
             continue
-        target = db.scalar(
-            select(KnowledgeNode).where(
-                KnowledgeNode.course_id == course_id,
-                KnowledgeNode.name == target_name,
-            )
-        )
+        target = find_node_by_name(db, course_id, target_name)
         confidence = relation.get("confidence")
         confidence_value = float(confidence) if isinstance(confidence, (int, float)) else None
         if target is None:
