@@ -1,28 +1,30 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { api } from '../api'
 import { useWorkspace } from '../components/AppLayout'
 import { CourseContextMenu, DeleteCourseDialog, RenameCourseDialog, type ContextMenuState } from '../CourseContextMenu'
-import type { Course } from '../types'
 
 export function CourseLibraryPage() {
   const { courses, coursesLoading, createCourse, refreshCourses } = useWorkspace()
   const navigate = useNavigate()
+  const location = useLocation()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string>()
-  const [deletedCourses, setDeletedCourses] = useState<Course[]>([])
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
   const [courseAction, setCourseAction] = useState<{ kind: 'rename' | 'delete'; courseId: string; courseName: string }>()
   const [courseActionSaving, setCourseActionSaving] = useState(false)
 
-  async function loadDeletedCourses() {
-    try { setDeletedCourses(await api.listDeletedCourses()) } catch { setDeletedCourses([]) }
-  }
-
-  useEffect(() => { void loadDeletedCourses() }, [])
+  // 侧边栏「新建」跳到本页并带上该 state，用来直接打开新建课程弹窗。
+  useEffect(() => {
+    const state = location.state as { openCreateCourse?: boolean } | null
+    if (!state?.openCreateCourse) return
+    setError(undefined)
+    setDialogOpen(true)
+    navigate('/courses', { replace: true, state: null })
+  }, [location.state, navigate])
 
   async function handleCreateCourse(event: FormEvent) {
     event.preventDefault()
@@ -60,27 +62,21 @@ export function CourseLibraryPage() {
     setError(undefined)
     try {
       await api.deleteCourse(courseAction.courseId)
-      await Promise.all([refreshCourses(), loadDeletedCourses()])
+      await refreshCourses()
       setCourseAction(undefined)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '课程移入回收站失败')
     } finally { setCourseActionSaving(false) }
   }
 
-  async function handleRestoreCourse(course: Course) {
-    try {
-      await api.restoreCourse(course.id)
-      await Promise.all([refreshCourses(), loadDeletedCourses()])
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '课程恢复失败')
-    }
-  }
-
   return (
     <section className="course-library page-enter" aria-labelledby="course-library-title">
       <header className="course-library-heading">
         <div><h1 id="course-library-title">课程</h1><p>按课程整理资料、笔记与知识结构。</p></div>
-        <button className="primary-button" type="button" onClick={() => { setError(undefined); setDialogOpen(true) }}>＋ 新建课程</button>
+        <div className="course-library-heading-actions">
+          <Link className="secondary-button link-button" to="/recycle">回收站</Link>
+          <button className="primary-button" type="button" onClick={() => { setError(undefined); setDialogOpen(true) }}>＋ 新建课程</button>
+        </div>
       </header>
 
       {coursesLoading ? <p className="course-library-state" role="status">正在读取课程…</p> : courses.length ? (
@@ -98,12 +94,6 @@ export function CourseLibraryPage() {
       )}
 
       {error && <p className="form-error" role="alert">{error}</p>}
-      {deletedCourses.length > 0 && <section className="deleted-course-list" aria-label="已删除课程">
-        <h2>回收站</h2>
-        {deletedCourses.map((course) => <div className="deleted-course-row" key={course.id}>
-          <span>{course.name}</span><button className="ghost-button" type="button" onClick={() => void handleRestoreCourse(course)}>恢复</button>
-        </div>)}
-      </section>}
 
       <CourseContextMenu
         state={contextMenu}
