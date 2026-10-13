@@ -29,6 +29,8 @@ export type ConversationState = {
   ready: boolean
   error?: string
   selectConversation: (id: string) => Promise<void>
+  /** 开一段新对话（悬浮坞的「新建对话」）。后端没有删除接口，所以用新建代替清空 */
+  startNewConversation: () => Promise<void>
   /** 发送提问；返回 false 表示未发出（调用方可把文本还回输入框） */
   ask: (text: string, scope?: AskScope) => Promise<boolean>
 }
@@ -110,6 +112,30 @@ export function useConversation(
     }
   }, [])
 
+  /* 悬浮坞的「新建对话」：后端只有会话级接口，没有单条消息删除，
+     因此「清空」等价于开一段新会话，旧会话仍可在答疑页的历史里找回 */
+  const startNewConversation = useCallback(async (): Promise<void> => {
+    const requestCourseId = courseId
+    if (!requestCourseId || busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setError(undefined)
+    try {
+      const created = await api.createConversation(requestCourseId)
+      if (courseRef.current !== requestCourseId) return
+      setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)])
+      setConversationId(created.id)
+      setHistory([])
+    } catch (cause) {
+      if (courseRef.current === requestCourseId) {
+        setError(cause instanceof Error ? cause.message : '新建对话失败')
+      }
+    } finally {
+      busyRef.current = false
+      if (courseRef.current === requestCourseId) setBusy(false)
+    }
+  }, [courseId])
+
   /* 会话尚未建立就发问时补建一个（悬浮坞可能在异步建会话完成前就提交） */
   const ensureConversation = useCallback(async (): Promise<string | undefined> => {
     if (!courseId) return undefined
@@ -184,5 +210,5 @@ export function useConversation(
     [history, conversationId, greeting],
   )
 
-  return { conversations, conversationId, messages, busy, ready, error, selectConversation, ask }
+  return { conversations, conversationId, messages, busy, ready, error, selectConversation, startNewConversation, ask }
 }

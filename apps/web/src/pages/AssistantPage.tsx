@@ -8,20 +8,8 @@ import { featurePath, useWorkspace } from '../components/AppLayout'
 import { SourceCard } from '../components/SourceCard'
 import { TeacherCharacter, type TeacherStatus } from '../components/TeacherCharacter'
 import { teacherPersonaMeta } from '../features/persona/personas'
+import { modeLabels, noEvidenceLabels } from '../features/assistant/answerMeta'
 import { api } from '../api'
-
-/* 回答模式标签，取值与后端 app.ai.orchestrator 的 mode 一一对应 */
-const modeLabels: Record<string, string> = {
-  'deepseek-rag': 'AI 生成 · 参考当前课程来源',
-  'persona-general': '未匹配课程资料 · 老师通用回答',
-  'local-retrieval-fallback': '本地检索结果 · 模型回答暂不可用',
-}
-
-const noEvidenceLabels: Record<string, string> = {
-  'persona-general': '这轮没有命中课程页面，回答只是老师的通用说明，不能当作课件依据。',
-  'no-evidence': '当前课程资料没有找到直接依据，联网补充也不可用；请缩小问题范围或先上传相关课件。',
-  'local-retrieval-fallback': '模型当前不可用，下面是分层检索得到的原文摘录。',
-}
 
 export function AssistantPage() {
   const {

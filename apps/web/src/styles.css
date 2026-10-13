@@ -58,7 +58,7 @@ a { color: inherit; text-decoration: none; }
 .course-switcher { width: 100%; min-width: 0; border: 0; color: var(--blue-ink); background: transparent; font-size: 12px; font-weight: 700; }
 .current-course-empty { width: 100%; border: 1px dashed #d5e7f4; border-radius: 11px; padding: 12px; text-align: left; color: var(--muted); background: #f9fcff; font-size: 12px; }
 .sidebar-footer { display: flex; align-items: center; gap: 8px; margin-top: auto; border-top: 1px solid var(--line); padding: 17px 7px 3px; color: #8797a8; font-size: 12px; }
-.sidebar-settings-button { margin-right: auto; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.sidebar-settings-button { display: inline-flex; align-items: center; gap: 7px; margin-right: auto; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .sidebar-settings-button:hover { color: var(--ink); }
 .deleted-course-list { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); }
 .deleted-course-list h2 { margin: 0 0 10px; color: var(--muted); font-size: 14px; }
@@ -1257,30 +1257,35 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 
 /* Accepted NoteBuddy shell: a working navigation rail, central workspace and course assistant. */
 .app-shell { transition: grid-template-columns .2s ease; }
-/* 第三列（答疑坞）加宽到 300px：字号调大后需要更宽的行长，否则每行只放得下十几个字 */
-.app-shell-with-assistant { grid-template-columns: 236px minmax(0,1fr) 300px; }
+/* 第三列（答疑坞）：宽度由外壳上的 --dock-w 驱动，拖拽时正文随之让位（详见文件末尾的悬浮坞区块） */
+.app-shell-with-assistant { grid-template-columns: 236px minmax(0,1fr) var(--dock-w, 340px); }
 .app-shell-sidebar-collapsed { grid-template-columns: 76px minmax(0,1fr); }
-.app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0,1fr) 300px; }
+.app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0,1fr) var(--dock-w, 340px); }
 .app-sidebar { transition: padding .2s ease; }
 .brand-mark svg { width: 25px; fill: #8aaf78; stroke: #e6f0df; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.sidebar-collapse-toggle { display: flex; min-height: 34px; align-items: center; gap: 8px; border: 1px solid #e5e5d9; border-radius: 9px; margin: 15px 1px 12px; padding: 5px 9px; color: #727d70; background: transparent; font-size: 11px; text-align: left; }
-.sidebar-collapse-toggle:hover { color: #315e43; background: #f1f4ed; }
-.sidebar-collapse-toggle > span:first-child { display: grid; width: 18px; flex: none; place-items: center; font-size: 18px; line-height: 1; }
+/* 侧边栏顶部：品牌块靠左、收起按钮贴右上角。按钮是 30×30 方形纯图标，不带文字 */
+.sidebar-header { display: flex; align-items: center; gap: 8px; }
+.sidebar-header .brand-lockup { min-width: 0; flex: 1; }
+.sidebar-collapse-toggle { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border: 1px solid #e5e5d9; border-radius: 9px; margin: 0; padding: 0; color: #727d70; background: transparent; font-size: 16px; line-height: 1; transition: background .16s ease, border-color .16s ease, color .16s ease; }
+.sidebar-collapse-toggle:hover { border-color: #cfd8c8; color: #315e43; background: #f1f4ed; }
+/* 收起态下 76px 宽放不下「左品牌 + 右按钮」两个方块，改为纵向堆叠（品牌在上、按钮在下） */
+.app-shell-sidebar-collapsed .sidebar-header { flex-direction: column; gap: 7px; }
 .app-shell-sidebar-collapsed .app-sidebar { align-items: stretch; padding-inline: 10px; }
 .app-shell-sidebar-collapsed .brand-lockup { justify-content: center; padding-inline: 0; }
 .app-shell-sidebar-collapsed .brand-lockup > span:last-child,
 .app-shell-sidebar-collapsed .sidebar-section-label,
 .app-shell-sidebar-collapsed .sidebar-link > span:last-child,
-.app-shell-sidebar-collapsed .sidebar-collapse-label,
 .app-shell-sidebar-collapsed .sidebar-course-block > .sidebar-section-label,
 .app-shell-sidebar-collapsed .sidebar-course-block .course-dot,
-.app-shell-sidebar-collapsed .sidebar-course-block .course-switcher,
-.app-shell-sidebar-collapsed .sidebar-footer:not(:has(.local-status-dot)) { display: none; }
+.app-shell-sidebar-collapsed .sidebar-course-block .course-switcher { display: none; }
 .app-shell-sidebar-collapsed .sidebar-link,
 .app-shell-sidebar-collapsed .sidebar-collapse-toggle { justify-content: center; padding-inline: 0; }
 .app-shell-sidebar-collapsed .sidebar-course-block { margin-top: 0; }
 .app-shell-sidebar-collapsed .course-switcher-label { justify-content: center; padding: 10px 0; }
-.app-shell-sidebar-collapsed .sidebar-footer { justify-content: center; padding-inline: 0; font-size: 0; }
+/* 收起态页脚只剩「设置」，居中对齐并只留图标（76px 放不下「⚙ 设置」） */
+.app-shell-sidebar-collapsed .sidebar-footer { justify-content: center; padding-inline: 0; }
+.app-shell-sidebar-collapsed .sidebar-settings-button { margin-right: 0; }
+.app-shell-sidebar-collapsed .sidebar-settings-label { display: none; }
 .app-shell-sidebar-collapsed .home-sidebar-doodle { display: none; }
 .assistant-dock { position: sticky; top: 0; display: flex; height: 100vh; min-height: 560px; flex-direction: column; overflow: hidden; border-left: 1px solid #e5e5d9; padding: 22px 16px 15px; background: #fbfaf5; }
 .assistant-dock-heading { display: flex; align-items: center; gap: 10px; }
@@ -1291,7 +1296,8 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 /* 侧边答疑坞立绘：舞台高度由 --dock-art-h 统一派生，角色宽高与光晕随之等比缩放。
    容器高度 = 舞台 + 名牌空间，立绘因此能真正长到舞台高度（过去被 48px 头像的
    .teacher-character-compact 舞台高度覆盖，只画了 67px，缩在框里显得很小）。 */
-.assistant-dock-teacher { --dock-art-h: clamp(150px, 26vh, 208px); position: relative; display: grid; height: calc(var(--dock-art-h) + 38px); flex: none; place-items: center; overflow: hidden; border-radius: 17px; margin: 15px 0; background: linear-gradient(180deg,#f3f1f5,#fff 82%); }
+/* 立绘高度收了一档：坞里新增了上下文行 / 作用范围 / 快捷提示，纵向空间要让给它们 */
+.assistant-dock-teacher { --dock-art-h: clamp(104px, 17vh, 148px); position: relative; display: grid; height: calc(var(--dock-art-h) + 28px); flex: none; place-items: center; overflow: hidden; border-radius: 17px; margin: 12px 0; background: linear-gradient(180deg,#f3f1f5,#fff 82%); }
 .assistant-dock-teacher .teacher-character { width: calc(var(--dock-art-h) * 0.84); height: 100%; }
 .assistant-dock-teacher .teacher-character-halo { top: calc(var(--dock-art-h) * 0.09); width: calc(var(--dock-art-h) * 0.78); height: calc(var(--dock-art-h) * 0.78); border: 0; background: radial-gradient(circle,#fff,#eef0f2 78%,transparent); box-shadow: none; }
 .assistant-dock-teacher .teacher-character-halo::after { display: none; }
@@ -1333,11 +1339,19 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .assistant-dock-answer .katex-display { overflow-x: auto; overflow-y: hidden; margin: .6em 0; }
 .assistant-dock-message > span { display: block; margin-top: 6px; color: #798872; font-size: 10.5px; }
 .assistant-dock-form { flex: none; border-top: 1px solid #e6e6dc; padding-top: 10px; }
-.assistant-dock-form textarea { width: 100%; min-height: 62px; resize: vertical; border: 1px solid #e2e5dc; border-radius: 10px; padding: 9px 10px; color: #405143; background: #fffefa; font-size: 12.5px; line-height: 1.55; }
-.assistant-dock-form > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.assistant-dock-form textarea { width: 100%; min-height: 58px; resize: vertical; border: 1px solid #e2e5dc; border-radius: 10px; padding: 9px 10px; color: #405143; background: #fffefa; font-size: 12.5px; line-height: 1.55; }
+/* 底部三键：新建对话 / 写入当前笔记（次要，描边） + 发送（主要，实底，靠右） */
+.assistant-dock-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.assistant-dock-actions > button { min-height: 34px; border-radius: 9px; padding: 0 11px; font-size: 12px; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.assistant-dock-ghost { border: 1px solid #e2e5dc; color: #5d6b5c; background: #fffefa; }
+.assistant-dock-ghost:hover:not(:disabled) { border-color: #c9d6c4; color: #315e43; background: #f1f4ed; }
+.assistant-dock-send { margin-left: auto; border: 0; color: #fff; background: #507958; }
+.assistant-dock-send:hover:not(:disabled) { background: #436a4c; }
+.assistant-dock-actions > button:disabled { cursor: not-allowed; opacity: .5; }
+.assistant-dock-links { margin-top: 6px; text-align: right; }
 .assistant-dock-form a { color: #6c8067; font-size: 11.5px; }
-.assistant-dock-form button { min-height: 38px; border: 0; border-radius: 9px; padding: 0 14px; color: white; background: #507958; font-size: 12.5px; }
-.assistant-dock-form button:disabled { opacity: .55; }
+.assistant-dock-status { margin-top: 7px; border-radius: 8px; padding: 7px 9px; color: #4f6a52; background: #eef3ea; font-size: 11.5px; line-height: 1.55; }
+.assistant-dock-status-error { color: #8b4e42; background: #fdf2ef; }
 .assistant-dock-empty { margin-top: auto; margin-bottom: auto; color: #7f897d; font-size: 13px; line-height: 1.7; }
 .assistant-dock-empty .text-button { display: inline-flex; margin-top: 10px; }
 
@@ -1549,15 +1563,17 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 }
 
 @media (max-width: 1150px) {
-  .app-shell-with-assistant { grid-template-columns: 210px minmax(0,1fr) 262px; }
-  .app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0,1fr) 262px; }
+  .app-shell-with-assistant { grid-template-columns: 210px minmax(0,1fr) var(--dock-w, 300px); }
+  .app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0,1fr) var(--dock-w, 300px); }
   .assistant-dock { padding-inline: 12px; }
   .notes-bookshelf { grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 14px; }
   .note-book, .book-create-tile { min-height: 225px; }
 }
 @media (max-width: 920px) {
   .app-shell-with-assistant, .app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 210px minmax(0,1fr); }
-  .assistant-dock { display: none; }
+  /* 窄屏没有第三列的位置：抽屉改为右侧浮层，这样全局悬浮球在任何宽度下都不是死按钮 */
+  .assistant-dock { position: fixed; top: 0; right: 0; bottom: 0; z-index: 80; width: min(var(--dock-w, 340px), 88vw); box-shadow: -14px 0 34px rgba(47,66,48,.16); }
+  .assistant-dock-grip { display: none; }
   .app-shell-sidebar-collapsed, .app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0,1fr); }
   .course-workspace-heading { align-items: flex-start; flex-direction: column; }
   .note-reader-workspace { grid-template-columns: minmax(0,1fr); }
@@ -1571,9 +1587,7 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
   .app-shell-sidebar-collapsed .brand-lockup > span:last-child,
   .app-shell-sidebar-collapsed .sidebar-section-label,
   .app-shell-sidebar-collapsed .sidebar-link > span:last-child,
-  .app-shell-sidebar-collapsed .sidebar-collapse-label,
   .app-shell-sidebar-collapsed .sidebar-footer { display: none; }
-  .app-shell-sidebar-collapsed .sidebar-collapse-toggle { flex: none; width: 35px; margin: 0 3px; }
   .app-shell-sidebar-collapsed .sidebar-link { min-width: 34px; }
   .notes-library { padding-top: 0; }
   .notes-library-heading { margin-top: 5px; }
@@ -1870,3 +1884,63 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
   .assistant-page .assistant-workspace:has(.assistant-options[open]) { height: auto; min-height: 0; }
   .assistant-page .assistant-workspace:has(.assistant-options[open]) .assistant-conversation { max-height: 45vh; }
 }
+
+/* 扁平侧边栏：主导航容器 + 课程页头部动作区 */
+.sidebar-nav { display: flex; flex-direction: column; }
+.course-library-heading-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+/* ==========================================================================
+   悬浮答疑坞：右下悬浮球 + 可拉伸的挤压式抽屉
+   参考 notebuddy_myself 的抽屉形态：抽屉不是浮层遮罩，而是网格的第三列；
+   宽度写在 --dock-w 上，拖分界条即改这一格变量，正文自动让位、不遮挡。
+   ========================================================================== */
+
+/* 拖拽期间关掉宽度过渡（否则宽度永远落后鼠标半个身位），并禁用选中，
+   不然往左拖会把正文一起框选进来 */
+.app-shell-dock-resizing { transition: none; user-select: none; }
+
+/* 分界条：钉在抽屉左边缘，按住左右拖动改宽；双击复位、方向键微调。
+   宽度只有 12px 且压在 padding 区里（抽屉是 overflow:hidden，不能挂到边框外） */
+.assistant-dock-grip { position: absolute; top: 0; bottom: 0; left: 0; z-index: 6; display: flex; width: 12px; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: col-resize; touch-action: none; }
+.assistant-dock-grip i { display: block; width: 3px; height: 3px; border-radius: 50%; background: #d6d8cb; transition: background .12s; }
+.assistant-dock-grip::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: #e5e5d9; transition: background .12s, opacity .12s; }
+.assistant-dock-grip:hover i, .assistant-dock-grip:focus-visible i { background: #507958; }
+.assistant-dock-grip:hover::after, .assistant-dock-grip:focus-visible::after { background: #507958; opacity: .45; }
+.assistant-dock-grip:focus-visible { outline: none; }
+
+/* 标题行：文案块吃掉剩余宽度，收起按钮固定在右端 */
+.assistant-dock-heading > div { min-width: 0; flex: 1; }
+.assistant-dock-close { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border: 1px solid transparent; border-radius: 9px; padding: 0; color: #7d887c; background: transparent; font-size: 14px; line-height: 1; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.assistant-dock-close:hover { border-color: #e2e5dc; color: #b4544a; background: #f4f2ec; }
+.assistant-dock-close:focus-visible { outline: 2px solid #b9cdb0; outline-offset: 2px; }
+
+/* 悬浮球：全局常驻，抽屉收起时它是唯一入口，所以固定右下角 */
+.assistant-fab { position: fixed; right: 26px; bottom: 26px; z-index: 90; display: grid; width: 56px; height: 56px; place-items: center; border: 0; border-radius: 50%; padding: 0; color: #fff; background: #507958; font-size: 22px; line-height: 1; box-shadow: 0 10px 24px rgba(52, 92, 62, .3); cursor: pointer; transition: background .16s ease, transform .16s ease, box-shadow .16s ease; }
+.assistant-fab:hover { background: #436a4c; box-shadow: 0 14px 28px rgba(52, 92, 62, .34); transform: translateY(-2px); }
+.assistant-fab:active { transform: translateY(0); }
+.assistant-fab:focus-visible { outline: 2px solid #8fb98b; outline-offset: 3px; }
+.assistant-fab > span { display: block; }
+@media (max-width: 920px) { .assistant-fab { right: 18px; bottom: 18px; } }
+
+/* 悬浮坞新增区（对照 notebuddy_myself 的伴读智能体：上下文 / 作用范围 / 快捷提示 / 来源） */
+/* 上下文行：一句说清这轮问答挂在哪门课、哪个范围上 */
+.assistant-dock-context { border-radius: 8px; margin-bottom: 9px; padding: 7px 10px; color: #6a7769; background: #f1f3ec; font-size: 11.5px; line-height: 1.6; }
+.assistant-dock-context strong { color: #35553d; }
+.assistant-dock-context em { display: block; margin-top: 2px; color: #98a094; font-size: 10.5px; font-style: normal; }
+/* 作用范围：默认整门课程，可收窄到某份课件 */
+.assistant-dock-scope { display: grid; flex: none; gap: 4px; margin-bottom: 9px; color: #8b9385; font-size: 10.5px; }
+.assistant-dock-scope select { width: 100%; min-width: 0; border: 1px solid #e2e5dc; border-radius: 8px; padding: 6px 8px; color: #405143; background: #fffefa; font-size: 12px; }
+/* 回答模式：窄栏里用短标签，说清这轮有没有命中课件 */
+.assistant-dock-mode { color: #8a9a86 !important; }
+.assistant-dock-message-assistant .assistant-dock-mode::before { content: '· '; }
+/* 来源清单：窄栏里把来源卡片压紧，避免挤掉对话 */
+.assistant-dock-sources { display: grid; gap: 5px; margin-top: 8px; }
+.assistant-dock-sources > small { color: #8896a2; font-size: 10.5px; }
+.assistant-dock-sources .source-card { border-radius: 8px; padding: 6px 8px; font-size: 11px; }
+.assistant-dock-sources .source-card strong { font-size: 11.5px; }
+.assistant-dock-sources .source-card small { font-size: 10.5px; }
+/* 快捷提示：点击只填进输入框，不直接发送 */
+.assistant-dock-quick { display: flex; flex-wrap: wrap; gap: 6px; flex: none; margin-bottom: 9px; }
+.assistant-dock-quick button { border: 1px solid #e2e5dc; border-radius: 999px; padding: 5px 11px; color: #5c6f5b; background: #fffefa; font-size: 11.5px; cursor: pointer; transition: background .14s ease, color .14s ease, border-color .14s ease; }
+.assistant-dock-quick button:hover:not(:disabled) { border-color: #c9d6c4; color: #315e43; background: #f1f4ed; }
+.assistant-dock-quick button:disabled { cursor: not-allowed; opacity: .5; }

@@ -6,6 +6,7 @@ import { useConversation } from '../conversation/useConversation'
 import { useNoteEditor } from '../notes/useNoteEditor'
 import { mergeNotebookNotes } from '../notebook/navigation'
 import { useTeacherCharacter } from '../persona/useTeacherCharacter'
+import { resolveConversationCourseId } from './currentCourse'
 import type { Course, Job, KnowledgeGraph, Material, Note, Page } from '../../types'
 
 const emptyGraph: KnowledgeGraph = { nodes: [], edges: [] }
@@ -45,7 +46,13 @@ export function useWorkspaceState() {
   const course = courses.find((item) => item.id === courseId)
   const selectedNote = notes.find((note) => note.id === selectedNoteId)
   const { noteDraft, setNoteDraft, editingNote, setEditingNote, noteSaving, noteDirty, saveNote, reloadNote } = useNoteEditor(selectedNote, setNotes, setError)
-  const conversation = useConversation(courseId, teacherPersona)
+  /* 悬浮球要在任何页面都能提问，所以要有一个课程落点：URL 课程优先，
+     否则落到最近访问过的课程（详见 features/workspace/currentCourse.ts） */
+  const conversationCourseId = useMemo(
+    () => resolveConversationCourseId(courseId, courses, (key) => localStorage.getItem(key)),
+    [courseId, courses],
+  )
+  const conversation = useConversation(conversationCourseId, teacherPersona)
 
   useEffect(() => {
     if (courseId) localStorage.setItem(`notebuddy.course.${courseId}.lastVisited`, new Date().toISOString())
@@ -238,6 +245,8 @@ export function useWorkspaceState() {
     courses,
     courseId,
     course,
+    /** 会话实际挂靠的课程：URL 课程，或没有 URL 课程时的最近访问课程 */
+    conversationCourseId,
     coursesLoading,
     courseContentLoading,
     materials,
@@ -274,7 +283,8 @@ export function useWorkspaceState() {
     saveNote,
     refreshCourses,
     refreshCurrentMaterials: () => courseId ? refreshMaterials(courseId) : Promise.resolve(),
-  }), [courses, courseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, teacherPersona, conversation, busy, noteSaving, noteDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
+    refreshCurrentNotes: () => courseId ? refreshNotes(courseId) : Promise.resolve(),
+  }), [courses, courseId, conversationCourseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, teacherPersona, conversation, busy, noteSaving, noteDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
 
   return workspace
 }
