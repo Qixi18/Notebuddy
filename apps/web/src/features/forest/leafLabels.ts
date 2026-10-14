@@ -1,5 +1,6 @@
 import type { KnowledgeLeaf, NotebookGeometry, Point } from './treeGeometry'
 import { operationSize } from './treeInteraction'
+import { notebookControls } from './notebookControls'
 
 export type LabelRect = { x: number; y: number; width: number; height: number }
 export type LeafLabel = { leaf: KnowledgeLeaf; branch: NotebookGeometry; rect: LabelRect; showText: boolean }
@@ -23,10 +24,10 @@ export function placeLeafLabels(items: { branch: NotebookGeometry; leaves: Knowl
   const size = operationSize(zoom)
   const width = Math.max(140, size), height = size
   const gap = 6 / Math.min(1, zoom)
-  const occupied: LabelRect[] = items.flatMap(({ branch }) => [
-    { x: branch.anchor.x + (branch.side < 0 ? -112 : -22), y: branch.anchor.y + 39 - size / 2, width: 134, height: size },
-    { x: branch.anchor.x + branch.side * 16 + (branch.side < 0 ? -128 : -8), y: branch.anchor.y + 82 - size / 2, width: 136, height: size },
-  ])
+  const occupied: LabelRect[] = items.flatMap(({ branch }) => {
+    const controls = notebookControls(branch, zoom)
+    return [controls.title, controls.directory]
+  })
   const icons = items.flatMap(({ leaves }) => leaves.map(leaf => ({ id: leaf.section.id, rect: { x: leaf.x - 11, y: leaf.y - 36, width: 22, height: 22 } })))
   const wood = items.flatMap(({ branch }) => branchPoints(branch))
   const result: LeafLabel[] = []

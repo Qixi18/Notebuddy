@@ -12,9 +12,35 @@ const section = (bookId: string, slot: number): SectionRead => ({ id: `${bookId}
 const book = (slot: number, count = 7): NotebookRead => ({ id: `book-${slot}`, course_id: 'course', title: `第${slot}本数学笔记`, tree_slot: slot, order_revision: 0, chapters: [{ id: 'chapter', title: '第一讲', chapter_order: 0, status: 'completed', deleted_at: null, sections: Array.from({ length: count }, (_, index) => section(`book-${slot}`, index)) }], historical_sections: [], removed_chapters: [] })
 const relation: CrossCourseRelation = { id: 'vine', source_course_id: 'course', target_course_id: 'other', source_note_id: 'from', target_note_id: 'to', source_title: '源知识点', target_title: '目标知识点', source_course_name: '甲', target_course_name: '乙', relation_type: 'related', reason: '证据', status: 'confirmed', origin: 'ai', source_revision: 1, target_revision: 1, stale: false, source_ref_ids: [], target_ref_ids: [] }
 function tree(zoom: number, count = 7, onNote = vi.fn()) {
-  return render(<svg><WatercolorTree tree={{ course, x: 0, y: 0, seed: 1 }} branches={Array.from({ length: count }, (_, slot) => notebookGeometry(book(slot)))} zoom={zoom} pins={new Set()} growingNotes={new Set()} search="" onRoot={vi.fn()} onNotebook={vi.fn()} onNote={onNote} onExpand={vi.fn()} onExpandBooks={vi.fn()} onFocus={vi.fn()} onReveal={vi.fn()} /></svg>)
+  return render(<svg><g transform={`translate(47,91) scale(${zoom})`}><WatercolorTree tree={{ course, x: 0, y: 0, seed: 1 }} branches={Array.from({ length: count }, (_, slot) => notebookGeometry(book(slot)))} zoom={zoom} pins={new Set()} growingNotes={new Set()} search="" onRoot={vi.fn()} onNotebook={vi.fn()} onNote={onNote} onExpand={vi.fn()} onExpandBooks={vi.fn()} onFocus={vi.fn()} onReveal={vi.fn()} /></g></svg>)
 }
+function screenRect(element: Element) {
+  let x = Number(element.getAttribute('x')), y = Number(element.getAttribute('y'))
+  let width = Number(element.getAttribute('width')), height = Number(element.getAttribute('height'))
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const operations = Array.from((parent.getAttribute('transform') ?? '').matchAll(/(translate|scale)\(([^)]+)\)/g)).reverse()
+    for (const [, type, values] of operations) {
+      const [first, second] = values.split(/[,\s]+/).map(Number)
+      if (type === 'translate') { x += first; y += second ?? 0 }
+      else { x *= first; y *= second ?? first; width *= first; height *= second ?? first }
+    }
+  }
+  return { x, y, width, height }
+}
+const overlap = (a: ReturnType<typeof screenRect>, b: ReturnType<typeof screenRect>) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 describe('screen operation dimensions', () => {
+  it.each([.8, sceneInitialCamera(2, 390, 720).k])('separates all book-name and directory hit rectangles at zoom %s including SVG transforms', zoom => {
+    const { container } = tree(zoom, 6)
+    const controls = Array.from(container.querySelectorAll('.kt-book-hit, .kt-aggregate-hit'))
+    expect(controls).toHaveLength(12)
+    const rects = controls.map(screenRect)
+    for (const rect of rects) {
+      expect(rect.height).toBeGreaterThanOrEqual(44 - 1e-8)
+      expect(rect.width).toBeGreaterThanOrEqual(44 - 1e-8)
+    }
+    for (let a = 0; a < rects.length; a++) for (let b = a + 1; b < rects.length; b++) expect(overlap(rects[a], rects[b])).toBe(false)
+    for (const target of Array.from(container.querySelectorAll('.kt-leaf-hit'))) for (const rect of rects) expect(overlap(screenRect(target), rect)).toBe(false)
+  })
   it.each([[1100, 750], [390, 720]])('keeps notebook and course aggregate hits at 44px for %s×%s', (width, height) => {
     const zoom = sceneInitialCamera(2, width, height).k
     tree(zoom)
