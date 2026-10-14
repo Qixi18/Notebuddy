@@ -16,7 +16,7 @@ export const notebookApi = {
   }),
   getReadingPosition: (courseId: string, notebookId: string) => request<NotebookReadingPosition | null>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/reading-position`),
   saveReadingPosition: (courseId: string, notebookId: string, position: ReadingPositionUpdate) => request<NotebookReadingPosition>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/reading-position`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(position),
+    method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(position),
   }),
   visitCourse: (courseId: string) => request<{ last_opened_at: string }>(`/api/v1/courses/${courseId}/visit`, { method: 'POST' }),
   getNotebook: (courseId: string) => request<Notebook>(`/api/v1/courses/${courseId}/notebook`),

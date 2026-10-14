@@ -11,7 +11,7 @@ import {
 
 // Relation summaries do not carry a material ID; a section-only URL resolves the exact note in its real chapter.
 function forestNotePath(courseId: string, section: { id: string; material_id: string | null }) {
-  return `/courses/${courseId}/notebook?section=${encodeURIComponent(section.id)}`
+  return `/courses/${courseId}/notes/${encodeURIComponent(section.id)}`
 }
 
 function RelationEvidence({ relation }: { relation: CrossCourseRelation }) {

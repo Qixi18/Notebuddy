@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api'
-import type { Notebook, NotebookSection } from '../../types'
+import type { NotebookRead, NotebookSection } from '../../types'
 import {
   levelLabels,
   stateLabels,
@@ -23,7 +23,7 @@ export function ForestCoursePanel({
   onJob,
 }: {
   course: ForestCourse
-  book?: Notebook
+  book?: NotebookRead
   expanded: Set<string>
   onExpand: (id: string) => void
   onClose: () => void
@@ -102,8 +102,8 @@ export function ForestCoursePanel({
         <small>学习状态由你确认</small>
       </p>
       <div className="forest-course-reading-links">
-        <Link to={`/courses/${course.course_id}/notebook`}>整本阅读</Link>
-        <Link to={`/courses/${course.course_id}/materials`}>上传下一讲</Link>
+        {book && <Link to={`/courses/${course.course_id}/notebooks/${book.id}`}>继续阅读此本</Link>}
+        <Link to={`/courses/${course.course_id}/materials${book ? `?notebook=${book.id}` : ''}`}>上传下一讲</Link>
         <button type="button" onClick={onFit}>
           适应展开内容
         </button>

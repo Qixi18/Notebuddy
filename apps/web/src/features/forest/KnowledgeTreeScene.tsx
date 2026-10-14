@@ -19,6 +19,8 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   const slots = useRef<Record<string, SavedSlot>>(initialView?.slots ?? {})
   const restored = useRef(initialView)
   const initialized = useRef(false)
+  const contentFramed = useRef(Boolean(initialView))
+  const firstCamera = useRef<{ x: number; y: number; k: number } | undefined>(undefined)
   const [selection, setSelection] = useState<TreeContentsSelection>()
   const [revealed, setRevealed] = useState(initialView?.revealedNoteId)
   const restoredContents = useRef(initialView?.contents)
@@ -99,7 +101,17 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     return () => { observer?.disconnect(); window.removeEventListener('resize', measure) }
   }, [])
   useEffect(() => {
-    if (!viewport.ready || initialized.current) return
+    if (!viewport.ready || !courses.length) return
+    const initialCourses = positions.slice(0, sceneInitialCamera(courses.length, viewport.width, viewport.height).visibleCount)
+    const directoriesReady = initialCourses.every(tree => treeMap.has(tree.course.course_id))
+    if (initialized.current) {
+      if (contentFramed.current || !directoriesReady) return
+      contentFramed.current = true
+      const previous = firstCamera.current, current = camera.cameraRef.current
+      // Lazy content gets one first frame only while the reader has left the
+      // original camera untouched. Returning and user movement always win.
+      if (!previous || previous.x !== current.x || previous.y !== current.y || previous.k !== current.k) return
+    }
     initialized.current = true
     if (restored.current) {
       camera.move({ ...restored.current.camera, x: restored.current.camera.x + (viewport.width - restored.current.viewport.width) / 2, y: restored.current.camera.y + (viewport.height - restored.current.viewport.height) / 2 })
@@ -113,9 +125,12 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
         const rectangles = [...labels.map(label => label.rect), ...[...controls.values()].flatMap(control => [control.title, control.directory])]
         return [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...rectangles.flatMap(rect => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
       })
-      camera.move(points.length ? fitPoints(points, viewport.width, viewport.height, 30) : initialFrame)
+      const frame = points.length ? fitPoints(points, viewport.width, viewport.height, 30) : initialFrame
+      camera.move(frame)
+      firstCamera.current = frame
+      if (directoriesReady) contentFramed.current = true
     }
-  }, [viewport, camera.move, courses.length, positions, branchMap])
+  }, [viewport, camera.move, courses.length, positions, branchMap, treeMap])
   const callback = useRef(onViewChange)
   callback.current = onViewChange
   const rememberView = () => {

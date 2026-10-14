@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { featurePath, useWorkspace } from '../components/AppLayout'
 import { ProcessingStatus } from '../components/ProcessingStatus'
 import { CourseKnowledgeStructure } from './CourseKnowledgeStructure'
+import { api } from '../api'
+import type { NotebookSummary } from '../types'
+import { NotebookRootMenu } from '../features/forest/NotebookRootMenu'
 
 type CourseTab = 'overview' | 'structure'
 
@@ -12,6 +15,14 @@ export function CourseOverviewPage() {
   const { course, courseContentLoading, materials, notes, graph, job, coursesLoading, refreshCourses } = useWorkspace()
   const [activeTab, setActiveTab] = useState<CourseTab>('overview')
   const navigate = useNavigate()
+  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
+  const [rootOpen, setRootOpen] = useState(false)
+  const [bookError, setBookError] = useState<string>()
+  useEffect(() => {
+    let active = true
+    void api.listNotebooks(courseId).then(items => { if (active) setNotebooks(items) }).catch((cause: unknown) => { if (active) setBookError(cause instanceof Error ? cause.message : '笔记本列表读取失败') })
+    return () => { active = false }
+  }, [courseId])
 
   if (coursesLoading) return <div className="page-loading" role="status">正在读取课程…</div>
   if (!course) {
@@ -33,6 +44,7 @@ export function CourseOverviewPage() {
   return (
     <div className="course-overview course-workspace page-enter">
       <header className="course-workspace-heading">
+        {rootOpen && <NotebookRootMenu courseId={courseId} courseName={course.name} onClose={() => setRootOpen(false)} />}
         <div>
           <h1>{course.name}</h1>
           <p>{course.description || '把课程资料、学习笔记和知识结构整理在一起。'}</p>
@@ -57,6 +69,7 @@ export function CourseOverviewPage() {
           </div>
 
           <div className="course-entry-list">
+            <section aria-label="本课程笔记本"><h2>笔记本</h2>{notebooks.map(book => <Link className="course-entry-row" key={book.id} to={`/courses/${courseId}/notebooks/${book.id}`}>{book.title} · 继续阅读</Link>)}<button className="text-button" onClick={() => setRootOpen(true)}>新建或扩充笔记本</button>{bookError && <p role="alert">{bookError}</p>}</section>
             <Link className="course-entry-row" to={featurePath(courseId, 'materials')}>
               <span className="course-entry-icon" aria-hidden="true">▱</span>
               <span className="course-entry-copy"><strong>课程资料</strong><small>{materialCount ? `${materialCount} 份资料 · 查看解析状态与页码来源` : '上传课件并查看解析状态与页码来源'}</small></span>

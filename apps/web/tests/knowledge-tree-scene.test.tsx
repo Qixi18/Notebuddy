@@ -22,6 +22,27 @@ function mount(count = 3, extra = {}) {
   render(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: [book(count)] }]} {...callbacks} {...extra} />)
   return callbacks
 }
+it('frames courses that arrive after mount and their first lazy directories', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)
+  const callbacks = { onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn() }
+  const { container, rerender } = render(<KnowledgeTreeScene courses={[]} trees={[]} {...callbacks} />)
+  rerender(<KnowledgeTreeScene courses={[course]} trees={[]} {...callbacks} />)
+  await waitFor(() => expect(container.querySelector('[data-course-id="course"]')).toBeTruthy())
+  const before = container.querySelector('.kt-canvas > g')!.getAttribute('transform')
+  const manyBooks = Array.from({ length: 6 }, (_, slot) => ({ ...book(6, slot), id: `book-${slot}`, chapters: book(6, slot).chapters.map(ch => ({ ...ch, sections: ch.sections.map(section => ({ ...section, notebook_id: `book-${slot}`, id: `${slot}-${section.id}` })) })) }))
+  rerender(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: manyBooks }]} {...callbacks} />)
+  await waitFor(() => expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).not.toBe(before))
+})
+it('lazy directories preserve a camera the reader already moved', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)
+  const callbacks = { onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn() }
+  const { container, rerender } = render(<KnowledgeTreeScene courses={[course]} trees={[]} {...callbacks} />)
+  fireEvent.click(screen.getByRole('button', { name: '向右浏览课程' }))
+  const before = container.querySelector('.kt-canvas > g')!.getAttribute('transform')
+  rerender(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: [book(200)] }]} {...callbacks} />)
+  await waitFor(() => expect(container.querySelector('[data-note-id="note-0"]')).toBeTruthy())
+  expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(before)
+})
 describe('persistent botanical slots', () => {
   it('preserves book and Note positions on insertion, reorder, removal and restoration', () => {
     const before = notebookGeometry(book(3))

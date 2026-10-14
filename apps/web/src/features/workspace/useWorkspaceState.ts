@@ -9,6 +9,8 @@ import { useTeacherCharacter } from '../persona/useTeacherCharacter'
 import { resolveConversationCourseId } from './currentCourse'
 import type { Course, Job, KnowledgeGraph, Material, Note, Page } from '../../types'
 
+const isNotebookRoute = (path: string) => /\/notebooks?($|\/)/.test(path)
+
 const emptyGraph: KnowledgeGraph = { nodes: [], edges: [] }
 
 export function useWorkspaceState() {
@@ -55,8 +57,15 @@ export function useWorkspaceState() {
   const conversation = useConversation(conversationCourseId, teacherPersona)
 
   useEffect(() => {
-    if (courseId) localStorage.setItem(`notebuddy.course.${courseId}.lastVisited`, new Date().toISOString())
-  }, [courseId])
+    if (!courseId || !course) return
+    let active = true
+    void api.visitCourse(courseId).then(({ last_opened_at }) => {
+      if (!active) return
+      setCourses(current => current.map(item => item.id === courseId ? { ...item, last_opened_at } : item))
+      try { localStorage.setItem(`notebuddy.course.${courseId}.lastVisited`, last_opened_at) } catch { /* Server remains the recency source. */ }
+    }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '课程访问时间保存失败') })
+    return () => { active = false }
+  }, [courseId, course?.id, location.pathname])
 
   const refreshCourses = useCallback(async () => {
     try {
@@ -104,7 +113,7 @@ export function useWorkspaceState() {
   useEffect(() => { void refreshCourses() }, [refreshCourses])
 
   useEffect(() => {
-    if (courseId && !location.pathname.endsWith('/notebook')) {
+    if (courseId && !isNotebookRoute(location.pathname)) {
       void refreshNotes(courseId).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '笔记读取失败'))
     }
   }, [courseId, location.pathname, refreshNotes])
@@ -126,7 +135,7 @@ export function useWorkspaceState() {
 
     void Promise.all([
       api.listMaterials(courseId),
-      location.pathname.endsWith('/notebook') ? Promise.resolve([] as Note[]) : api.listNotes(courseId),
+      isNotebookRoute(location.pathname) ? Promise.resolve([] as Note[]) : api.listNotes(courseId),
       api.getKnowledgeGraph(courseId),
     ]).then(([nextMaterials, nextNotes, nextGraph]) => {
       if (!active) return
@@ -189,12 +198,13 @@ export function useWorkspaceState() {
     return created
   }
 
-  async function uploadMaterial(file: File, lectureTitle: string, topicTitle?: string, allowDuplicate = false) {
+  async function uploadMaterial(file: File, lectureTitle: string, topicTitle?: string, allowDuplicate = false, notebookId?: string) {
     if (!courseId) throw new Error('请先选择课程')
     try {
       setBusy(true)
       setError(undefined)
-      const result = await api.uploadMaterial(courseId, file, lectureTitle, topicTitle, allowDuplicate)
+      const result = await api.uploadMaterial(courseId, file, lectureTitle, topicTitle, allowDuplicate, crypto.randomUUID(), notebookId)
+      if (currentCourseId.current !== courseId) return
       setJob(result.job)
       setSelectedMaterialId(result.material.id)
       await refreshMaterials(courseId)
