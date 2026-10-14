@@ -1,6 +1,6 @@
 import type { KnowledgeLeaf, NotebookGeometry, Point } from './treeGeometry'
 import { operationSize } from './treeInteraction'
-import { notebookControls } from './notebookControls'
+import { projectNotebookControls, type NotebookControls } from './notebookControls'
 
 export type LabelRect = { x: number; y: number; width: number; height: number }
 export type LeafLabel = { leaf: KnowledgeLeaf; branch: NotebookGeometry; rect: LabelRect; showText: boolean }
@@ -20,12 +20,12 @@ function branchPoints(branch: NotebookGeometry): Point[] {
 
 // Business leaf positions never move. Only text and its operation rectangle are
 // assigned here, once across every visible main branch rather than per branch.
-export function placeLeafLabels(items: { branch: NotebookGeometry; leaves: KnowledgeLeaf[] }[], zoom: number): LeafLabel[] {
+export function placeLeafLabels(items: { branch: NotebookGeometry; leaves: KnowledgeLeaf[] }[], zoom: number, projected: Map<string, NotebookControls> = projectNotebookControls(items, zoom)): LeafLabel[] {
   const size = operationSize(zoom)
   const width = Math.max(140, size), height = size
   const gap = 6 / Math.min(1, zoom)
   const occupied: LabelRect[] = items.flatMap(({ branch }) => {
-    const controls = notebookControls(branch, zoom)
+    const controls = projected.get(branch.book.id)!
     return [controls.title, controls.directory]
   })
   const icons = items.flatMap(({ leaves }) => leaves.map(leaf => ({ id: leaf.section.id, rect: { x: leaf.x - 11, y: leaf.y - 36, width: 22, height: 22 } })))

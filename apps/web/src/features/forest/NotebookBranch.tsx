@@ -3,19 +3,19 @@ import { TreeAction } from './TreeAction'
 import { LeafSprite } from './TreeSprites'
 import { overviewLeaves, type NotebookGeometry } from './treeGeometry'
 import { detailInteraction, operationSize } from './treeInteraction'
-import { notebookControls } from './notebookControls'
+import type { NotebookControls } from './notebookControls'
 
 const short = (text: string, length: number) => text.length > length ? `${text.slice(0, length)}…` : text
-export const NotebookBranch = memo(function NotebookBranch({ branch, pins, search, expanded, zoom, textureId, onNotebook, onExpand, showDirectory = false }: {
+export const NotebookBranch = memo(function NotebookBranch({ branch, controls, pins, search, expanded, zoom, textureId, onNotebook, onExpand, showDirectory = false }: {
   branch: NotebookGeometry; pins: Set<string>; search: string; expanded: boolean; zoom: number; textureId: string
   onNotebook: () => void; onExpand: () => void
   showDirectory?: boolean
+  controls: NotebookControls
 }) {
   const { origin: o, anchor: a, side, book } = branch
   const leaves = overviewLeaves(branch, pins, search, expanded)
   const detail = detailInteraction(zoom)
   const hitSize = detail ? operationSize(zoom) : 44
-  const controls = notebookControls(branch, zoom)
   const tip = { x: a.x + side * 29, y: a.y - 151 }
   const taper = `M${o.x - 13},${o.y + 3} C${side * 42 - 9},${o.y - 22} ${a.x - side * 35},${a.y + 58} ${a.x - 3},${a.y} Q${a.x + side * 16},${a.y - 96} ${tip.x},${tip.y} Q${a.x + side * 16 + 4},${a.y - 96} ${a.x + 4},${a.y} C${a.x - side * 15},${a.y + 61} ${side * 52 + 9},${o.y - 12} ${o.x + 13},${o.y + 5}Z`
   return <g className="kt-branch" data-notebook-id={book.id}>
@@ -31,7 +31,7 @@ export const NotebookBranch = memo(function NotebookBranch({ branch, pins, searc
       <path d={branch.spine} stroke="transparent" strokeWidth={hitSize} fill="none" />
       <rect x={controls.title.x} y={controls.titleCenterY - 22} width="134" height="44" rx="8" fill="#f7f5ea" fillOpacity=".88" className="kt-book-plaque" />
       <rect {...controls.title} fill="transparent" className="kt-book-hit" />
-      <text x={a.x + side * 6} y={controls.titleCenterY + 4} textAnchor={side < 0 ? 'end' : 'start'} className="kt-book-title">{short(book.title, 9)}</text>
+      <text x={side < 0 ? controls.title.x + controls.title.width - 16 : controls.title.x + 28} y={controls.titleCenterY + 4} textAnchor={side < 0 ? 'end' : 'start'} className="kt-book-title">{short(book.title, 9)}</text>
     </TreeAction>
     {!detail && leaves.map(leaf => <g key={leaf.section.id} transform={`translate(${leaf.x},${leaf.y})`} pointerEvents="none" aria-hidden="true"><LeafSprite variant={leaf.variant} angle={leaf.angle} /></g>)}
     {detail && (branch.leaves.length > 6 || showDirectory) && <TreeAction label={`展开${book.title}的全部${branch.leaves.length}个知识点`} onActivate={onExpand} className="kt-aggregate" transform={`translate(${controls.directoryTranslate.x},${controls.directoryTranslate.y})`}>

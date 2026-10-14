@@ -28,6 +28,15 @@ function screenRect(element: Element) {
   return { x, y, width, height }
 }
 const overlap = (a: ReturnType<typeof screenRect>, b: ReturnType<typeof screenRect>) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+function screenCircle(element: Element) {
+  let x = Number(element.getAttribute('cx')), y = Number(element.getAttribute('cy')), radius = Number(element.getAttribute('r'))
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) for (const [, type, values] of Array.from((parent.getAttribute('transform') ?? '').matchAll(/(translate|scale)\(([^)]+)\)/g)).reverse()) {
+    const [first, second] = values.split(/[,\s]+/).map(Number)
+    if (type === 'translate') { x += first; y += second ?? 0 }
+    else { x *= first; y *= second ?? first; radius *= first }
+  }
+  return { x, y, radius }
+}
 describe('screen operation dimensions', () => {
   it.each([.8, sceneInitialCamera(2, 390, 720).k])('separates all book-name and directory hit rectangles at zoom %s including SVG transforms', zoom => {
     const { container } = tree(zoom, 6)
@@ -40,6 +49,11 @@ describe('screen operation dimensions', () => {
     }
     for (let a = 0; a < rects.length; a++) for (let b = a + 1; b < rects.length; b++) expect(overlap(rects[a], rects[b])).toBe(false)
     for (const target of Array.from(container.querySelectorAll('.kt-leaf-hit'))) for (const rect of rects) expect(overlap(screenRect(target), rect)).toBe(false)
+    for (const target of Array.from(container.querySelectorAll('.kt-leaf-icon-hit'))) for (const rect of rects) {
+      const circle = screenCircle(target)
+      const nearestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.width)), nearestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.height))
+      expect(Math.hypot(circle.x - nearestX, circle.y - nearestY)).toBeGreaterThanOrEqual(circle.radius - 1e-8)
+    }
   })
   it.each([[1100, 750], [390, 720]])('keeps notebook and course aggregate hits at 44px for %s×%s', (width, height) => {
     const zoom = sceneInitialCamera(2, width, height).k
@@ -90,6 +104,8 @@ describe('cross-branch label operation layout', () => {
       const expected = section(`book-${slot}`, index)
       const button = screen.getByRole('button', { name: `打开知识点：${expected.title}` })
       fireEvent.click(button.querySelector('.kt-leaf-hit')!)
+      expect(onNote).toHaveBeenLastCalledWith(expect.objectContaining({ id: `book-${slot}` }), expected)
+      fireEvent.click(button.querySelector('.kt-leaf-icon-hit')!)
       expect(onNote).toHaveBeenLastCalledWith(expect.objectContaining({ id: `book-${slot}` }), expected)
       const paint = button.querySelector('[data-leaf-paint]')!
       const actual = notebookGeometry(book(slot)).leaves[index]

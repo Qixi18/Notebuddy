@@ -10,6 +10,7 @@ import { TreeAction } from './TreeAction'
 import { detailInteraction, operationSize } from './treeInteraction'
 import { placeLeafLabels } from './leafLabels'
 import { KnowledgeLeaves } from './KnowledgeLeaves'
+import { projectNotebookControls } from './notebookControls'
 
 export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoom, pins, growingNotes, search, expandedBookId, onRoot, onNotebook, onNote, onExpand, onExpandBooks, onFocus, onReveal }: {
   tree: TreePosition; branches: NotebookGeometry[]; zoom: number; pins: Set<string>; growingNotes: Set<string>; search: string; expandedBookId?: string
@@ -23,7 +24,8 @@ export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoo
   const detail = detailInteraction(zoom)
   const hitSize = detail ? operationSize(zoom) : 44
   const items = visible.map(branch => ({ branch, leaves: overviewLeaves(branch, pins, search, expandedBookId === branch.book.id) }))
-  const labels = detail ? placeLeafLabels(items, zoom) : []
+  const controls = projectNotebookControls(items, zoom)
+  const labels = detail ? placeLeafLabels(items, zoom, controls) : []
   return <g transform={`translate(${tree.x},${tree.y})`} className={`kt-tree kt-tree-${course.learning_state}`} data-course-id={course.course_id}>
     <defs>
       <linearGradient id={`${id}-wood`} x1="0" y1="0" x2="1" y2=".4" gradientUnits="objectBoundingBox">
@@ -36,7 +38,7 @@ export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoo
       <path d="M-202 13Q-148-4-87 12T41 8T196 15" fill="none" stroke="#a6ad83" strokeWidth="2" opacity=".4" />
       <TrunkSprite variant={hashId(course.course_id) % 3} empty={empty} />
     </g>
-    {visible.map(branch => <NotebookBranch key={branch.book.id} branch={branch} pins={pins} search={search} expanded={expandedBookId === branch.book.id} zoom={zoom} textureId={id} onNotebook={() => onNotebook(branch.book)} onExpand={() => onExpand(branch.book)} showDirectory={labels.some(label => label.branch.book.id === branch.book.id && !label.showText) || labels.filter(label => label.branch.book.id === branch.book.id).length < overviewLeaves(branch, pins, search, expandedBookId === branch.book.id).length} />)}
+    {visible.map(branch => <NotebookBranch key={branch.book.id} branch={branch} controls={controls.get(branch.book.id)!} pins={pins} search={search} expanded={expandedBookId === branch.book.id} zoom={zoom} textureId={id} onNotebook={() => onNotebook(branch.book)} onExpand={() => onExpand(branch.book)} showDirectory={labels.some(label => label.branch.book.id === branch.book.id && !label.showText) || labels.filter(label => label.branch.book.id === branch.book.id).length < overviewLeaves(branch, pins, search, expandedBookId === branch.book.id).length} />)}
     {detail && <KnowledgeLeaves labels={labels} items={items} pins={pins} growingNotes={growingNotes} zoom={zoom} search={search} onNote={onNote} onReveal={onReveal} />}
     <TreeAction disabled={!detail} label={`课程菜单：${course.name}`} onActivate={onRoot} onFocus={onFocus} className="kt-root">
       <title>{course.name} · 新建或扩充笔记本</title>

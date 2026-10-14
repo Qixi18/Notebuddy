@@ -8,6 +8,7 @@ import { TreeContents, type TreeContentsSelection } from './TreeContents'
 import type { KnowledgeTreeSceneProps } from './sceneTypes'
 import { detailInteraction } from './treeInteraction'
 import { placeLeafLabels } from './leafLabels'
+import { projectNotebookControls } from './notebookControls'
 import './knowledge-tree.css'
 
 export type { KnowledgeTreeSceneProps, KnowledgeTreeView } from './sceneTypes'
@@ -106,8 +107,11 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
       const initialFrame = sceneInitialCamera(courses.length, viewport.width, viewport.height)
       const points = positions.slice(0, initialFrame.visibleCount).flatMap(tree => {
         const branches = (branchMap.get(tree.course.course_id) ?? []).slice(0, 6)
-        const labels = placeLeafLabels(branches.map(branch => ({ branch, leaves: overviewLeaves(branch, new Set(), '') })), initialFrame.k)
-        return [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...labels.flatMap(({ rect }) => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
+        const items = branches.map(branch => ({ branch, leaves: overviewLeaves(branch, new Set(), '') }))
+        const controls = projectNotebookControls(items, initialFrame.k)
+        const labels = placeLeafLabels(items, initialFrame.k, controls)
+        const rectangles = [...labels.map(label => label.rect), ...[...controls.values()].flatMap(control => [control.title, control.directory])]
+        return [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...rectangles.flatMap(rect => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
       })
       camera.move(points.length ? fitPoints(points, viewport.width, viewport.height, 30) : initialFrame)
     }
@@ -125,8 +129,12 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   }, [camera.camera, viewport, focusCourseId, selection, revealed])
   const focusTree = useCallback((tree: TreePosition) => {
     const branches = branchMap.get(tree.course.course_id) ?? []
-    const labels = placeLeafLabels(branches.slice(0, 6).map(branch => ({ branch, leaves: overviewLeaves(branch, new Set(), '') })), Math.max(.5, camera.cameraRef.current.k))
-    const points = [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...branches.slice(0, 6).flatMap(branch => branch.leaves.slice(0, 6).map(leaf => ({ x: tree.x + leaf.x, y: tree.y + leaf.y - 65 }))), ...labels.flatMap(({ rect }) => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
+    const items = branches.slice(0, 6).map(branch => ({ branch, leaves: overviewLeaves(branch, new Set(), '') }))
+    const zoom = Math.max(.5, camera.cameraRef.current.k)
+    const controls = projectNotebookControls(items, zoom)
+    const labels = placeLeafLabels(items, zoom, controls)
+    const rectangles = [...labels.map(label => label.rect), ...[...controls.values()].flatMap(control => [control.title, control.directory])]
+    const points = [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...branches.slice(0, 6).flatMap(branch => branch.leaves.slice(0, 6).map(leaf => ({ x: tree.x + leaf.x, y: tree.y + leaf.y - 65 }))), ...rectangles.flatMap(rect => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
     const framed = fitPoints(points, viewport.width, viewport.height, 30)
     // Course overview controls promise to enter an operable detail view. On a
     // short canvas preserve the root and let the user pan the upper canopy.
