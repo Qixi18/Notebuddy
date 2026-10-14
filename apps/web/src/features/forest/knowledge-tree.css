@@ -7,12 +7,16 @@
 .kt-camera-controls button { border-radius: 7px; font-size: 19px; }
 .kt-camera-controls button:hover { background: #e5e7d4; }
 .kt-camera-controls output { font: 13px system-ui, sans-serif; min-width: 40px; text-align: center; }
+.kt-overview-controls { position: absolute; left: 18px; bottom: 54px; max-height: 150px; max-width: calc(100% - 36px); overflow: auto; display: flex; flex-wrap: wrap; gap: 8px; padding: 6px; background: #f7f5eaee; border: 1px solid #b5b99c; border-radius: 8px; }
+.kt-overview-controls button { min-height: 44px; min-width: 44px; padding: 6px 12px; border: 1px solid #b5b99c; border-radius: 6px; color: #284b39; background: #fcfbf3; cursor: pointer; font: 13px 'Microsoft YaHei', system-ui, sans-serif; }
+.kt-overview-controls span { margin-left: 8px; color: #667d42; font-size: 11px; }
+.kt-overview-controls button:focus-visible { outline: 2px solid #6f8650; outline-offset: -2px; }
 .kt-action { cursor: pointer; outline: none; }
 .kt-action text { pointer-events: none; }
 .kt-course-title, .kt-book-title { font-family: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', serif; }
 .kt-course-title { fill: #284b39; font-size: 25px; font-weight: 700; letter-spacing: 1px; }
 .kt-book-title { fill: #284b39; font-size: 18px; font-weight: 700; }
-.kt-note-label { fill: #334b35; font: 13px 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif; }
+.kt-note-label { fill: #334b35; font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif; }
 .kt-state { fill: #54624b; font: 12px 'Microsoft YaHei', system-ui, sans-serif; }
 .kt-tree-planned .kt-branch image { opacity: .65; filter: saturate(.42); }
 .kt-tree-completed .kt-branch image { filter: saturate(1.1) brightness(.9); }

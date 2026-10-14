@@ -6,6 +6,8 @@ import { WatercolorTree } from './WatercolorTree'
 import { TreeVines } from './TreeVines'
 import { TreeContents, type TreeContentsSelection } from './TreeContents'
 import type { KnowledgeTreeSceneProps } from './sceneTypes'
+import { detailInteraction } from './treeInteraction'
+import { placeLeafLabels } from './leafLabels'
 import './knowledge-tree.css'
 
 export type { KnowledgeTreeSceneProps, KnowledgeTreeView } from './sceneTypes'
@@ -70,11 +72,15 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     for (const tree of positions) for (const branch of overviewBranches(branchMap.get(tree.course.course_id) ?? [], pins, search)) for (const leaf of overviewLeaves(branch, pins, search, selection?.notebookId === branch.book.id)) result.set(leaf.section.id, { x: tree.x + leaf.x, y: tree.y + leaf.y - 25 })
     return result
   }, [positions, branchMap, pins, search, selection?.notebookId])
+  const selectedCourses = useMemo(() => {
+    const selected = relations.find(relation => relation.id === selectedRelationId && relation.status === 'confirmed' && !relation.stale)
+    return new Set(selected ? [selected.source_course_id, selected.target_course_id] : [])
+  }, [relations, selectedRelationId])
   const visible = useMemo(() => {
     const left = -camera.camera.x / camera.camera.k - BOTANICAL_SPACING
     const right = (viewport.width - camera.camera.x) / camera.camera.k + BOTANICAL_SPACING
-    return positions.filter(tree => tree.x + 300 >= left && tree.x - 300 <= right || tree.course.course_id === focusCourseId || (branchMap.get(tree.course.course_id) ?? []).some(branch => branch.leaves.some(leaf => pins.has(leaf.section.id))))
-  }, [positions, camera.camera.x, camera.camera.k, viewport.width, focusCourseId, branchMap, pins])
+    return positions.filter(tree => tree.x + 300 >= left && tree.x - 300 <= right || selectedCourses.has(tree.course.course_id) || tree.course.course_id === focusCourseId || (branchMap.get(tree.course.course_id) ?? []).some(branch => branch.leaves.some(leaf => pins.has(leaf.section.id))))
+  }, [positions, camera.camera.x, camera.camera.k, viewport.width, focusCourseId, branchMap, pins, selectedCourses])
   const visibleKey = visible.map(tree => tree.course.course_id).join('|')
   const visibleCallback = useRef(onVisibleCourseIdsChange)
   visibleCallback.current = onVisibleCourseIdsChange
@@ -96,8 +102,16 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     initialized.current = true
     if (restored.current) {
       camera.move({ ...restored.current.camera, x: restored.current.camera.x + (viewport.width - restored.current.viewport.width) / 2, y: restored.current.camera.y + (viewport.height - restored.current.viewport.height) / 2 })
-    } else camera.move(sceneInitialCamera(courses.length, viewport.width, viewport.height))
-  }, [viewport, camera.move, courses.length])
+    } else {
+      const initialFrame = sceneInitialCamera(courses.length, viewport.width, viewport.height)
+      const points = positions.slice(0, initialFrame.visibleCount).flatMap(tree => {
+        const branches = (branchMap.get(tree.course.course_id) ?? []).slice(0, 6)
+        const labels = placeLeafLabels(branches.map(branch => ({ branch, leaves: overviewLeaves(branch, new Set(), '') })), initialFrame.k)
+        return [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...labels.flatMap(({ rect }) => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
+      })
+      camera.move(points.length ? fitPoints(points, viewport.width, viewport.height, 30) : initialFrame)
+    }
+  }, [viewport, camera.move, courses.length, positions, branchMap])
   const callback = useRef(onViewChange)
   callback.current = onViewChange
   const rememberView = () => {
@@ -111,8 +125,12 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   }, [camera.camera, viewport, focusCourseId, selection, revealed])
   const focusTree = useCallback((tree: TreePosition) => {
     const branches = branchMap.get(tree.course.course_id) ?? []
-    const points = [{ x: tree.x - 270, y: tree.y - 735 }, { x: tree.x + 270, y: tree.y + 65 }, ...branches.slice(0, 6).flatMap(branch => branch.leaves.slice(0, 6).map(leaf => ({ x: tree.x + leaf.x, y: tree.y + leaf.y - 65 })))]
-    camera.move(fitPoints(points, viewport.width, viewport.height, 30))
+    const labels = placeLeafLabels(branches.slice(0, 6).map(branch => ({ branch, leaves: overviewLeaves(branch, new Set(), '') })), Math.max(.5, camera.cameraRef.current.k))
+    const points = [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...branches.slice(0, 6).flatMap(branch => branch.leaves.slice(0, 6).map(leaf => ({ x: tree.x + leaf.x, y: tree.y + leaf.y - 65 }))), ...labels.flatMap(({ rect }) => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
+    const framed = fitPoints(points, viewport.width, viewport.height, 30)
+    // Course overview controls promise to enter an operable detail view. On a
+    // short canvas preserve the root and let the user pan the upper canopy.
+    camera.move(framed.k >= .5 ? framed : { k: .75, x: viewport.width / 2 - tree.x * .75, y: viewport.height * .82 - tree.y * .75 })
   }, [branchMap, camera.move, viewport.width, viewport.height])
   const previousFocus = useRef(initialView?.focusedCourseId)
   useEffect(() => {
@@ -127,7 +145,9 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   useEffect(() => {
     if (!viewport.ready || !pinKey || pinKey === lastPinFocus.current) return
     const points = [...pins].flatMap(id => endpoints.has(id) ? [endpoints.get(id)!] : [])
-    if (!points.length) return
+    // A selected relation can load its two directories separately. Do not mark
+    // this pin set framed until every requested real endpoint is available.
+    if (points.length !== pins.size) return
     camera.move(fitPoints(points, viewport.width, viewport.height, 100))
     lastPinFocus.current = pinKey
   }, [pinKey, pins, endpoints, viewport, camera.move])
@@ -166,7 +186,7 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
         if (event.key === 'Escape') { setRevealed(undefined); fit() }
       }}>
       <g ref={camera.sceneRef}>
-        <TreeVines relations={relations} endpoints={endpoints} selectedId={selectedRelationId} onRelation={relation => { rememberView(); onRelation(relation) }} />
+        <TreeVines relations={relations} endpoints={endpoints} zoom={camera.camera.k} selectedId={selectedRelationId} onRelation={relation => { rememberView(); onRelation(relation) }} />
         {visible.map(tree => <WatercolorTree key={tree.course.course_id} tree={tree} branches={branchMap.get(tree.course.course_id) ?? []} zoom={camera.camera.k} pins={pins} growingNotes={growingNotes} search={search} expandedBookId={selection?.notebookId}
           onRoot={() => { rememberView(); onRoot(tree.course.course_id) }} onNotebook={book => { rememberView(); onNotebook(tree.course.course_id, book.id) }} onNote={(book, section) => { rememberView(); onNote(tree.course.course_id, book.id, section) }}
           onExpand={book => openContents(tree.course.course_id, tree.course.name, book.id)} onExpandBooks={() => openContents(tree.course.course_id, tree.course.name)}
@@ -175,6 +195,9 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
       </g>
     </svg>
     {!courses.length && <p className="kt-empty">创建课程后，在树根开始第一本笔记。</p>}
+    {!detailInteraction(camera.camera.k) && courses.length > 0 && <div className="kt-overview-controls" role="group" aria-label="课程概览，选择课程放大查看">
+      {visible.map(tree => <button key={tree.course.course_id} onClick={() => { onFocusCourse?.(tree.course.course_id); focusTree(tree) }} aria-label={`聚焦课程：${tree.course.name}`}>{tree.course.name}<span>放大查看</span></button>)}
+    </div>}
     <p className="kt-hint">根部创建或扩充 · 枝干继续阅读 · 叶片打开知识点</p>
     {selection && <TreeContents selection={{ ...selection, books: allBooks(selection.courseId) }} onClose={closeContents} onNotebook={(courseId, notebookId) => { rememberView(); onNotebook(courseId, notebookId) }} onNote={(courseId, notebookId, section) => { rememberView(); onNote(courseId, notebookId, section) }} onReveal={(_courseId, noteId) => setRevealed(noteId)} />}
   </div>
