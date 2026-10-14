@@ -1,4 +1,5 @@
 import { request } from './http'
+import type { CourseTree } from '../types'
 import type {
   CrossCourseRelation,
   CurriculumImport,
@@ -14,6 +15,7 @@ const json = (body: unknown) => ({
   body: JSON.stringify(body),
 })
 export const forestApi = {
+  getCourseTree: (courseId: string) => request<CourseTree>(`${base}/courses/${courseId}/tree`),
   getForest: () => request<{ courses: ForestCourse[] }>(base),
   searchForest: (query: string) =>
     request<
@@ -21,6 +23,7 @@ export const forestApi = {
         course_id: string
         course_name: string
         note_id: string
+        notebook_id: string | null
         title: string
         material_id: string | null
       }>
