@@ -31,6 +31,7 @@ class ForestSearchRead(BaseModel):
     course_id: str
     course_name: str
     note_id: str
+    notebook_id: str | None = None
     title: str
     material_id: str | None
 

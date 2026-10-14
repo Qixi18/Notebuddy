@@ -13,6 +13,7 @@ class MaterialRead(BaseModel):
 
     id: str
     course_id: str
+    notebook_id: str | None = None
     lecture_title: str
     topic_title: str | None
     original_filename: str

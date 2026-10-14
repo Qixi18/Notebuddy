@@ -8,6 +8,7 @@ from app.api.v1.shared import ensure_course
 from app.db.database import get_db
 from app.db.models import (
     Course,
+    utc_now,
 )
 from app.forest.service import ensure_profile
 from app.schemas.api import (
@@ -23,6 +24,14 @@ from app.services.deletion import (
 )
 
 router = APIRouter()
+
+
+@router.post("/courses/{course_id}/visit")
+def visit_course(course_id: str, db: Session = Depends(get_db)) -> dict:
+    course = ensure_course(db, course_id)
+    course.last_opened_at = utc_now()
+    db.commit()
+    return {"last_opened_at": course.last_opened_at}
 
 
 @router.post("/courses", response_model=CourseRead, status_code=201)

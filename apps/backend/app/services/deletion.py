@@ -89,7 +89,7 @@ def soft_delete_material(db: Session, material: Material) -> dict:
         raise DeletionConflict("资料仍有处理任务；完成或取消后再删除")
     _checkpoint()
     material.deleted_at = datetime.now(UTC)
-    bump_order_revision(db, material.course_id)
+    bump_order_revision(db, material.course_id, material.notebook_id)
     db.commit()
     return preview
 

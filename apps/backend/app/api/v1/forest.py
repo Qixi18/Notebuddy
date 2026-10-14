@@ -8,6 +8,7 @@ from sqlalchemy import exists, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.api.v1.notebook import list_notebooks
 from app.api.v1.shared import ensure_course, ensure_note
 from app.db.database import get_db
 from app.db.models import Course, CrossCourseRelation, Note
@@ -20,6 +21,7 @@ from app.forest.service import (
     update_profile,
     visible_note_predicate,
 )
+from app.notes.notebook import notebook_outline
 from app.schemas.forest import (
     CrossCourseRelationCreate,
     CrossCourseRelationRead,
@@ -29,8 +31,16 @@ from app.schemas.forest import (
     ForestRead,
     ForestSearchRead,
 )
+from app.schemas.notebook import CourseTreeRead
 
 router = APIRouter()
+
+
+@router.get("/forest/courses/{course_id}/tree", response_model=CourseTreeRead)
+def course_tree(course_id: str, db: Session = Depends(get_db)) -> dict:
+    course = ensure_course(db, course_id)
+    return {"course_id": course_id, "notebooks": [
+        notebook_outline(db, course, book) for book in list_notebooks(course_id, db)]}
 
 
 @router.get("/forest", response_model=ForestRead)
@@ -55,6 +65,7 @@ def search_forest(
                 Note.id.label("note_id"),
                 Note.title,
                 Note.material_id,
+                Note.notebook_id,
             )
             .join(Note, Note.course_id == Course.id)
             .where(

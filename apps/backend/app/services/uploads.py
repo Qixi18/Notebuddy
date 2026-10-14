@@ -8,12 +8,12 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from zipfile import BadZipFile, ZipFile
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Material, ProcessingJob, new_id
-from app.notes.notebook import bump_order_revision
+from app.db.models import Course, Material, Notebook, ProcessingJob, new_id
+from app.notes.notebook import bump_order_revision, default_notebook
 
 
 class UploadRejected(ValueError):
@@ -66,15 +66,29 @@ def ingest_document(
     db: Session, *, course_id: str, source: object, filename: str,
     lecture_title: str, topic_title: str, media_type: str | None,
     allow_duplicate: bool = False, idempotency_key: str | None = None,
+    notebook_id: str | None = None,
 ) -> tuple[Material, ProcessingJob]:
     extension = Path(filename).suffix.lower()
     if extension not in settings.allowed_extensions:
         raise UploadRejected("当前支持 PPTX、PDF 和 DOCX 文件", 415)
-    key = hashlib.sha256(f"{course_id}:{idempotency_key}".encode()).hexdigest() if idempotency_key else None
+    course = db.get(Course, course_id)
+    if course is None or course.deleted_at is not None:
+        raise UploadRejected("课程不存在", 404)
+    if notebook_id is None:
+        books = db.scalars(select(Notebook).where(Notebook.course_id == course_id)).all()
+        if len(books) > 1:
+            raise UploadRejected("当前课程有多本笔记本，请明确选择上传目标", 422)
+        book = books[0] if books else default_notebook(db, course)
+    else:
+        book = db.get(Notebook, notebook_id)
+        if book is None or book.course_id != course_id:
+            raise UploadRejected("笔记本不存在或不属于当前课程", 404)
+    notebook_id = book.id
+    key = hashlib.sha256(f"{course_id}:{notebook_id}:{idempotency_key}".encode()).hexdigest() if idempotency_key else None
     if key:
         prior = db.scalar(select(ProcessingJob).where(ProcessingJob.idempotency_key == key))
         if prior is not None:
-            if prior.material.course_id != course_id:
+            if prior.material.course_id != course_id or prior.material.notebook_id != notebook_id:
                 raise UploadRejected("重复请求不属于当前课程", 409)
             return prior.material, prior
 
@@ -96,21 +110,32 @@ def ingest_document(
             raise UploadRejected("文件为空或无法读取", 415)
         _validate_container(temporary, extension)
         content_hash = digest.hexdigest()
+        # Recheck after taking the SQLite write lock: concurrent retries may
+        # both have passed the early lookup while streaming their files.
+        db.execute(update(Notebook).where(Notebook.id == notebook_id).values(
+            order_revision=Notebook.order_revision))
+        if key:
+            prior = db.scalar(select(ProcessingJob).where(ProcessingJob.idempotency_key == key))
+            if prior is not None:
+                material = prior.material
+                db.commit()
+                return material, prior
         duplicate = db.scalar(select(Material).where(
             Material.course_id == course_id, Material.content_hash == content_hash,
+            Material.notebook_id == notebook_id,
             Material.deleted_at.is_(None),
         ))
         if duplicate is not None and not allow_duplicate:
             raise UploadRejected(f"该课程已上传相同文件：{duplicate.lecture_title}。如需作为新讲次导入，请确认。", 409)
         material_id = new_id()
         # Serialize chapter allocation with reorders and other uploads.
-        bump_order_revision(db, course_id)
-        last_order = db.scalar(select(func.max(Material.chapter_order)).where(Material.course_id == course_id))
+        bump_order_revision(db, course_id, notebook_id)
+        last_order = db.scalar(select(func.max(Material.chapter_order)).where(Material.notebook_id == notebook_id))
         destination = settings.originals_dir / f"{material_id}{extension}"
         os.replace(temporary, destination)
         temporary = None
         material = Material(
-            id=material_id, course_id=course_id,
+            id=material_id, course_id=course_id, notebook_id=notebook_id,
             lecture_title=lecture_title.strip()[:200] or filename[:200],
             topic_title=topic_title.strip()[:200] or None,
             original_filename=Path(filename).name[:255], stored_filename=destination.name,

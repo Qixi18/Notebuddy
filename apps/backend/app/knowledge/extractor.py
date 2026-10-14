@@ -9,10 +9,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.ai.deepseek import DeepSeekClient, DeepSeekError
 from app.ai.prompts import build_note_extraction_messages
 from app.db.models import (
+    Course,
     KnowledgeNode,
     Material,
     MaterialPage,
     Note,
+    Notebook,
     NoteRevision,
     NoteSourceMapping,
     PageBlock,
@@ -21,6 +23,7 @@ from app.db.models import (
 from app.knowledge.matcher import find_candidates, normalize_name
 from app.knowledge.proposals import create_knowledge_proposal, create_note_suggestion
 from app.knowledge.relations import add_relation
+from app.notes.notebook import default_notebook
 from app.notes.renderer import render_note_markdown
 from app.services.provider_audit import (
     begin_call,
@@ -247,10 +250,17 @@ def ensure_note(
     material_id: str | None = None,
     section_key: str | None = None,
     section_order: int = 0,
+    notebook_id: str | None = None,
 ) -> Note:
     db.flush()
     filters = [Note.course_id == course_id]
+    if node.course_id != course_id:
+        raise ValueError("Note and concept must belong to the same course")
     if material_id is None:
+        book = db.get(Notebook, notebook_id) if notebook_id else default_notebook(db, db.get(Course, course_id))
+        if book is None or book.course_id != course_id:
+            raise ValueError("Notebook must belong to the same course")
+        notebook_id = book.id
         filters.extend([Note.material_id.is_(None), Note.knowledge_node_id == node.id])
     else:
         if not section_key:
@@ -258,11 +268,16 @@ def ensure_note(
         material = db.get(Material, material_id)
         if material is None or material.course_id != course_id or node.course_id != course_id:
             raise ValueError("Note, concept and material must belong to the same course")
+        if notebook_id is not None and notebook_id != material.notebook_id:
+            raise ValueError("Note and material must belong to the same notebook")
+        notebook_id = material.notebook_id
         filters.extend([Note.material_id == material_id, Note.section_key == section_key])
+    filters.append(Note.notebook_id == notebook_id)
     note = db.scalar(select(Note).where(*filters).order_by(Note.created_at, Note.id))
     if note is None and material_id is not None:
         migrated = db.scalars(select(Note).where(
             Note.course_id == course_id, Note.material_id == material_id,
+            Note.notebook_id == notebook_id,
             Note.knowledge_node_id == node.id, Note.section_order == section_order,
             Note.section_key.like("legacy:%"),
         )).all()
@@ -272,6 +287,7 @@ def ensure_note(
     if note is None:
         note = Note(
             course_id=course_id,
+            notebook_id=notebook_id,
             knowledge_node_id=node.id,
             material_id=material_id,
             section_key=section_key,

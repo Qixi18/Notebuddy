@@ -23,6 +23,7 @@ class CourseRead(BaseModel):
     name: str
     description: str | None
     created_at: datetime
+    last_opened_at: datetime | None = None
     deleted_at: datetime | None = None
 
 

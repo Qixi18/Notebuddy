@@ -3,7 +3,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import Column, ForeignKey, Index, String, Table, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Column,
+    ForeignKey,
+    Index,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    event,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -119,6 +131,8 @@ class Course(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     notebook_order_revision: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    last_opened_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    notebooks: Mapped[list[Notebook]] = relationship(cascade="all, delete-orphan")
 
     # 除了 materials，其余关联表只有 course_id 外键。显式声明 ORM 级联，
     # 这样即使引擎未开启 SQLite 外键（tests / 迁移脚本 / 换库），
@@ -153,12 +167,43 @@ class Course(Base):
     )
 
 
+class Notebook(Base):
+    __tablename__ = "notebooks"
+    __table_args__ = (
+        UniqueConstraint("course_id", "tree_slot", name="uq_notebooks_course_slot"),
+        Index("uq_notebooks_default", "course_id", unique=True, sqlite_where=text("is_default = 1")),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    display_order: Mapped[int] = mapped_column(default=0, server_default="0")
+    order_revision: Mapped[int] = mapped_column(default=0, server_default="0")
+    is_default: Mapped[bool] = mapped_column(default=False, server_default="0")
+    tree_slot: Mapped[int] = mapped_column(nullable=False)
+    next_note_slot: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+    reading_position: Mapped[NotebookReadingPosition | None] = relationship(cascade="all, delete-orphan")
+
+
+class NotebookReadingPosition(Base):
+    __tablename__ = "notebook_reading_positions"
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True)
+    chapter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    note_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    mode: Mapped[str] = mapped_column(String(10), nullable=False)
+    section_offset: Mapped[float] = mapped_column(default=0)
+    revision: Mapped[int] = mapped_column(default=1)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
 class Material(Base):
     __tablename__ = "materials"
     __table_args__ = (Index("ix_materials_course_id", "course_id"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    notebook_id: Mapped[str | None] = mapped_column(ForeignKey("notebooks.id"), nullable=True, index=True)
     lecture_title: Mapped[str] = mapped_column(String(200), nullable=False)
     topic_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -379,6 +424,8 @@ class Note(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    notebook_id: Mapped[str | None] = mapped_column(ForeignKey("notebooks.id"), nullable=True, index=True)
+    tree_slot: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     knowledge_node_id: Mapped[str] = mapped_column(
         ForeignKey("knowledge_nodes.id", ondelete="CASCADE")
     )
@@ -659,3 +706,46 @@ class ProviderCall(Base):
     started_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+def default_notebook_id(connection, course_id: str) -> str:
+    """Assign legacy writes a real default book without changing existing IDs."""
+    connection.execute(Course.__table__.update().where(Course.id == course_id).values(
+        notebook_order_revision=Course.notebook_order_revision))
+    book_id = connection.scalar(select(Notebook.id).where(
+        Notebook.course_id == course_id, Notebook.is_default.is_(True)))
+    if book_id is None:
+        course = connection.execute(select(Course.name, Course.notebook_order_revision).where(
+            Course.id == course_id)).one()
+        slot = connection.scalar(select(func.max(Notebook.tree_slot)).where(Notebook.course_id == course_id))
+        book_id = new_id()
+        connection.execute(Notebook.__table__.insert().values(
+            id=book_id, course_id=course_id, title=f"{course.name}·课程笔记",
+            is_default=True, tree_slot=0 if slot is None else slot + 1,
+            display_order=0 if slot is None else slot + 1,
+            order_revision=course.notebook_order_revision))
+    return book_id
+
+
+@event.listens_for(Material, "before_insert")
+@event.listens_for(Note, "before_insert")
+def assign_notebook(mapper, connection, target) -> None:
+    """Compatibility for worker and existing integrations constructing ORM rows."""
+    if isinstance(target, Note) and target.material_id:
+        material = connection.execute(select(Material.course_id, Material.notebook_id).where(
+            Material.id == target.material_id)).one()
+        if material.course_id != target.course_id:
+            raise ValueError("Note and material must belong to the same course")
+        if target.notebook_id is not None and target.notebook_id != material.notebook_id:
+            raise ValueError("Note and material must belong to the same notebook")
+        target.notebook_id = material.notebook_id
+    if target.notebook_id is None:
+        target.notebook_id = default_notebook_id(connection, target.course_id)
+    owner = connection.scalar(select(Notebook.course_id).where(Notebook.id == target.notebook_id))
+    if owner != target.course_id:
+        raise ValueError("Notebook must belong to the same course")
+    if isinstance(target, Note):
+        next_slot = connection.scalar(Notebook.__table__.update().where(Notebook.id == target.notebook_id)
+                                      .values(next_note_slot=Notebook.next_note_slot + 1)
+                                      .returning(Notebook.next_note_slot))
+        target.tree_slot = next_slot - 1
