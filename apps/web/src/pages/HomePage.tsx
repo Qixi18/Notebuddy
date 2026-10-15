@@ -67,7 +67,13 @@ function HomeScene() {
     </div>
     {vines.error && <p role="alert">{vines.error}<button onClick={() => void vines.refresh()}>重试关联</button></p>}
     {Object.values(vines.jobs).filter(job => job.status === 'failed').map(job => <p role="status" key={job.id}>{job.error_message}<button onClick={() => void api.retryForestJob(job.id).then(next => { const id = Object.keys(vines.jobs).find(id => vines.jobs[id].id === job.id); if (id) vines.track(id, next) }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '重试失败'))}>重试关联任务</button></p>)}
-    {relationsOpen && <ForestRelationsPanel relations={vines.relations} courses={forestCourses} onLocate={relation => { setSelectedRelation(relation.id); directories.load([relation.source_course_id, relation.target_course_id]); setRelationsOpen(false) }} onChange={() => { void vines.refresh(); void directories.refresh() }} onClose={() => setRelationsOpen(false)} />}
+    {relationsOpen && <ForestRelationsPanel relations={vines.relations} courses={forestCourses} onLocate={relation => {
+      if (!chosen.current?.includes(relation.source_course_id) || !chosen.current?.includes(relation.target_course_id)) {
+        navigate(`/forest?relation=${encodeURIComponent(relation.id)}`)
+        return
+      }
+      setSelectedRelation(relation.id); directories.load([relation.source_course_id, relation.target_course_id]); setRelationsOpen(false)
+    }} onChange={() => { void vines.refresh(); void directories.refresh() }} onClose={() => setRelationsOpen(false)} />}
     {(error || Object.keys(directories.errors).length > 0) && <p role="alert">{error ?? '部分课程目录读取失败。'}<button onClick={() => directories.load(Object.keys(directories.errors))}>重试目录</button></p>}
     {root && <NotebookRootMenu courseId={root} courseName={courses.find(course => course.id === root)?.name ?? '课程'} onClose={() => setRoot(undefined)} returnState={returnState} />}
     {requestedFeature && <CourseGate feature={requestedFeature} onClose={() => setRequestedFeature(undefined)} />}

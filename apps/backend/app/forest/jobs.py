@@ -126,6 +126,10 @@ def enqueue_relations(
         if pending:
             pending.source_snapshot_json = json.dumps(revisions)
             pending.idempotency_key = key
+            # The cursor belongs to the old ordered snapshot. A save or newly
+            # inserted Note can change any earlier entry, including after retry.
+            pending.completed_source_count = 0
+            pending.progress = 0
             db.flush()
             return pending
     db.execute(insert(ForestJob).values(

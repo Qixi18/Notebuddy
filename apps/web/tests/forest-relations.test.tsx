@@ -10,6 +10,7 @@ vi.mock('../src/api', () => ({
     getNotebook: vi.fn(),
     getCourseTree: vi.fn(),
     createForestRelation: vi.fn(),
+    getNoteSources: vi.fn(),
   },
 }))
 afterEach(() => {
@@ -125,4 +126,23 @@ test('manual endpoint chooser includes exact real notes in non-default books', a
   fireEvent.change(screen.getByLabelText('连接理由'), { target: { value: '两本真实笔记关联' } })
   fireEvent.click(screen.getByRole('button', { name: '建立藤蔓' }))
   await waitFor(() => expect(api.createForestRelation).toHaveBeenCalledWith(expect.objectContaining({ source_note_id: 'a-owned-note', target_note_id: 'b-owned-note' })))
+})
+
+test('source fingerprint refreshes quotes when relation note revisions and ref IDs stay unchanged', async () => {
+  let quote = '更新前真实引用'
+  vi.mocked(api.getNoteSources).mockImplementation(async id => id === 'na' ? [{ id: 'sa', quote }] as never : [])
+  const props = { relations: [{ ...relation, status: 'confirmed', evidence_fingerprint: 'old-source' } as never], courses: [], onChange: vi.fn(), onClose: vi.fn() }
+  const view = render(<ForestRelationsPanel {...props} />)
+  const expand = () => {
+    const details = screen.getByText('核对两端来源 · 2 条').closest('details')!
+    details.open = true
+    fireEvent(details, new Event('toggle'))
+  }
+  expand()
+  await screen.findByText('更新前真实引用')
+  quote = '重新解析后的当前引用'
+  view.rerender(<ForestRelationsPanel {...props} relations={[{ ...relation, status: 'confirmed', evidence_fingerprint: 'new-source' } as never]} />)
+  expand()
+  await screen.findByText('重新解析后的当前引用')
+  expect(screen.queryByText('更新前真实引用')).toBeNull()
 })

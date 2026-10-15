@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from sqlalchemy import select
 from test_forest_jobs import _newer_unrelated_notes, _notes, _run
 from test_forest_jobs import setup as forest_setup
@@ -191,3 +192,75 @@ def test_retry_replaces_obsolete_source_snapshot_after_user_save(setup, monkeypa
     db.refresh(job)
     assert job.status == 'completed'
     assert json.loads(job.source_snapshot_json)[0]['revision'] == 6
+
+
+@pytest.mark.parametrize('change', ['saved_revision', 'new_first_id'])
+def test_retry_then_pending_merge_reanalyses_changed_source_before_old_checkpoint(setup, monkeypatch, change):
+    from app.db.models import Note
+    from app.notes.service import update_note_as_user
+    _, db, factory = setup
+    notes = _notes(db)
+    _newer_unrelated_notes(db, notes[0], count=31)
+    monkeypatch.setattr(jobs.DeepSeekClient, 'configured', property(lambda self: True))
+    calls = 0
+    seen = []
+
+    def response(self, messages, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise jobs.DeepSeekError('fake interrupted second batch')
+        seen.extend((row['note_id'], row['revision']) for row in json.loads(messages[1]['content'])['source'])
+        return {'relations': []}
+
+    monkeypatch.setattr(jobs.DeepSeekClient, 'complete_json', response)
+    job = jobs.enqueue_relations(db, notes[0].course_id)
+    db.commit()
+    _run(factory, monkeypatch)
+    db.refresh(job)
+    assert job.status == 'failed' and job.completed_source_count == 30
+    jobs.retry_job(db, job)
+    first_id = json.loads(job.source_snapshot_json)[0]['note_id']
+    first = db.get(Note, first_id)
+    if change == 'saved_revision':
+        update_note_as_user(db, first, 'user saved after retry', first.revision_number)
+        expected = (first.id, first.revision_number)
+    else:
+        added = Note(id='000-new-source', course_id=first.course_id,
+                     material_id=first.material_id, knowledge_node_id=first.knowledge_node_id,
+                     title='new source before checkpoint', content_markdown='new source',
+                     source_refs=list(first.source_refs))
+        db.add(added)
+        db.flush()
+        jobs.enqueue_relations(db, first.course_id, note_ids=[added.id])
+        db.commit()
+        expected = (added.id, added.revision_number)
+    db.refresh(job)
+    assert job.completed_source_count == 0 and job.progress == 0
+    seen.clear()
+    _run(factory, monkeypatch)
+    db.refresh(job)
+    assert expected in seen
+    assert set(seen) == {(row['note_id'], row['revision']) for row in json.loads(job.source_snapshot_json)}
+    assert job.status == 'completed'
+
+
+def test_relation_response_versions_source_changes_without_note_or_ref_identity_changes(setup, monkeypatch):
+    from test_forest_jobs import _current_ai_relations
+    client, db, factory = setup
+    notes = _notes(db)
+    _current_ai_relations(monkeypatch, notes)
+    jobs.enqueue_relations(db, notes[0].course_id)
+    db.commit()
+    _run(factory, monkeypatch)
+    before = client.get('/api/v1/forest/relations').json()[0]
+    assert before['evidence_fingerprint']
+    notes[0].source_refs[0].quote = '矩阵乘法'
+    db.commit()
+    jobs.enqueue_relations(db, notes[0].course_id)
+    db.commit()
+    _run(factory, monkeypatch)
+    after = client.get('/api/v1/forest/relations').json()[0]
+    assert after['id'] == before['id'] and after['source_ref_ids'] == before['source_ref_ids']
+    assert after['source_revision'] == before['source_revision'] and not after['stale']
+    assert after['evidence_fingerprint'] != before['evidence_fingerprint']

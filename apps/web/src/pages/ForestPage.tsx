@@ -34,7 +34,7 @@ export function ForestPage() {
   const [results, setResults] = useState<SearchResult[]>([])
   const [searchError, setSearchError] = useState<string>()
   const [searching, setSearching] = useState(false)
-  const [selectedRelation, setSelectedRelation] = useState<string>()
+  const [selectedRelation, setSelectedRelation] = useState<string | undefined>(query.get('relation') ?? undefined)
   const directories = useTreeDirectories()
   const vines = useAutomaticVines(directories.watchKey, directories.settledVersion, directories.refresh)
   const { relations } = vines
@@ -55,6 +55,11 @@ export function ForestPage() {
   }, [directories.refresh, vines.refresh])
   useEffect(() => { void reload() }, [reload])
   useEffect(() => { if (query.get('course')) setFocusId(query.get('course')!) }, [query])
+  useEffect(() => { if (query.get('relation')) setSelectedRelation(query.get('relation')!) }, [query])
+  useEffect(() => {
+    const selected = relations.find(relation => relation.id === selectedRelation && relation.status === 'confirmed' && !relation.stale)
+    if (selected) directories.load([selected.source_course_id, selected.target_course_id])
+  }, [selectedRelation, relations, directories.load])
   useEffect(() => {
     let active = true
     const text = search.trim()

@@ -320,7 +320,7 @@ export function ForestRelationsPanel({
                 {relation.stale && (
                   <p className="forest-stale">笔记已修改，需重新生成并核对关联；当前不绘制藤蔓。</p>
                 )}
-                <RelationEvidence key={JSON.stringify([relation.id, relation.source_revision, relation.target_revision, relation.source_ref_ids, relation.target_ref_ids, relation.stale])} relation={relation} />
+                <RelationEvidence key={JSON.stringify([relation.id, relation.source_revision, relation.target_revision, relation.source_ref_ids, relation.target_ref_ids, relation.stale, relation.evidence_fingerprint])} relation={relation} />
                 {relation.stale && (
                   <button
                     className="forest-action"

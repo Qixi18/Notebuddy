@@ -258,6 +258,7 @@ def relation_display(db: Session, relation: CrossCourseRelation) -> dict | None:
         "origin": relation.origin,
         "activation_mode": relation.activation_mode or (
             "manual" if relation.status == "confirmed" else None),
+        "evidence_fingerprint": relation.evidence_fingerprint,
         "source_revision": relation.source_revision,
         "target_revision": relation.target_revision,
         "stale": stale,

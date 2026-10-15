@@ -78,6 +78,7 @@ class CrossCourseRelationRead(BaseModel):
     status: RelationStatus
     origin: Literal["manual", "ai"]
     activation_mode: Literal["automatic", "manual"] | None = None
+    evidence_fingerprint: str | None = None
     source_revision: int
     target_revision: int
     stale: bool
