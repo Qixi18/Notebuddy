@@ -1,12 +1,56 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { HomePage } from '../src/pages/HomePage'
 import { ForestPage } from '../src/pages/ForestPage'
-vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getForestRelations: vi.fn().mockResolvedValue([]), getCourseTree: vi.fn(), getLatestForestJob: vi.fn().mockResolvedValue(null), getForestJob: vi.fn() } }))
+import { MaterialsPage } from '../src/pages/MaterialsPage'
+vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getForestRelations: vi.fn().mockResolvedValue([]), getCourseTree: vi.fn(), getLatestForestJob: vi.fn().mockResolvedValue(null), getForestJob: vi.fn(), createNotebook: vi.fn(), listNotebooks: vi.fn(), getCapabilities: vi.fn().mockResolvedValue(undefined), listDeletedMaterials: vi.fn().mockResolvedValue([]) } }))
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); sessionStorage.clear() })
+
+test.each(['home', 'forest'])('%s root creation reaches the real upload page and returns with only the new branch growing', async mode => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)
+  const course = { id: 'c', name: '课程', created_at: '2026-10-15', last_opened_at: null }
+  const old = { id: 'old-book', course_id: 'c', title: '旧笔记本', tree_slot: 0, order_revision: 0, chapters: [{ id: 'm', title: '第一讲', status: 'completed', sections: [{ id: 'old-note', notebook_id: 'old-book', title: '旧知识点', tree_slot: 0, material_id: 'm' }] }], historical_sections: [], removed_chapters: [] }
+  const added = { ...old, id: 'new-book', title: '新增笔记本', tree_slot: 1, chapters: [] }
+  let created = false
+  vi.mocked(api.getForest).mockResolvedValue({ courses: [{ course_id: 'c', name: '课程', semester: 1, position: 0, level: 'foundation', learning_state: 'learning', prerequisites: [], revision: 0 }] } as never)
+  vi.mocked(api.getCourseTree).mockImplementation(async () => ({ course_id: 'c', notebooks: structuredClone(created ? [old, added] : [old]) }) as never)
+  vi.mocked(api.createNotebook).mockImplementation(async () => { created = true; return added as never })
+  vi.mocked(api.listNotebooks).mockImplementation(async () => structuredClone(created ? [old, added] : [old]) as never)
+  function HistoryControl() {
+    const navigate = useNavigate(), location = useLocation()
+    return <><output aria-label="当前页面">{location.pathname}{location.search}</output><button onClick={() => navigate(-1)}>浏览器返回</button></>
+  }
+  const { container } = render(<MemoryRouter initialEntries={[mode === 'home' ? '/' : '/forest']}><WorkspaceProvider value={{ course, courses: [course], coursesLoading: false, materials: [], pages: [], refreshCourses: vi.fn() } as unknown as WorkspaceContextValue}>
+    <Routes><Route path="/" element={<HomePage />} /><Route path="/forest" element={<ForestPage />} /><Route path="/courses/:courseId/materials" element={<MaterialsPage />} /></Routes><HistoryControl />
+  </WorkspaceProvider></MemoryRouter>)
+  await screen.findByRole('button', { name: '打开知识点：旧知识点' })
+  expect(container.querySelector('.kt-branch-growth')).toBeNull()
+  const leafPosition = container.querySelector('[data-note-id="old-note"] [data-leaf-paint]')!.getAttribute('transform')
+  const oldSpine = container.querySelector('.kt-branch[data-notebook-id="old-book"] .kt-book-action path')!.getAttribute('d')
+  fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
+  await waitFor(() => expect(screen.getByLabelText('知识树缩放').textContent).toBe('100%'))
+  fireEvent.click(screen.getByRole('button', { name: '课程菜单：课程' }))
+  // Root focus may bring the root into view before its menu opens.
+  const camera = container.querySelector('.kt-canvas > g')!.getAttribute('transform')
+  fireEvent.click(screen.getByRole('button', { name: '新建笔记本' }))
+  fireEvent.change(screen.getByLabelText('笔记本名称'), { target: { value: added.title } })
+  fireEvent.click(screen.getByRole('button', { name: '创建并上传' }))
+  await screen.findByRole('heading', { name: '课程资料' })
+  expect(api.createNotebook).toHaveBeenCalledExactlyOnceWith('c', added.title)
+  expect(screen.getByLabelText('当前页面').textContent).toBe('/courses/c/materials?notebook=new-book')
+  await waitFor(() => expect((screen.getByLabelText('目标笔记本') as HTMLSelectElement).value).toBe(added.id))
+  fireEvent.click(screen.getByRole('button', { name: '浏览器返回' }))
+  await screen.findByRole('button', { name: '续读笔记本：新增笔记本' })
+  const growth = container.querySelectorAll('.kt-branch-growth')
+  expect(growth).toHaveLength(1)
+  expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe(added.id)
+  expect(container.querySelector('[data-note-id="old-note"] [data-leaf-paint]')!.getAttribute('transform')).toBe(leafPosition)
+  expect(container.querySelector('.kt-branch[data-notebook-id="old-book"] .kt-book-action path')!.getAttribute('d')).toBe(oldSpine)
+  expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(camera)
+})
 test.each(['home', 'forest'])('%s grows a real generated Note in the same scene and stops polling when its pending material completes', async mode => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)

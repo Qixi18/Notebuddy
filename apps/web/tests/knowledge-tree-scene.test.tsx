@@ -44,6 +44,77 @@ it('lazy directories preserve a camera the reader already moved', async () => {
   expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(before)
 })
 describe('persistent botanical slots', () => {
+  it('adds one independently growing book branch without replacing or moving existing books and Notes', () => {
+    const first = book(3)
+    const second = { ...book(0, 1), id: 'new-book', title: '新增的笔记本' }
+    const callbacks = { onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn() }
+    const props = { courses: [course], ...callbacks }
+    const view = render(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: [first] }]} />)
+    const oldBranch = view.container.querySelector('.kt-branch[data-notebook-id="book"]')
+    const oldLeaf = view.container.querySelector('[data-note-id="note-1"]')
+    const leafPosition = oldLeaf?.querySelector('[data-leaf-paint]')?.getAttribute('transform')
+    const oldGeometry = notebookGeometry(first)
+    expect(view.container.querySelector('.kt-branch-growth')).toBeNull()
+    view.rerender(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: [first, second] }]} />)
+    expect(screen.getByRole('button', { name: '续读笔记本：新增的笔记本' })).toBeTruthy()
+    expect(view.container.querySelector('.kt-branch[data-notebook-id="book"]')).toBe(oldBranch)
+    expect(view.container.querySelector('[data-note-id="note-1"]')).toBe(oldLeaf)
+    expect(oldLeaf?.querySelector('[data-leaf-paint]')?.getAttribute('transform')).toBe(leafPosition)
+    expect(notebookGeometry(first)).toEqual(oldGeometry)
+    const growth = view.container.querySelectorAll('.kt-branch-growth')
+    expect(growth).toHaveLength(1)
+    expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe('new-book')
+    fireEvent.keyDown(screen.getByRole('button', { name: '续读笔记本：新增的笔记本' }), { key: 'Enter' })
+    expect(callbacks.onNotebook).toHaveBeenCalledExactlyOnceWith('course', 'new-book')
+    // A refreshed copy of the directory must not replay old branch growth.
+    view.rerender(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: structuredClone([first, second]) }]} />)
+    expect(view.container.querySelector('.kt-branch-growth')).toBeNull()
+    view.unmount()
+    const reloaded = render(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: [first, second] }]} />)
+    expect(reloaded.container.querySelector('.kt-branch-growth')).toBeNull()
+  })
+  it('does not replay branch growth for the first lazy directory or exceed the six-book overview', () => {
+    const callbacks = { onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn() }
+    const initialBooks = Array.from({ length: 6 }, (_, slot) => ({ ...book(0, slot), id: `book-${slot}`, title: `笔记本${slot}` }))
+    const props = { courses: [course], ...callbacks }
+    const view = render(<KnowledgeTreeScene {...props} trees={[]} />)
+    view.rerender(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: initialBooks }]} />)
+    expect(view.container.querySelector('.kt-branch-growth')).toBeNull()
+    const seventh = { ...book(0, 6), id: 'seventh', title: '第七本笔记本' }
+    view.rerender(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: [...initialBooks, seventh] }]} />)
+    expect(view.container.querySelectorAll('.kt-branch')).toHaveLength(6)
+    fireEvent.click(screen.getByRole('button', { name: '展开离散数学的全部7本笔记本' }))
+    fireEvent.click(screen.getByRole('button', { name: '第七本笔记本 · 继续阅读' }))
+    expect(callbacks.onNotebook).toHaveBeenCalledExactlyOnceWith('course', 'seventh')
+  })
+  it('compares against the saved course book baseline after returning from the upload route', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)
+    const onViewChange = vi.fn()
+    const callbacks = { onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn() }
+    const first = book(3)
+    const view = render(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: [first] }]} onViewChange={onViewChange} {...callbacks} />)
+    fireEvent.click(screen.getByRole('button', { name: '课程菜单：离散数学' }))
+    await waitFor(() => expect(onViewChange).toHaveBeenCalled())
+    const saved = onViewChange.mock.lastCall![0]
+    view.unmount() // Root menu creation navigates to the separate upload route.
+    const second = { ...book(0, 1), id: 'created-while-away', title: '返回时的新笔记本' }
+    const returned = render(<KnowledgeTreeScene courses={[course]} trees={[]} initialView={saved} onViewChange={onViewChange} {...callbacks} />)
+    returned.rerender(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: [first, second] }]} initialView={saved} onViewChange={onViewChange} {...callbacks} />)
+    const growth = returned.container.querySelectorAll('.kt-branch-growth')
+    expect(growth).toHaveLength(1)
+    expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe(second.id)
+    fireEvent.click(screen.getByRole('button', { name: '课程菜单：离散数学' }))
+    expect(onViewChange.mock.lastCall![0].knownNotebookIds.course).toEqual(['book', second.id])
+  })
+  it('shows the new branch immediately without growth motion when reduced motion is requested', () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
+    const callbacks = { onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn() }
+    const first = book(3), second = { ...book(0, 1), id: 'new', title: '新增本' }
+    const view = render(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: [first] }]} {...callbacks} />)
+    view.rerender(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: [first, second] }]} {...callbacks} />)
+    expect(screen.getByRole('button', { name: '续读笔记本：新增本' })).toBeTruthy()
+    expect(view.container.querySelector('.kt-branch-growth')).toBeNull()
+  })
   it('preserves book and Note positions on insertion, reorder, removal and restoration', () => {
     const before = notebookGeometry(book(3))
     expect(before.leaves).toHaveLength(3)

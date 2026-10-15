@@ -13,8 +13,9 @@ import { KnowledgeLeaves } from './KnowledgeLeaves'
 import { projectNotebookControls } from './notebookControls'
 import { NotebookWood } from './NotebookWood'
 
-export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoom, pins, growingNotes, search, expandedBookId, onRoot, onNotebook, onNote, onExpand, onExpandBooks, onFocus, onReveal }: {
+export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoom, pins, growingNotes, growingBooks, search, expandedBookId, onRoot, onNotebook, onNote, onExpand, onExpandBooks, onFocus, onReveal }: {
   tree: TreePosition; branches: NotebookGeometry[]; zoom: number; pins: Set<string>; growingNotes: Set<string>; search: string; expandedBookId?: string
+  growingBooks?: Set<string>
   onRoot: () => void; onNotebook: (book: NotebookRead) => void; onNote: (book: NotebookRead, section: SectionRead) => void
   onExpand: (book: NotebookRead) => void; onExpandBooks: () => void; onFocus: () => void; onReveal: (leaf: KnowledgeLeaf) => void
 }) {
@@ -51,7 +52,7 @@ export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoo
       <path d="M-119 14q-4-11-2-17m2 17q4-13 10-15M104 17q-2-13 2-21m-2 21q7-13 12-14M-68 21q-7-6-8-12m8 12q0-7 4-10" fill="none" stroke="#889365" strokeWidth="1.2" opacity=".48" />
       <path d="M-150 23q4-8 14-5l6 7q-11 4-20-2M130 27q4-8 13-6l5 6q-9 3-18 0" fill="#b7b5a2" stroke="#969981" strokeWidth=".6" opacity=".48" />
     </g>
-    {items.map(({ branch, leaves }) => <NotebookWood key={branch.book.id} branch={branch} leaves={leaves} textureId={id} />)}
+    {items.map(({ branch, leaves }) => <NotebookWood key={branch.book.id} branch={branch} leaves={leaves} textureId={id} growing={growingBooks?.has(branch.book.id)} />)}
     <g aria-hidden="true" pointerEvents="none" mask={empty ? undefined : `url(#${id}-trunk-junction)`}><TrunkSprite variant={trunkVariant} empty={empty} /></g>
     {visible.map(branch => <NotebookBranch key={branch.book.id} branch={branch} controls={controls.get(branch.book.id)!} pins={pins} search={search} expanded={expandedBookId === branch.book.id} zoom={zoom} onNotebook={() => onNotebook(branch.book)} onExpand={() => onExpand(branch.book)} showDirectory={labels.some(label => label.branch.book.id === branch.book.id && !label.showText) || labels.filter(label => label.branch.book.id === branch.book.id).length < overviewLeaves(branch, pins, search, expandedBookId === branch.book.id).length} />)}
     {detail && <KnowledgeLeaves labels={labels} items={items} pins={pins} growingNotes={growingNotes} zoom={zoom} search={search} onNote={onNote} onReveal={onReveal} />}

@@ -40,6 +40,20 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   const treeMap = useMemo(() => new Map(trees.map(tree => [tree.course_id, tree])), [trees])
   const knownCourses = useRef(new Set<string>())
   const knownNotes = useRef(new Set<string>())
+  const knownBooks = useRef(new Map(Object.entries(initialView?.knownNotebookIds ?? {})
+    .filter(([, ids]) => Array.isArray(ids) && ids.every(id => typeof id === 'string'))
+    .map(([id, ids]) => [id, new Set(ids)])))
+  const growingBooks = useMemo(() => {
+    const fresh = new Set<string>()
+    const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    for (const tree of trees) {
+      const previous = knownBooks.current.get(tree.course_id)
+      if (previous && !reduced) for (const book of tree.notebooks) {
+        if (book.course_id === tree.course_id && !previous.has(book.id)) fresh.add(book.id)
+      }
+    }
+    return fresh
+  }, [trees])
   const growingNotes = useMemo(() => {
     const fresh = new Set<string>()
     for (const tree of trees) for (const book of tree.notebooks) for (const section of [...book.chapters.flatMap(chapter => chapter.sections), ...book.historical_sections]) {
@@ -50,6 +64,9 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   useEffect(() => {
     for (const tree of trees) {
       knownCourses.current.add(tree.course_id)
+      const books = knownBooks.current.get(tree.course_id) ?? new Set<string>()
+      for (const book of tree.notebooks) if (book.course_id === tree.course_id) books.add(book.id)
+      knownBooks.current.set(tree.course_id, books)
       for (const book of tree.notebooks) for (const section of [...book.chapters.flatMap(chapter => chapter.sections), ...book.historical_sections]) knownNotes.current.add(section.id)
     }
   }, [trees])
@@ -137,11 +154,12 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     if (viewport.ready) callback.current?.({ camera: { ...camera.cameraRef.current }, viewport: { width: viewport.width, height: viewport.height }, slots: { ...slots.current }, focusedCourseId: focusCourseId,
       contents: selection ? { courseId: selection.courseId, notebookId: selection.notebookId } : !contentsRestored.current ? restoredContents.current : undefined,
       revealedNoteId: revealed,
+      knownNotebookIds: Object.fromEntries([...knownBooks.current].map(([id, ids]) => [id, [...ids]])),
     })
   }
   useEffect(() => {
     rememberView()
-  }, [camera.camera, viewport, focusCourseId, selection, revealed])
+  }, [camera.camera, viewport, focusCourseId, selection, revealed, trees])
   const focusTree = useCallback((tree: TreePosition) => {
     const branches = branchMap.get(tree.course.course_id) ?? []
     const items = branches.slice(0, 6).map(branch => ({ branch, leaves: overviewLeaves(branch, new Set(), '') }))
@@ -218,7 +236,7 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
       }}>
       <g ref={camera.sceneRef}>
         <TreeVines relations={relations} endpoints={endpoints} zoom={camera.camera.k} selectedId={selectedRelationId} onRelation={relation => { rememberView(); onRelation(relation) }} />
-        {visible.map(tree => <WatercolorTree key={tree.course.course_id} tree={tree} branches={branchMap.get(tree.course.course_id) ?? []} zoom={camera.camera.k} pins={pins} growingNotes={growingNotes} search={search} expandedBookId={selection?.notebookId}
+        {visible.map(tree => <WatercolorTree key={tree.course.course_id} tree={tree} branches={branchMap.get(tree.course.course_id) ?? []} zoom={camera.camera.k} pins={pins} growingNotes={growingNotes} growingBooks={growingBooks} search={search} expandedBookId={selection?.notebookId}
           onRoot={() => { rememberView(); onRoot(tree.course.course_id) }} onNotebook={book => { rememberView(); onNotebook(tree.course.course_id, book.id) }} onNote={(book, section) => { rememberView(); onNote(tree.course.course_id, book.id, section) }}
           onExpand={book => openContents(tree.course.course_id, tree.course.name, book.id)} onExpandBooks={() => openContents(tree.course.course_id, tree.course.name)}
           onFocus={() => { onFocusCourse?.(tree.course.course_id); if (!pointVisible({ x: tree.x, y: tree.y })) focusTree(tree) }}

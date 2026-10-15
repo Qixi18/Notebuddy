@@ -42,6 +42,8 @@
 .kt-contents button:hover { background: #e7ebd3; }
 .kt-contents button:focus-visible, .kt-camera-controls button:focus-visible { outline: 2px solid #6f8650; outline-offset: -2px; }
 .kt-leaf-growth { animation: kt-grow 600ms ease-out both; transform-box: fill-box; transform-origin: center bottom; }
+.kt-branch-growth { animation: kt-branch-grow 600ms ease-out both; transform-origin: 0 0; }
+@keyframes kt-branch-grow { from { opacity: 0; transform: scale(.16); } to { opacity: 1; transform: scale(1); } }
 @keyframes kt-grow { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .kt-leaf-growth { animation: none; } .kt-note-label-bg, .kt-leaf-hit, .kt-book-plaque { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .kt-leaf-growth, .kt-branch-growth { animation: none; } .kt-note-label-bg, .kt-leaf-hit, .kt-book-plaque { transition: none; } }
 @media (max-width: 600px) { .kt-camera-controls { top: 10px; right: 10px; gap: 0; padding: 2px; } .kt-camera-controls button { font-size: 16px; } .kt-hint { left: 8px; right: 8px; text-align: center; font-size: 10px; } .kt-contents { right: 10px; top: 70px; width: calc(100% - 20px); } }

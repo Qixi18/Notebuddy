@@ -18,6 +18,8 @@
 
 Web 路由为 `/courses/:courseId/notebooks/:notebookId?chapter=<materialId>&section=<noteId>`，整本模式加 `mode=book`，历史整理用 `chapter=history`。叶子和搜索深链优先于旧书签；枝干恢复该本书签，失败保留待重试位置并提示。目标已移除时回到原本目录，不转到别本。旧单数 API 指向默认本；真正空课返回404，不自动写库。旧单数阅读路由和 `/courses/:courseId/notes/:noteId` 按真实Note归属解析。
 
+前端画布快照 `KnowledgeTreeView` 可选 `knownNotebookIds: Record<courseId,string[]>`，用于跨上传页返回时识别新增主枝，属于本地session视图数据，不是后端API字段。无该字段的旧缓存首次不播放全树生长；新增枝600ms反馈遵守reduced-motion。
+
 ## 课程笔记本历史契约（2026-10-08）
 
 本段记录旧单本契约；单数接口通过默认本兼容。多本作用域、空课与显式新路由以上方2026-10-15契约为准。
