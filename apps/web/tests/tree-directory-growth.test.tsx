@@ -5,7 +5,7 @@ import { api } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { HomePage } from '../src/pages/HomePage'
 import { ForestPage } from '../src/pages/ForestPage'
-vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getForestRelations: vi.fn().mockResolvedValue([]), getCourseTree: vi.fn(), getLatestForestJob: vi.fn().mockResolvedValue(null) } }))
+vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getForestRelations: vi.fn().mockResolvedValue([]), getCourseTree: vi.fn(), getLatestForestJob: vi.fn().mockResolvedValue(null), getForestJob: vi.fn() } }))
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); sessionStorage.clear() })
 test.each(['home', 'forest'])('%s grows a real generated Note in the same scene and stops polling when its pending material completes', async mode => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
@@ -31,4 +31,30 @@ test.each(['home', 'forest'])('%s grows a real generated Note in the same scene 
   const finishedCalls = vi.mocked(api.getCourseTree).mock.calls.length
   await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
   await waitFor(() => expect(vi.mocked(api.getCourseTree).mock.calls.length).toBe(finishedCalls))
+})
+
+test.each(['home', 'forest'])('%s receives automatic vines after background completion without resetting camera', async mode => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1500, height: 720 } as DOMRect)
+  const courses = ['a', 'b'].map((id, index) => ({ id, name: id, created_at: '2026-10-15', last_opened_at: null, course_id: id, position: index, semester: 1, level: 'foundation', learning_state: 'learning', prerequisites: [], revision: 0 }))
+  vi.mocked(api.getForest).mockResolvedValue({ courses } as never)
+  vi.mocked(api.getCourseTree).mockImplementation(async id => ({ course_id: id, notebooks: [{ id: id + '-book', course_id: id, title: id, tree_slot: 0, chapters: [{ id: id + '-m', status: 'completed', sections: [{ id: id + '-n', notebook_id: id + '-book', title: id, tree_slot: 0, material_id: id + '-m' }] }], historical_sections: [] }] }) as never)
+  vi.mocked(api.getLatestForestJob).mockImplementation(async id => id === 'a' ? { id: 'job', status: 'processing', progress: 10 } as never : null)
+  vi.mocked(api.getForestJob).mockResolvedValue({ id: 'job', status: 'completed', progress: 100 } as never)
+  let completed = false
+  vi.mocked(api.getForestRelations).mockImplementation(async () => completed ? [{ id: 'v', source_course_id: 'a', target_course_id: 'b', source_note_id: 'a-n', target_note_id: 'b-n', source_title: 'a', target_title: 'b', relation_type: 'related', status: 'confirmed', origin: 'ai', activation_mode: 'automatic', stale: false }] as never : [])
+  const { container } = render(<MemoryRouter initialEntries={[mode === 'home' ? '/' : '/forest']}><WorkspaceProvider value={{ courses, coursesLoading: false, refreshCourses: vi.fn() } as unknown as WorkspaceContextValue}>{mode === 'home' ? <HomePage /> : <ForestPage />}</WorkspaceProvider></MemoryRouter>)
+  await screen.findByRole('button', { name: '续读笔记本：a' })
+  await waitFor(() => expect(api.getLatestForestJob).toHaveBeenCalledWith('a'))
+  fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
+  const scene = container.querySelector('.knowledge-tree-scene')
+  const camera = container.querySelector('.kt-canvas > g')!.getAttribute('transform')
+  completed = true
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+  await screen.findByRole('button', { name: /查看a与b的模型推断关联/ })
+  expect(container.querySelector('.knowledge-tree-scene')).toBe(scene)
+  expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(camera)
+  const finished = vi.mocked(api.getForestJob).mock.calls.length
+  await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
+  expect(vi.mocked(api.getForestJob).mock.calls.length).toBe(finished)
 })

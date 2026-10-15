@@ -27,6 +27,7 @@ export type CrossCourseRelation = {
   reason: string
   status: 'pending' | 'confirmed' | 'rejected'
   origin: 'manual' | 'ai'
+  activation_mode: 'automatic' | 'manual' | null
   source_revision: number
   target_revision: number
   stale: boolean

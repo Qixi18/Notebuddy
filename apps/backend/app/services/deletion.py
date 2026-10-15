@@ -61,7 +61,7 @@ def impact_preview(db: Session, *, course_id: str, material_id: str | None = Non
     # A running relation job may be reading evidence from any target course.
     # Pending jobs only pin their source course; completed/failed jobs never pin it.
     forest_active = db.scalar(select(func.count(ForestJob.id)).where(
-        ForestJob.kind == "cross_course_relations",
+        ForestJob.kind.in_(["cross_course_relations", "validate_legacy_relations"]),
         or_(
             and_(ForestJob.course_id == course_id,
                  ForestJob.status.in_(["pending", "processing"])),

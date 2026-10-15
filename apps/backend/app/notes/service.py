@@ -33,6 +33,10 @@ def update_note_as_user(
             user_locked=True,
         )
     )
+    from app.forest.jobs import enqueue_relations
+
+    db.flush()
+    enqueue_relations(db, note.course_id, note_ids=[note.id])
     db.commit()
     db.refresh(note)
     return note

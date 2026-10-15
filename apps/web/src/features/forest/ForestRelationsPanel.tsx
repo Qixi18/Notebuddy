@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../../api'
-import type { NotebookSection, NoteSourceRef } from '../../types'
+import type { CourseTree, NoteSourceRef } from '../../types'
 import { ForestDialog } from './ForestDialog'
 import {
   relationLabels,
@@ -8,6 +8,11 @@ import {
   type ForestCourse,
   type RelationType,
 } from './types'
+
+type RelationSection = { id: string; title: string; bookTitle: string }
+function allBookSections(tree: CourseTree): RelationSection[] {
+  return tree.notebooks.flatMap(book => [...book.chapters.flatMap(chapter => chapter.sections), ...book.historical_sections].map(section => ({ id: section.id, title: section.title, bookTitle: book.title })))
+}
 
 // Relation summaries do not carry a material ID; a section-only URL resolves the exact note in its real chapter.
 function forestNotePath(courseId: string, section: { id: string; material_id: string | null }) {
@@ -67,18 +72,20 @@ export function ForestRelationsPanel({
   courses,
   onChange,
   onClose,
+  onLocate,
 }: {
   relations: CrossCourseRelation[]
   courses: ForestCourse[]
   onChange: () => void
   onClose: () => void
+  onLocate?: (relation: CrossCourseRelation) => void
 }) {
-  const [filter, setFilter] = useState<'pending' | 'confirmed' | 'rejected'>('pending')
+  const [filter, setFilter] = useState<'pending' | 'confirmed' | 'rejected'>('confirmed')
   const [manual, setManual] = useState(false)
   const [sourceCourse, setSourceCourse] = useState('')
   const [targetCourse, setTargetCourse] = useState('')
-  const [sourceSections, setSourceSections] = useState<NotebookSection[]>([])
-  const [targetSections, setTargetSections] = useState<NotebookSection[]>([])
+  const [sourceSections, setSourceSections] = useState<RelationSection[]>([])
+  const [targetSections, setTargetSections] = useState<RelationSection[]>([])
   const [sourceNote, setSourceNote] = useState('')
   const [targetNote, setTargetNote] = useState('')
   const [type, setType] = useState<RelationType>('related')
@@ -94,11 +101,11 @@ export function ForestRelationsPanel({
     setTargetNote('')
     if (!manual || !sourceCourse || !targetCourse || sourceCourse === targetCourse) return
     setLoading(true)
-    void Promise.all([api.getNotebook(sourceCourse), api.getNotebook(targetCourse)])
+    void Promise.all([api.getCourseTree(sourceCourse), api.getCourseTree(targetCourse)])
       .then(([a, b]) => {
         if (!active) return
-        setSourceSections(a.chapters.flatMap((c) => c.sections).concat(a.historical_sections))
-        setTargetSections(b.chapters.flatMap((c) => c.sections).concat(b.historical_sections))
+        setSourceSections(allBookSections(a))
+        setTargetSections(allBookSections(b))
       })
       .catch((cause) => {
         if (active) setError(cause instanceof Error ? cause.message : '笔记目录读取失败')
@@ -144,7 +151,7 @@ export function ForestRelationsPanel({
   return (
     <ForestDialog title="跨课程藤蔓" onClose={onClose} wide>
       <p className="forest-dialog-intro">
-        连接两门课程中真实的笔记。AI 建议经过确认后才会出现在森林里。
+        连接两门课程中真实的笔记。自动关联通过版本和来源校验后生效，属于模型推断；隐藏后不会自动恢复。
       </p>
       <div className="forest-relation-toolbar">
         <div role="group" aria-label="关联状态">
@@ -158,7 +165,7 @@ export function ForestRelationsPanel({
               }}
               key={status}
             >
-              {status === 'pending' ? '待确认' : status === 'confirmed' ? '已连接' : '已忽略'} (
+              {status === 'pending' ? '待校验' : status === 'confirmed' ? '已生效' : '已隐藏'} (
               {relations.filter((r) => r.status === status).length})
             </button>
           ))}
@@ -222,7 +229,7 @@ export function ForestRelationsPanel({
                 <option value="">选择真实笔记</option>
                 {sourceSections.map((section) => (
                   <option value={section.id} key={section.id}>
-                    {section.title}
+                    {section.bookTitle} · {section.title}
                   </option>
                 ))}
               </select>
@@ -238,7 +245,7 @@ export function ForestRelationsPanel({
                 <option value="">选择真实笔记</option>
                 {targetSections.map((section) => (
                   <option value={section.id} key={section.id}>
-                    {section.title}
+                    {section.bookTitle} · {section.title}
                   </option>
                 ))}
               </select>
@@ -283,7 +290,7 @@ export function ForestRelationsPanel({
               <article key={relation.id} className="forest-relation-card">
                 <span className="forest-relation-kind">
                   {relationLabels[relation.relation_type]} ·{' '}
-                  {relation.origin === 'ai' ? 'AI 建议' : '手动连接'}
+                  {relation.activation_mode === 'automatic' ? '自动关联 · 模型推断' : relation.status === 'pending' ? '等待后台校验 · 模型推断' : '手动关联'}
                 </span>
                 <h3>
                   {relation.source_title} <span aria-hidden="true">↝</span> {relation.target_title}
@@ -313,7 +320,7 @@ export function ForestRelationsPanel({
                 {relation.stale && (
                   <p className="forest-stale">笔记已修改，需重新生成并核对关联；当前不绘制藤蔓。</p>
                 )}
-                <RelationEvidence relation={relation} />
+                <RelationEvidence key={JSON.stringify([relation.id, relation.source_revision, relation.target_revision, relation.source_ref_ids, relation.target_ref_ids, relation.stale])} relation={relation} />
                 {relation.stale && (
                   <button
                     className="forest-action"
@@ -334,7 +341,10 @@ export function ForestRelationsPanel({
                   </button>
                 )}
                 <div className="forest-relation-actions">
-                  {filter === 'pending' ? (
+                  {onLocate && relation.status === 'confirmed' && !relation.stale && <button type="button" onClick={() => onLocate(relation)}>在树中定位端点</button>}
+                  {filter === 'rejected' ? (
+                    <button type="button" disabled={busy} onClick={() => void act(() => api.createForestRelation({ source_note_id: relation.source_note_id, target_note_id: relation.target_note_id, relation_type: relation.relation_type, reason: relation.reason }))}>主动恢复并核对来源</button>
+                  ) : filter === 'pending' ? (
                     <>
                       <button
                         className="forest-action"
@@ -353,7 +363,7 @@ export function ForestRelationsPanel({
                           void act(() => api.reviewForestRelation(relation.id, 'reject'))
                         }
                       >
-                        忽略建议
+                        隐藏关联
                       </button>
                     </>
                   ) : (
@@ -362,7 +372,7 @@ export function ForestRelationsPanel({
                       disabled={busy}
                       onClick={() => void act(() => api.deleteForestRelation(relation.id))}
                     >
-                      移除关联
+                      隐藏关联
                     </button>
                   )}
                 </div>
@@ -371,10 +381,10 @@ export function ForestRelationsPanel({
           {!relations.some((relation) => relation.status === filter) && (
             <p className="forest-empty-message">
               {filter === 'pending'
-                ? '暂时没有待确认的关联。可以选中一门课程，生成跨课程建议。'
+                ? '暂时没有待校验的关联。有效自动关联会直接生效。'
                 : filter === 'confirmed'
                   ? '还没有跨课程藤蔓。可以手动连接两片笔记叶子。'
-                  : '没有已忽略的建议。'}
+                  : '没有已隐藏的关联。'}
             </p>
           )}
         </div>

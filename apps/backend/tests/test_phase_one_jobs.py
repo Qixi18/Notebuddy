@@ -48,22 +48,24 @@ def database(tmp_path, monkeypatch):
 
 def test_upload_is_queued_and_idempotent(database):
     factory, course_id = database
+    # Reuse exact bytes: newly built ZIPs may differ at a timestamp boundary.
+    payload = _pptx().getvalue()
     with factory() as db:
         first, job = ingest_pptx(
-            db, course_id=course_id, source=_pptx(), filename="lecture.pptx",
+            db, course_id=course_id, source=BytesIO(payload), filename="lecture.pptx",
             lecture_title="第 1 讲", topic_title="", media_type=None,
             idempotency_key="request-1",
         )
         assert job.status == "pending"
         same, same_job = ingest_pptx(
-            db, course_id=course_id, source=_pptx(), filename="lecture.pptx",
+            db, course_id=course_id, source=BytesIO(payload), filename="lecture.pptx",
             lecture_title="第 1 讲", topic_title="", media_type=None,
             idempotency_key="request-1",
         )
         assert (same.id, same_job.id) == (first.id, job.id)
         with pytest.raises(UploadRejected) as duplicate:
             ingest_pptx(
-                db, course_id=course_id, source=_pptx(), filename="lecture.pptx",
+                db, course_id=course_id, source=BytesIO(payload), filename="lecture.pptx",
                 lecture_title="第 2 讲", topic_title="", media_type=None,
             )
         assert duplicate.value.status_code == 409

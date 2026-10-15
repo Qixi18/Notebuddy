@@ -163,17 +163,25 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
       if (tree && viewport.ready) { focusTree(tree); previousFocus.current = focusCourseId }
     }
   }, [focusCourseId, positions, viewport.ready, focusTree])
-  const pinKey = [...pins].sort().join('|')
+  // Ambient automatic vines can reveal a bounded set of leaves but must not
+  // move a camera the reader is using. Only an explicit selection frames it.
+  const focusPins = useMemo(() => {
+    const ids = new Set<string>(revealed ? [revealed] : [])
+    const selected = relations.find(relation => relation.id === selectedRelationId && relation.status === 'confirmed' && !relation.stale)
+    if (selected) { ids.add(selected.source_note_id); ids.add(selected.target_note_id) }
+    return ids
+  }, [revealed, relations, selectedRelationId])
+  const pinKey = [...focusPins].sort().join('|')
   const lastPinFocus = useRef(initialView ? pinKey : '')
   useEffect(() => {
     if (!viewport.ready || !pinKey || pinKey === lastPinFocus.current) return
-    const points = [...pins].flatMap(id => endpoints.has(id) ? [endpoints.get(id)!] : [])
+    const points = [...focusPins].flatMap(id => endpoints.has(id) ? [endpoints.get(id)!] : [])
     // A selected relation can load its two directories separately. Do not mark
     // this pin set framed until every requested real endpoint is available.
-    if (points.length !== pins.size) return
+    if (points.length !== focusPins.size) return
     camera.move(fitPoints(points, viewport.width, viewport.height, 100))
     lastPinFocus.current = pinKey
-  }, [pinKey, pins, endpoints, viewport, camera.move])
+  }, [pinKey, focusPins, endpoints, viewport, camera.move])
   const closeContents = () => {
     const trigger = selection?.trigger
     contentsRestored.current = true

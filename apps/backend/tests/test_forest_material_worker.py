@@ -1,5 +1,7 @@
 """Successful lecture imports automatically request forest suggestions durably."""
 
+import json
+
 import pytest
 from docx import Document
 from sqlalchemy import create_engine, select
@@ -78,7 +80,10 @@ def test_first_and_subsequent_lectures_enqueue_and_retries_are_idempotent(databa
     material_worker.process_material(second_job.id)
     db.expire_all()
     assert second_job.status == "completed"
-    assert len(db.scalars(select(ForestJob)).all()) == 2
+    coalesced = list(db.scalars(select(ForestJob)))
+    assert len(coalesced) == 1
+    expected = {note.id for note in db.scalars(select(Note).where(Note.course_id == course.id))}
+    assert {row['note_id'] for row in json.loads(coalesced[0].source_snapshot_json)} == expected
     assert first_notes[0].content_markdown == "我的锁定笔记" and first_notes[0].user_locked
     repeated = ProcessingJob(
         material_id=second_job.material_id, kind="parse_material", status="processing"
@@ -88,7 +93,8 @@ def test_first_and_subsequent_lectures_enqueue_and_retries_are_idempotent(databa
     material_worker.process_material(repeated.id)
     db.expire_all()
     assert repeated.status == "completed"
-    assert len(db.scalars(select(ForestJob)).all()) == 2
+    assert len(db.scalars(select(ForestJob)).all()) == 1
+    assert {row['note_id'] for row in json.loads(coalesced[0].source_snapshot_json)} == expected
 
 
 def test_failed_knowledge_or_index_does_not_enqueue_candidates(database, monkeypatch):

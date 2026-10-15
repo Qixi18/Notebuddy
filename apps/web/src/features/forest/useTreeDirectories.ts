@@ -9,6 +9,8 @@ export function useTreeDirectories() {
   const inFlight = useRef(new Map<string, Promise<void>>())
   const watched = useRef<string[]>([])
   const [watchKey, setWatchKey] = useState('')
+  const [settledVersion, setSettledVersion] = useState(0)
+  const snapshots = useRef<Record<string, CourseTree>>({})
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const fetchDirectory = useCallback((id: string) => {
@@ -17,6 +19,11 @@ export function useTreeDirectories() {
     requested.current.add(id)
     const pending = api.getCourseTree(id).then(tree => {
       if (!mounted.current) return
+      const previous = snapshots.current[id]
+      const pendingBefore = previous?.notebooks.some(book => book.chapters.some(chapter => ['pending', 'processing'].includes(chapter.status)))
+      const pendingAfter = tree.notebooks.some(book => book.chapters.some(chapter => ['pending', 'processing'].includes(chapter.status)))
+      snapshots.current[id] = tree
+      if (pendingBefore && !pendingAfter) setSettledVersion(value => value + 1)
       setTrees(current => ({ ...current, [id]: tree }))
       setErrors(current => { const next = { ...current }; delete next[id]; return next })
     }).catch((cause: unknown) => {
@@ -43,5 +50,5 @@ export function useTreeDirectories() {
     }, 2000)
     return () => window.clearInterval(timer)
   }, [pendingKey, refresh])
-  return { trees: Object.values(trees), errors, load, watch, refresh }
+  return { trees: Object.values(trees), errors, load, watch, refresh, watchKey, settledVersion }
 }

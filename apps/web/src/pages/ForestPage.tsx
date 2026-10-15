@@ -7,10 +7,11 @@ import { ForestCoursePanel } from '../features/forest/ForestCoursePanel'
 import { ForestRelationsPanel } from '../features/forest/ForestRelationsPanel'
 import { KnowledgeTreeScene, type KnowledgeTreeView } from '../features/forest/KnowledgeTreeScene'
 import { NotebookRootMenu } from '../features/forest/NotebookRootMenu'
+import { useAutomaticVines } from '../features/forest/useAutomaticVines'
 import { useTreeDirectories } from '../features/forest/useTreeDirectories'
 import { readSceneSnapshot, saveSceneSnapshot } from '../features/forest/pageState'
 import { notebookPath } from '../features/notebook/navigation'
-import type { CrossCourseRelation, ForestCourse, ForestJob } from '../features/forest/types'
+import type { ForestCourse } from '../features/forest/types'
 import type { NotebookSection } from '../types'
 import '../features/forest/forest.css'
 
@@ -22,7 +23,6 @@ export function ForestPage() {
   const { refreshCourses } = useWorkspace()
   const restored = useRef(readSceneSnapshot('forest')).current
   const [courses, setCourses] = useState<ForestCourse[]>([])
-  const [relations, setRelations] = useState<CrossCourseRelation[]>([])
   const [focusId, setFocusId] = useState(query.get('course') ?? restored?.view?.focusedCourseId)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [expanded, setExpanded] = useState(new Set<string>())
@@ -35,23 +35,24 @@ export function ForestPage() {
   const [searchError, setSearchError] = useState<string>()
   const [searching, setSearching] = useState(false)
   const [selectedRelation, setSelectedRelation] = useState<string>()
-  const [job, setJob] = useState<ForestJob>()
   const directories = useTreeDirectories()
+  const vines = useAutomaticVines(directories.watchKey, directories.settledVersion, directories.refresh)
+  const { relations } = vines
+  const [dismissedJob, setDismissedJob] = useState<string>()
+  const job = Object.entries(vines.jobs).find(([id, value]) => id === focusId && value.id !== dismissedJob)?.[1] ?? Object.values(vines.jobs).find(value => value.id !== dismissedJob && ['pending', 'processing', 'failed'].includes(value.status))
   const [visibleIds, setVisibleIds] = useState<string[]>([])
   const visibleDirectories = useCallback((ids: string[]) => { setVisibleIds(ids); directories.watch(ids) }, [directories.watch])
-  const pins = relations.filter(relation => relation.status === 'confirmed' && !relation.stale && visibleIds.includes(relation.source_course_id) && visibleIds.includes(relation.target_course_id)).flatMap(relation => [relation.source_note_id, relation.target_note_id])
+  const pins = relations.filter(relation => relation.status === 'confirmed' && !relation.stale && visibleIds.includes(relation.source_course_id) && visibleIds.includes(relation.target_course_id)).slice(0, 6).flatMap(relation => [relation.source_note_id, relation.target_note_id])
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const reload = useCallback(async () => {
     void directories.refresh()
-    const [forest, links] = await Promise.allSettled([api.getForest(), api.getForestRelations()])
+    const [forest] = await Promise.allSettled([api.getForest(), vines.refresh()])
     if (!mounted.current) return
     if (forest.status === 'fulfilled') setCourses(forest.value.courses)
     else setError(forest.reason instanceof Error ? forest.reason.message : '森林读取失败')
-    if (links.status === 'fulfilled') setRelations(links.value)
-    else setError(links.reason instanceof Error ? links.reason.message : '关联读取失败')
     setLoading(false)
-  }, [directories.refresh])
+  }, [directories.refresh, vines.refresh])
   useEffect(() => { void reload() }, [reload])
   useEffect(() => { if (query.get('course')) setFocusId(query.get('course')!) }, [query])
   useEffect(() => {
@@ -65,23 +66,6 @@ export function ForestPage() {
     }, 250)
     return () => { active = false; clearTimeout(timer) }
   }, [search, directories.load])
-  useEffect(() => {
-    setJob(undefined)
-    if (!focusId) return
-    let active = true
-    void api.getLatestForestJob(focusId).then(value => { if (active && value) setJob(value) }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '任务读取失败') })
-    return () => { active = false }
-  }, [focusId])
-  useEffect(() => {
-    if (!job || !['pending', 'processing'].includes(job.status)) return
-    let active = true, inFlight = false
-    const timer = setInterval(() => {
-      if (inFlight) return
-      inFlight = true
-      void api.getForestJob(job.id).then(next => { if (active) { setJob(next); if (next.status === 'completed') void reload() } }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '任务读取失败') }).finally(() => { inFlight = false })
-    }, 1500)
-    return () => { active = false; clearInterval(timer) }
-  }, [job?.id, job?.status, reload])
   const focusCourse = courses.find(course => course.course_id === focusId)
   const courseTree = directories.trees.find(tree => tree.course_id === focusId)
   const [panelBookId, setPanelBookId] = useState('')
@@ -102,18 +86,18 @@ export function ForestPage() {
       </div>}</div>
       <div className="forest-legend" aria-label="课程学习状态"><span><i className="forest-state-planned" />未开始</span><span><i className="forest-state-learning" />在学</span><span><i className="forest-state-completed" />已完成</span></div>
       {loading && <p role="status" className="forest-scene-message">正在打开森林…</p>}
-      {error && <div className="forest-scene-error" role="alert">{error}<button onClick={() => { setError(undefined); void reload() }}>重新读取</button></div>}
+      {(error || vines.error) && <div className="forest-scene-error" role="alert">{error ?? vines.error}<button onClick={() => { setError(undefined); void reload() }}>重新读取</button></div>}
       {Object.keys(directories.errors).length > 0 && <div className="forest-outline-error" role="alert">部分课程目录读取失败<button onClick={() => directories.load(Object.keys(directories.errors))}>重试目录</button></div>}
       {!loading && !courses.length && !error && <div className="forest-scene-empty"><h2>你的森林，从一门课程开始</h2><button className="forest-action" onClick={() => setDialog('import')}>导入培养方案</button><button onClick={() => navigate('/', { state: { openCreateCourse: true } })}>手动创建课程</button></div>}
       {settingsOpen && focusCourse && <div className="forest-settings-wrap"><label>设置课程<select value={focusId} onChange={event => focus(event.target.value)}>{courses.map(course => <option key={course.course_id} value={course.course_id}>{course.name}</option>)}</select></label>
         {courseTree && <label>笔记本<select value={panelBook?.id ?? ''} onChange={event => setPanelBookId(event.target.value)}>{courseTree.notebooks.map(book => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>}
-        <ForestCoursePanel key={`${focusId}:${focusCourse.revision}`} course={focusCourse} book={panelBook} expanded={expanded} onExpand={id => setExpanded(current => current.has(id) ? new Set() : new Set([id]))} onClose={() => setSettingsOpen(false)} onUpdated={next => { setCourses(current => current.map(course => course.course_id === next.course_id ? next : course)); void refreshCourses() }} onOpen={section => panelBook && openNote(focusCourse.course_id, panelBook.id, section)} onFit={() => { setSettingsOpen(false); setFocusId(undefined); setTimeout(() => setFocusId(focusCourse.course_id), 0) }} onJob={setJob} />
+        <ForestCoursePanel key={`${focusId}:${focusCourse.revision}`} course={focusCourse} book={panelBook} expanded={expanded} onExpand={id => setExpanded(current => current.has(id) ? new Set() : new Set([id]))} onClose={() => setSettingsOpen(false)} onUpdated={next => { setCourses(current => current.map(course => course.course_id === next.course_id ? next : course)); void refreshCourses() }} onOpen={section => panelBook && openNote(focusCourse.course_id, panelBook.id, section)} onFit={() => { setSettingsOpen(false); setFocusId(undefined); setTimeout(() => setFocusId(focusCourse.course_id), 0) }} onJob={next => vines.track(focusCourse.course_id, next)} />
       </div>}
       <details className="forest-minimap"><summary>森林地图 · {courses.length} 门课程</summary><div className="forest-course-map">{courses.map(course => <button key={course.course_id} aria-label={`地图定位${course.name}`} onClick={() => focus(course.course_id)}>{course.semester ? `第${course.semester}学期 · ` : ''}{course.name}</button>)}</div></details>
-      {job && <div className={`forest-job-toast forest-job-${job.status}`} role="status"><span>{job.status === 'failed' ? job.error_message ?? '关联任务失败' : job.status === 'completed' ? '关联任务已完成' : `正在寻找跨课程关联 · ${job.progress}%`}</span>{job.status === 'failed' && <button onClick={() => void api.retryForestJob(job.id).then(setJob).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '重试失败'))}>重试</button>}<button onClick={() => setDialog('relations')}>查看藤蔓</button><button aria-label="关闭任务提示" onClick={() => setJob(undefined)}>×</button></div>}
+      {job && <div className={`forest-job-toast forest-job-${job.status}`} role="status"><span>{job.status === 'failed' ? job.error_message ?? '关联任务失败' : job.status === 'completed' ? '关联任务已完成' : `正在寻找跨课程关联 · ${job.progress}%`}</span>{job.status === 'failed' && <button onClick={() => void api.retryForestJob(job.id).then(next => { const courseId = Object.keys(vines.jobs).find(id => vines.jobs[id].id === job.id); if (courseId) vines.track(courseId, next) }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '重试失败'))}>重试</button>}<button onClick={() => setDialog('relations')}>查看藤蔓</button><button aria-label="关闭任务提示" onClick={() => setDismissedJob(job.id)}>×</button></div>}
     </div>
     {root && <NotebookRootMenu courseId={root} courseName={courses.find(course => course.course_id === root)?.name ?? '课程'} onClose={() => setRoot(undefined)} returnState={returnState} />}
-    {dialog === 'relations' && <ForestRelationsPanel relations={relations} courses={courses} onChange={() => void reload()} onClose={() => setDialog(undefined)} />}
+    {dialog === 'relations' && <ForestRelationsPanel relations={relations} courses={courses} onLocate={relation => { setSelectedRelation(relation.id); directories.load([relation.source_course_id, relation.target_course_id]); setDialog(undefined) }} onChange={() => void reload()} onClose={() => setDialog(undefined)} />}
     {dialog === 'import' && <CurriculumImportPanel courses={courses} onConfirmed={() => { void reload(); void refreshCourses() }} onClose={() => setDialog(undefined)} />}
   </div>
 }

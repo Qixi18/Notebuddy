@@ -1,6 +1,7 @@
 """Forest imports and workers must preserve real evidence and user notes."""
 
 import importlib
+import json
 from io import BytesIO
 
 import pytest
@@ -217,6 +218,10 @@ def _current_ai_relations(monkeypatch, notes):
     monkeypatch.setattr(settings, "deepseek_api_key", "test-only")
 
     def response(self, messages, **kwargs):
+        payload = json.loads(messages[1]["content"])
+        provided = {row["note_id"] for row in payload["source"] + payload["candidates"]}
+        if not {note.id for note in notes} <= provided:
+            return {"relations": []}
         return {
             "relations": [
                 {
@@ -252,19 +257,19 @@ def test_explicit_suggestions_generate_again_when_target_notes_change(setup, mon
     assert second["id"] != first["id"] and second["status"] == "pending"
     _run(factory, monkeypatch)
     assert client.get(f"/api/v1/forest/jobs/{second['id']}").json()["status"] == "completed"
-    relations = client.get("/api/v1/forest/relations?status=pending").json()
+    relations = client.get("/api/v1/forest/relations?status=confirmed").json()
     assert len(relations) == 1 and relations[0]["target_revision"] == 6
     assert not relations[0]["stale"]
 
 
-def test_explicit_suggestions_rebuild_deleted_relation_and_reuse_active_clicks(setup, monkeypatch):
+def test_explicit_suggestions_preserve_hidden_relation_and_reuse_active_clicks(setup, monkeypatch):
     client, db, factory = setup
     notes = _notes(db)
     _current_ai_relations(monkeypatch, notes)
     path = f"/api/v1/forest/courses/{notes[0].course_id}/suggest-relations"
     first = client.post(path).json()
     _run(factory, monkeypatch)
-    relation = client.get("/api/v1/forest/relations?status=pending").json()[0]
+    relation = client.get("/api/v1/forest/relations?status=confirmed").json()[0]
     assert client.delete(f"/api/v1/forest/relations/{relation['id']}").status_code == 200
     second = client.post(path).json()
     assert second["id"] != first["id"] and second["status"] == "pending"
@@ -275,10 +280,10 @@ def test_explicit_suggestions_rebuild_deleted_relation_and_reuse_active_clicks(s
     repeated = client.post(path).json()
     assert repeated["id"] == second["id"] and repeated["status"] == "processing"
     jobs.process_forest_job(second["id"])
-    restored = client.get("/api/v1/forest/relations?status=pending").json()
-    assert len(restored) == 1 and restored[0]["id"] != relation["id"]
-    assert restored[0]["source_note_id"] == notes[0].id
-    assert restored[0]["source_ref_ids"] == [notes[0].source_refs[0].id]
+    restored = client.get("/api/v1/forest/relations?status=confirmed").json()
+    assert restored == []
+    hidden = client.get("/api/v1/forest/relations?status=rejected").json()
+    assert len(hidden) == 1 and hidden[0]["id"] == relation["id"]
 
 
 def test_automatic_relation_requests_keep_completed_revision_idempotency(setup, monkeypatch):
@@ -330,7 +335,7 @@ def test_old_foundation_note_survives_newer_unrelated_candidate_pool(
     result = client.post(f"/api/v1/forest/courses/{course_id}/suggest-relations").json()
     _run(factory, monkeypatch)
     assert client.get(f"/api/v1/forest/jobs/{result['id']}").json()["status"] == "completed"
-    relations = client.get("/api/v1/forest/relations?status=pending").json()
+    relations = client.get("/api/v1/forest/relations?status=confirmed").json()
     assert len(relations) == 1 and relations[0]["source_note_id"] == notes[0].id
     assert relations[0]["source_ref_ids"] == [notes[0].source_refs[0].id]
     assert relations[0]["target_note_id"] == notes[1].id and not relations[0]["stale"]
@@ -372,7 +377,7 @@ def test_course_latest_job_exposes_latest_automatic_failure_and_checks_course(se
     assert client.get(path).status_code == 404
 
 
-def test_valid_ai_candidates_pending_with_sources_and_without_note_changes(setup, monkeypatch):
+def test_valid_ai_candidates_automatic_with_sources_and_without_note_changes(setup, monkeypatch):
     client, db, factory = setup
     notes = _notes(db)
     monkeypatch.setattr(settings, "deepseek_api_key", "test-only")
@@ -400,7 +405,7 @@ def test_valid_ai_candidates_pending_with_sources_and_without_note_changes(setup
     _run(factory, monkeypatch)
     models = importlib.import_module("app.db.models")
     relation = db.scalar(select(models.CrossCourseRelation))
-    assert relation is not None and relation.status == "pending" and relation.origin == "ai"
+    assert relation is not None and relation.status == "confirmed" and relation.origin == "ai"
     assert relation.source_revision == 5 and relation.target_revision == 5
     for note in notes:
         db.refresh(note)
@@ -587,6 +592,7 @@ def test_new_revision_refreshes_only_unreviewed_ai_candidate(setup, monkeypatch,
     db.refresh(relation)
     assert relation.source_revision == 6
     relation.status = reviewed_status
+    relation.activation_mode = "manual" if reviewed_status == "confirmed" else relation.activation_mode
     notes[0].revision_number = 7
     db.commit()
     client.post(path)

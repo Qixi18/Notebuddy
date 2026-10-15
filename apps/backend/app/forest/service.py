@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 from sqlalchemy import exists, func, or_, select, update
@@ -134,6 +135,23 @@ def active_note_sources(db: Session, note: Note) -> list[SourceRef]:
     return result
 
 
+def evidence_fingerprint(db: Session, note: Note, ref_ids: list[str] | None = None) -> str:
+    """Include source content and parse identity without changing protected note revisions."""
+    rows = [
+        [ref.id, ref.quote, ref.page_block_id, ref.parser_version,
+         ref.page_block.content, ref.page_block.page.id, ref.page_block.page.stable_location_key]
+        for ref in active_note_sources(db, note)
+        if ref_ids is None or ref.id in ref_ids
+    ]
+    return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode()).hexdigest()
+
+
+def relation_fingerprint(db: Session, source: Note, target: Note,
+                         source_ids: list[str], target_ids: list[str]) -> str:
+    return hashlib.sha256((evidence_fingerprint(db, source, source_ids)
+                           + evidence_fingerprint(db, target, target_ids)).encode()).hexdigest()
+
+
 def list_forest_courses(db: Session) -> list[dict]:
     courses = list(
         db.scalars(
@@ -221,6 +239,8 @@ def relation_display(db: Session, relation: CrossCourseRelation) -> dict | None:
         or not target_ids
         or not set(source_ids).issubset(current_source_ids)
         or not set(target_ids).issubset(current_target_ids)
+        or (relation.evidence_fingerprint is not None and relation.evidence_fingerprint
+            != relation_fingerprint(db, source, target, source_ids, target_ids))
     )
     return {
         "id": relation.id,
@@ -236,6 +256,8 @@ def relation_display(db: Session, relation: CrossCourseRelation) -> dict | None:
         "reason": relation.reason,
         "status": relation.status,
         "origin": relation.origin,
+        "activation_mode": relation.activation_mode or (
+            "manual" if relation.status == "confirmed" else None),
         "source_revision": relation.source_revision,
         "target_revision": relation.target_revision,
         "stale": stale,

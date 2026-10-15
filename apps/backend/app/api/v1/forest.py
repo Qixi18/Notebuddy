@@ -18,6 +18,7 @@ from app.forest.service import (
     list_forest_courses,
     note_is_visible,
     relation_display,
+    relation_fingerprint,
     update_profile,
     visible_note_predicate,
 )
@@ -147,6 +148,8 @@ def create_relation(payload: CrossCourseRelationCreate, db: Session = Depends(ge
         "reason": payload.reason,
         "status": "confirmed",
         "origin": "manual",
+        "activation_mode": "manual",
+        "evidence_fingerprint": relation_fingerprint(db, source, target, [r.id for r in source_refs], [r.id for r in target_refs]),
         "source_ref_ids_json": json.dumps([ref.id for ref in source_refs]),
         "target_ref_ids_json": json.dumps([ref.id for ref in target_refs]),
     }
@@ -159,7 +162,7 @@ def create_relation(payload: CrossCourseRelationCreate, db: Session = Depends(ge
     )
     if existing is not None:
         display = relation_display(db, existing)
-        if display is None or not display["stale"]:
+        if display is None or (not display["stale"] and existing.status != "rejected"):
             raise HTTPException(status_code=409, detail="这两篇笔记的同类型关系已存在")
         # Reconnecting is explicit user confirmation of the current evidence. Keep
         # the relationship ID while protecting against another simultaneous review.
@@ -226,7 +229,7 @@ def review_relation(
         changed = db.execute(
             update(CrossCourseRelation)
             .where(CrossCourseRelation.id == relation_id, *predicates)
-            .values(status="confirmed")
+            .values(status="confirmed", activation_mode="manual")
         )
         if changed.rowcount != 1:
             db.rollback()
@@ -241,6 +244,6 @@ def review_relation(
 @router.delete("/forest/relations/{relation_id}")
 def delete_relation(relation_id: str, db: Session = Depends(get_db)) -> dict:
     relation, _ = _ensure_relation(db, relation_id)
-    db.delete(relation)
+    relation.status = "rejected"
     db.commit()
     return {"deleted": True}
