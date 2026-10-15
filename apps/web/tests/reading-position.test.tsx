@@ -11,12 +11,14 @@ const s1 = { id: 'n1', notebook_id: 'book', material_id: 'm1', tree_slot: 0, tit
 const s2 = { ...s1, id: 'n2', material_id: 'm2', title: '第二节' }
 const outline = { id: 'book', course_id: 'c', title: '本', chapters: [{ id: 'm1', title: '讲1', sections: [s1] }, { id: 'm2', title: '讲2', sections: [s2] }], historical_sections: [], removed_chapters: [] }
 const position = { notebook_id: 'book', chapter_id: 'm2', note_id: 'n2', mode: 'chapter', section_offset: .5, revision: 3, updated_at: 'now' }
-function mount(query = '') {
+function mount(query = '', courseId = 'c') {
   const workspace = { notes: [s1, s2], materials: [], upsertNotes: vi.fn(), setSelectedNoteId: vi.fn() } as unknown as WorkspaceContextValue
-  return render(<MemoryRouter initialEntries={[`/courses/c/notebooks/book${query}`]}><WorkspaceProvider value={workspace}><Routes><Route path="/courses/:courseId/notebooks/:notebookId" element={<NotebookPage />} /></Routes></WorkspaceProvider></MemoryRouter>)
+  const page = (value: WorkspaceContextValue) => <MemoryRouter initialEntries={[`/courses/${courseId}/notebooks/book${query}`]}><WorkspaceProvider value={value}><Routes><Route path="/courses/:courseId/notebooks/:notebookId" element={<NotebookPage />} /></Routes></WorkspaceProvider></MemoryRouter>
+  const result = render(page(workspace))
+  return { ...result, updateNotes: () => result.rerender(page({ ...workspace, notes: workspace.notes.map(note => ({ ...note, revision_number: 2 })) })) }
 }
 beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); HTMLElement.prototype.scrollIntoView = vi.fn(); vi.mocked(api.getChapter).mockResolvedValue({ material_id: 'm1', sections: [] }); vi.mocked(api.getNotebook).mockResolvedValue(outline as never); vi.mocked(api.getNotebookById).mockResolvedValue(outline as never); vi.mocked(api.getReadingPosition).mockResolvedValue(position as never); vi.mocked(api.getNotebookChapter).mockResolvedValue({ material_id: 'm1', sections: [] }); vi.mocked(api.saveReadingPosition).mockImplementation(async (_c, _b, p) => ({ ...p, notebook_id: 'book', revision: p.expected_revision + 1, updated_at: 'now' })) })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
 test('branch resumes the saved section while an explicit leaf wins the bookmark', async () => {
   const result = mount()
   expect(await screen.findByText('正文 n2')).toBeTruthy()
@@ -90,4 +92,44 @@ test('switching books never queues an old section into the new book during loadi
   await screen.findByText('正文 n3')
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   expect(vi.mocked(api.saveReadingPosition).mock.calls.filter(call => call[1] === 'second' && call[2].note_id === 'n1')).toHaveLength(0)
+})
+test('cached text does not restore early; the completed chapter restores once and later note updates keep the reader scroll', async () => {
+  let finishChapter!: (value: unknown) => void
+  let bodyReady = false
+  vi.mocked(api.getNotebookChapter).mockImplementationOnce(() => new Promise(resolve => { finishChapter = resolve as never }))
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    if (this.classList.contains('notebook-content')) return { top: 100 } as DOMRect
+    if (this.id === 'section-n2') return { top: 100, height: bodyReady ? 800 : 200 } as DOMRect
+    return { top: 100, height: 200 } as DOMRect
+  })
+  const page = mount('', 'stable')
+  await screen.findByText('正在按章节读取正文…')
+  const container = screen.getByRole('main', { name: '笔记本正文' })
+  expect(container.scrollTop).toBe(0)
+  await act(async () => { bodyReady = true; finishChapter({ material_id: 'm2', sections: [] }) })
+  await waitFor(() => expect(screen.queryByText('正在按章节读取正文…')).toBeNull())
+  expect(container.scrollTop).toBe(400)
+  container.scrollTop = 520
+  fireEvent.scroll(container)
+  page.updateNotes()
+  // A same-section rerender must not reset scroll to the original bookmark.
+  expect(container.scrollTop).toBe(520)
+  page.unmount()
+  vi.restoreAllMocks()
+})
+test('leaving before the debounce samples the latest container offset even if its final scroll event is pending', async () => {
+  let articleTop = 20
+  const page = mount('?chapter=m1&section=n1', 'leave-latest')
+  await screen.findByText('正文 n1')
+  await waitFor(() => expect(screen.queryByText('正在按章节读取正文…')).toBeNull())
+  const container = screen.getByRole('main', { name: '笔记本正文' })
+  const article = document.getElementById('section-n1')!
+  vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({ top: 100 } as DOMRect)
+  vi.spyOn(article, 'getBoundingClientRect').mockImplementation(() => ({ top: articleTop, height: 400 } as DOMRect))
+  fireEvent.scroll(container) // 20% was observed by the scroll listener.
+  articleTop = -220 // 80% is now visible; the next native scroll event has not arrived.
+  page.unmount()
+  await waitFor(() => expect(api.saveReadingPosition).toHaveBeenCalled())
+  expect(vi.mocked(api.saveReadingPosition).mock.calls.at(-1)?.[2]).toMatchObject({ note_id: 'n1', section_offset: .8 })
+  vi.restoreAllMocks()
 })

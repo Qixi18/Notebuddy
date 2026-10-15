@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { NotebookReadingPosition, NotebookSection } from '../../types'
 import { pendingPosition, positionWriter, type Position } from './readingPosition'
 
@@ -24,20 +24,26 @@ export function useReadingPosition(courseId: string, bookId: string, bookmark: N
     restored.current = targetKey
     positions.current.set(key, { chapter_id: selected.material_id, note_id: selected.id, mode, section_offset: initialOffset })
   }, [ready, selected?.id, mode, targetKey, initialOffset, container, key])
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = container.current
     if (!host || !ready || !selected || bookmark === undefined) return
-    function scroll() {
+    function samplePosition() {
       const top = host!.getBoundingClientRect().top
       const elements = [...host!.querySelectorAll<HTMLElement>('.notebook-section')]
       const element = elements.filter(item => item.getBoundingClientRect().top <= top + 2).at(-1) ?? elements[0]
       if (!element) return
       const rect = element.getBoundingClientRect()
-      positions.current.set(key, { chapter_id: element.dataset.chapter || null, note_id: element.dataset.note!, mode, section_offset: rect.height ? Math.min(1, Math.max(0, (top - rect.top) / rect.height)) : 0 })
+      if (rect.height <= 0) return
+      positions.current.set(key, { chapter_id: element.dataset.chapter || null, note_id: element.dataset.note!, mode, section_offset: Math.min(1, Math.max(0, (top - rect.top) / rect.height)) })
+    }
+    function scroll() {
+      samplePosition()
       clearTimeout(timer.current)
       timer.current = setTimeout(save, 600)
     }
-    const leave = () => { clearTimeout(timer.current); save() }
+    // Layout cleanup samples before React removes the reading DOM. The final
+    // native scroll event may still be queued when navigation/pagehide happens.
+    const leave = () => { clearTimeout(timer.current); samplePosition(); save() }
     host.addEventListener('scroll', scroll, { passive: true })
     window.addEventListener('pagehide', leave)
     return () => { host.removeEventListener('scroll', scroll); window.removeEventListener('pagehide', leave); leave() }
