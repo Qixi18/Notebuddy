@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { api } from '../api'
 import { EmptyState } from '../components/EmptyState'
@@ -7,12 +7,19 @@ import { ProcessingStatus } from '../components/ProcessingStatus'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useWorkspace } from '../components/AppLayout'
 import type { Capabilities } from '../api/config'
-import type { Coverage, DeletionPreview, PageEvidence } from '../types'
+import type { Coverage, DeletionPreview, PageEvidence, NotebookSummary } from '../types'
+import { NotebookRootMenu } from '../features/forest/NotebookRootMenu'
 import type { ForestCourse } from '../features/forest/types'
 
 const statusLabels: Record<string, string> = { pending: '等待处理', processing: '解析中', completed: '已完成', failed: '解析失败' }
 
 export function MaterialsPage() {
+  const [query, setQuery] = useSearchParams()
+  const location = useLocation()
+  const targetBookId = query.get('notebook') ?? ''
+  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
+  const [booksLoading, setBooksLoading] = useState(true)
+  const [rootOpen, setRootOpen] = useState(false)
   const {
     course,
     courseContentLoading,
@@ -48,6 +55,20 @@ export function MaterialsPage() {
   const currentCourseId = useRef(course?.id)
   currentCourseId.current = course?.id
   useEffect(() => { setStartLearningCourse(undefined) }, [course?.id])
+  useEffect(() => {
+    let active = true
+    setNotebooks([]); setBooksLoading(true)
+    if (!course) return () => { active = false }
+    void api.listNotebooks(course.id).then(items => {
+      if (!active) return
+      setNotebooks(items)
+      if (!targetBookId && items.length === 1) setQuery({ notebook: items[0].id }, { replace: true, state: location.state })
+    }).catch((cause: unknown) => { if (active) setMaterialActionError(cause instanceof Error ? cause.message : '笔记本列表读取失败') })
+      .finally(() => { if (active) setBooksLoading(false) })
+    return () => { active = false }
+  }, [course?.id, targetBookId])
+  useEffect(() => { setRootOpen(false) }, [targetBookId])
+  const targetBook = notebooks.find(book => book.id === targetBookId)
 
   useEffect(() => {
     let active = true
@@ -93,9 +114,9 @@ export function MaterialsPage() {
 
   async function handleUpload(event: FormEvent) {
     event.preventDefault()
-    if (!file) return
+    if (!file || !targetBook) return
     try {
-      await uploadMaterial(file, lectureTitle, topicTitle, allowDuplicate)
+      await uploadMaterial(file, lectureTitle, topicTitle, allowDuplicate, targetBook.id)
       setFile(undefined)
       setAllowDuplicate(false)
       if (course) {
@@ -139,10 +160,13 @@ export function MaterialsPage() {
       </header>
 
       <form className="material-upload-card" onSubmit={(event) => void handleUpload(event)}>
+        <label>目标笔记本<select aria-label="目标笔记本" value={targetBook?.id ?? ''} disabled={booksLoading || busy} onChange={event => setQuery({ notebook: event.target.value }, { state: location.state })}><option value="" disabled>请选择本课程的笔记本</option>{notebooks.map(book => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
+        {!booksLoading && !notebooks.length && <p>此课程尚无笔记本。<button type="button" onClick={() => setRootOpen(true)}>新建笔记本</button></p>}
+        {!booksLoading && targetBookId && !targetBook && <p role="alert">目标笔记本不存在或属于其他课程，请重新选择。</p>}
         <div className="upload-card-heading"><span className="upload-card-icon">＋</span><div><h2>添加课程资料</h2><p>支持 {(capabilities?.allowed_extensions ?? ['.pptx', '.pdf', '.docx']).join('、')}，单文件上限 {capabilities ? `${Math.round(capabilities.max_upload_bytes / 1024 / 1024)} MB` : '由后端配置'}。</p><small>{capabilities?.ocr.status === 'ready' ? `扫描页可使用 OCR，每次最多 ${capabilities.ocr.max_pages} 页。` : '扫描页会标记为待检查，不会生成虚构文本。'}</small></div></div>
         <div className="material-upload-fields">
           <label className="material-file-field"><span>{file ? file.name : '选择课件文件'}</span><input type="file" accept={(capabilities?.allowed_extensions ?? ['.pptx', '.pdf', '.docx']).join(',')} onChange={(event) => setFile(event.target.files?.[0])} /></label>
-          <button className="primary-button" type="submit" disabled={!file || busy}>{busy ? '上传中…' : '上传并解析'}</button>
+          <button className="primary-button" type="submit" disabled={!file || busy || !targetBook}>{busy ? '上传中…' : '上传并解析'}</button>
         </div>
         <details className="material-upload-options">
           <summary>设置讲次信息</summary>
@@ -153,6 +177,7 @@ export function MaterialsPage() {
           </div>
         </details>
       </form>
+      {rootOpen && course && <NotebookRootMenu courseId={course.id} courseName={course.name} onClose={() => setRootOpen(false)} returnState={location.state} />}
 
       {startLearningCourse && <div className="materials-forest-start"><span>已上传第一讲，要将森林中的这门课设为“在学”吗？</span><button type="button" disabled={startingLearning} onClick={() => void startLearning()}>{startingLearning ? '保存中…' : '开始学习'}</button><button type="button" disabled={startingLearning} onClick={() => setStartLearningCourse(undefined)}>稍后</button></div>}
 

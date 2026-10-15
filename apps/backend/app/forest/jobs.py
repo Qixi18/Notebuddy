@@ -28,7 +28,13 @@ from app.db.models import (
     new_id,
 )
 from app.forest.curriculum import CurriculumError, extract_curriculum
-from app.forest.service import active_note_sources, note_is_visible, relation_display
+from app.forest.service import (
+    active_note_sources,
+    evidence_fingerprint,
+    note_is_visible,
+    relation_display,
+    relation_fingerprint,
+)
 from app.services.provider_audit import (
     begin_call,
     estimate_token_cost,
@@ -71,59 +77,83 @@ def _live_note_query(course_id: str | None = None):
     return query.where(Note.course_id == course_id) if course_id else query
 
 
+def _source_snapshot(db: Session, course_id: str, *, material_id: str | None = None,
+                     note_ids: list[str] | None = None) -> list[dict]:
+    query = _live_note_query(course_id).options(load_only(
+        Note.id, Note.course_id, Note.material_id, Note.revision_number)).order_by(Note.id)
+    if material_id is not None:
+        query = query.where(Note.material_id == material_id)
+    if note_ids is not None:
+        query = query.where(Note.id.in_(note_ids))
+    return [{"note_id": note.id, "revision": note.revision_number,
+             "evidence": evidence_fingerprint(db, note)} for note in db.scalars(query)]
+
+
 def enqueue_relations(
-    db: Session, course_id: str, *, material_id: str | None = None, explicit: bool = False
+    db: Session, course_id: str, *, material_id: str | None = None, explicit: bool = False,
+    note_ids: list[str] | None = None,
 ) -> ForestJob | None:
-    """Keep automatic revisions idempotent; coalesce only active explicit requests."""
+    """Persist all affected Note IDs; merge saves only while a job has not been claimed."""
     course = db.get(Course, course_id)
     if course is None or course.deleted_at is not None:
         raise HTTPException(404, "课程不存在")
-    query = (
-        _live_note_query(course_id)
-        .with_only_columns(Note.id, Note.revision_number)
-        .order_by(Note.id)
-    )
-    if material_id is not None:
-        query = query.where(Note.material_id == material_id)
-    revisions = list(db.execute(query).all())
+    db.flush()
+    # Reserve SQLite's writer before reading/coalescing, including concurrent saves.
+    db.execute(update(Course).where(Course.id == course_id).values(name=Course.name))
+    revisions = _source_snapshot(db, course_id, material_id=material_id, note_ids=note_ids)
     if not revisions:
         return None
     if explicit:
         key = f"manual-relations:{course_id}"
-        # Terminal requests remain in history with their IDs. The stable active
-        # key protects concurrent clicks without preventing intentional reruns.
-        db.execute(
-            update(ForestJob)
-            .where(
-                ForestJob.idempotency_key == key,
-                ForestJob.status.in_(["completed", "failed"]),
-            )
-            .values(idempotency_key=ForestJob.idempotency_key + ":" + ForestJob.id)
-        )
+        existing = db.scalar(select(ForestJob).where(ForestJob.idempotency_key == key))
+        if existing and existing.status in ("pending", "processing"):
+            return existing
+        db.execute(update(ForestJob).where(ForestJob.idempotency_key == key).values(
+            idempotency_key=ForestJob.idempotency_key + ":" + ForestJob.id))
     else:
-        snapshot = json.dumps(
-            [course_id, material_id, [list(row) for row in revisions]],
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        key = "relations:" + hashlib.sha256(snapshot.encode()).hexdigest()
-    existing = db.scalar(select(ForestJob).where(ForestJob.idempotency_key == key))
-    if existing is not None:
-        return existing
-    # SQLite's deferred BEGIN can release a SAVEPOINT as a real commit.
-    # A direct INSERT starts the outer write transaction and remains rollbackable.
-    db.execute(
-        insert(ForestJob)
-        .values(
-            id=new_id(), kind="cross_course_relations", course_id=course_id, idempotency_key=key
-        )
-        .on_conflict_do_nothing(index_elements=[ForestJob.idempotency_key])
-    )
+        pending = db.scalar(select(ForestJob).where(
+            ForestJob.course_id == course_id, ForestJob.kind == "cross_course_relations",
+            ForestJob.status == "pending", ForestJob.idempotency_key.like("relations:%")))
+        if pending:
+            ids = {row["note_id"] for row in json.loads(pending.source_snapshot_json)}
+            ids.update(row["note_id"] for row in revisions)
+            revisions = _source_snapshot(db, course_id, note_ids=list(ids))
+        key = "relations:" + hashlib.sha256(json.dumps([course_id, revisions],
+            ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        existing = db.scalar(select(ForestJob).where(ForestJob.idempotency_key == key))
+        if existing:
+            return existing
+        if pending:
+            pending.source_snapshot_json = json.dumps(revisions)
+            pending.idempotency_key = key
+            # The cursor belongs to the old ordered snapshot. A save or newly
+            # inserted Note can change any earlier entry, including after retry.
+            pending.completed_source_count = 0
+            pending.progress = 0
+            db.flush()
+            return pending
+    db.execute(insert(ForestJob).values(
+        id=new_id(), kind="cross_course_relations", course_id=course_id, idempotency_key=key,
+        source_snapshot_json=json.dumps(revisions),
+    ).on_conflict_do_nothing(index_elements=[ForestJob.idempotency_key]))
     return db.scalar(select(ForestJob).where(ForestJob.idempotency_key == key))
 
 
 def claim_next_forest_job() -> str | None:
     with SessionLocal() as db:
+        # Also covers old rows restored into fixtures/current schemas. This only
+        # registers durable validation; claim/worker owns activation, never GET.
+        for course_id in db.scalars(select(CrossCourseRelation.source_course_id).where(or_(
+            (CrossCourseRelation.status == "pending") & (CrossCourseRelation.origin == "ai")
+            & CrossCourseRelation.activation_mode.is_(None),
+            (CrossCourseRelation.status == "confirmed")
+            & CrossCourseRelation.evidence_fingerprint.is_(None),
+        )).distinct()):
+            db.execute(insert(ForestJob).values(
+                id=new_id(), kind="validate_legacy_relations", course_id=course_id,
+                idempotency_key="validate-legacy:" + course_id,
+            ).on_conflict_do_nothing(index_elements=[ForestJob.idempotency_key]))
+        db.commit()
         candidate = db.scalar(
             select(ForestJob.id)
             .where(ForestJob.status == "pending")
@@ -189,11 +219,26 @@ def retry_job(db: Session, job: ForestJob) -> ForestJob:
         )
     ):
         raise HTTPException(410, "培养方案原文件不存在，请重新导入")
+    values = {}
+    if job.kind == "cross_course_relations":
+        original = json.loads(job.source_snapshot_json)
+        current = _source_snapshot(db, job.course_id,
+                                   note_ids=[row["note_id"] for row in original] or None)
+        if current != original:
+            key = "relations:" + hashlib.sha256(json.dumps([job.course_id, current],
+                ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            existing = db.scalar(select(ForestJob).where(
+                ForestJob.idempotency_key == key, ForestJob.id != job.id))
+            if existing is not None:
+                raise HTTPException(409, "当前版本已有分析任务，请刷新查看最新任务")
+            values = {"source_snapshot_json": json.dumps(current),
+                      "completed_source_count": 0, "idempotency_key": key}
     # Same job identity, only failed -> pending. A concurrent retry cannot replay it twice.
     result = db.execute(
         update(ForestJob)
         .where(ForestJob.id == job.id, ForestJob.status == "failed")
         .values(
+            **values,
             status="pending",
             progress=0,
             error_message=None,
@@ -232,6 +277,7 @@ def _note_snapshot(db: Session, note: Note) -> dict | None:
         "course_name": note.course.name,
         "title": note.title,
         "revision": note.revision_number,
+        "fingerprint": evidence_fingerprint(db, note),
         "evidence": [
             {
                 "ref_id": source.id,
@@ -245,12 +291,13 @@ def _note_snapshot(db: Session, note: Note) -> dict | None:
     }
 
 
-def _candidate_snapshots(db: Session, course_id: str) -> tuple[list[dict], list[dict]]:
+def _candidate_snapshots(db: Session, course_id: str, source_ids: list[str] | None = None) -> tuple[list[dict], list[dict]]:
     # Rank all lightweight titles before applying evidence/prompt budgets. Taking
     # the newest rows first permanently hid older prerequisite material.
     own_metadata = list(
         db.execute(
-            _live_note_query(course_id).with_only_columns(Note.id, Note.title, Note.course_id)
+            _live_note_query(course_id).where(Note.id.in_(source_ids) if source_ids is not None else True)
+            .with_only_columns(Note.id, Note.title, Note.course_id)
         ).all()
     )
     metadata = list(
@@ -314,13 +361,19 @@ def _candidate_snapshots(db: Session, course_id: str) -> tuple[list[dict], list[
     return source, target
 
 
-def _generate_relations(db: Session, job: ForestJob, client: DeepSeekClient) -> None:
+def _generate_batch(db: Session, job: ForestJob, client: DeepSeekClient, batch: list[dict]) -> None:
     if not client.configured:
         raise RelationError("AI 模型未配置，无法生成跨课候选；配置后可重试，也可手动建立藤蔓")
     course = db.get(Course, job.course_id)
     if course is None or course.deleted_at is not None:
         raise RelationError("课程已删除或不存在，无法生成跨课候选")
-    own, other = _candidate_snapshots(db, course.id)
+    own, other = _candidate_snapshots(db, course.id, [row["note_id"] for row in batch])
+    expected = {row["note_id"]: row for row in batch}
+    for item in own:
+        note = db.get(Note, item["note_id"])
+        if (item["revision"] != expected[note.id]["revision"]
+                or evidence_fingerprint(db, note) != expected[note.id]["evidence"]):
+            raise RelationError("笔记版本或来源已变化，请重试任务")
     if not own:
         raise RelationError("当前课程没有可核对原文来源的真实笔记，无法生成跨课候选")
     if not other:
@@ -375,6 +428,9 @@ def _generate_relations(db: Session, job: ForestJob, client: DeepSeekClient) -> 
     )
     db.commit()
     # Re-read every endpoint and its evidence after the external call, before any insert.
+    # Begin a write transaction before final reads, so edits/deletion/reparse
+    # cannot interleave between evidence validation and relation commit.
+    db.execute(update(ForestJob).where(ForestJob.id == job.id).values(heartbeat_at=datetime.now(UTC)))
     db.expire_all()
     validated = []
     seen = set()
@@ -401,6 +457,7 @@ def _generate_relations(db: Session, job: ForestJob, client: DeepSeekClient) -> 
                 or revision != prior["revision"]
                 or note.revision_number != revision
                 or note.course_id != prior["course_id"]
+                or evidence_fingerprint(db, note) != prior["fingerprint"]
             ):
                 raise RelationError("生成期间笔记已修改或模型使用了错误版本，请重新生成")
             active = {ref.id for ref in active_note_sources(db, note)}
@@ -430,15 +487,20 @@ def _generate_relations(db: Session, job: ForestJob, client: DeepSeekClient) -> 
         if existing:
             # A new analysis may refresh a stale, unreviewed AI proposal only.
             if (
-                existing.status == "pending"
+                existing.status != "rejected"
                 and existing.origin == "ai"
-                and (relation_display(db, existing) or {}).get("stale")
+                and (existing.activation_mode == "automatic" or existing.status == "pending")
+                and ((relation_display(db, existing) or {}).get("stale")
+                     or existing.status == "pending")
             ):
                 existing.source_revision = source.revision_number
                 existing.target_revision = target.revision_number
                 existing.source_ref_ids_json = json.dumps(source_refs)
                 existing.target_ref_ids_json = json.dumps(target_refs)
                 existing.reason = reason
+                existing.status = "confirmed"
+                existing.activation_mode = "automatic"
+                existing.evidence_fingerprint = relation_fingerprint(db, source, target, source_refs, target_refs)
             continue
         db.add(
             CrossCourseRelation(
@@ -450,12 +512,46 @@ def _generate_relations(db: Session, job: ForestJob, client: DeepSeekClient) -> 
                 target_revision=target.revision_number,
                 relation_type=item.relation_type,
                 reason=reason,
-                status="pending",
+                status="confirmed",
                 origin="ai",
+                activation_mode="automatic",
+                evidence_fingerprint=relation_fingerprint(db, source, target, source_refs, target_refs),
                 source_ref_ids_json=json.dumps(source_refs),
                 target_ref_ids_json=json.dumps(target_refs),
             )
         )
+
+
+def _validate_legacy_relations(db: Session, job: ForestJob) -> None:
+    db.execute(update(ForestJob).where(ForestJob.id == job.id).values(heartbeat_at=datetime.now(UTC)))
+    db.expire_all()
+    for relation in db.scalars(select(CrossCourseRelation).where(
+            CrossCourseRelation.source_course_id == job.course_id,
+            CrossCourseRelation.status.in_(["pending", "confirmed"]))):
+        display = relation_display(db, relation)
+        if display is not None and not display["stale"]:
+            relation.activation_mode = ("automatic" if relation.status == "pending"
+                                        else relation.activation_mode or "manual")
+            relation.status = "confirmed"
+            relation.evidence_fingerprint = relation_fingerprint(
+                db, db.get(Note, relation.source_note_id), db.get(Note, relation.target_note_id),
+                display["source_ref_ids"], display["target_ref_ids"])
+        elif relation.status == "pending":
+            enqueue_relations(db, job.course_id, note_ids=[relation.source_note_id])
+
+
+def _generate_relations(db: Session, job: ForestJob, client: DeepSeekClient) -> None:
+    snapshot = json.loads(job.source_snapshot_json)
+    if not snapshot:  # Existing queued jobs from before source snapshot migration.
+        snapshot = _source_snapshot(db, job.course_id)
+        job.source_snapshot_json = json.dumps(snapshot)
+        db.commit()
+    for offset in range(job.completed_source_count, len(snapshot), 30):
+        _generate_batch(db, job, client, snapshot[offset:offset + 30])
+        job.completed_source_count = min(offset + 30, len(snapshot))
+        job.progress = int(90 * job.completed_source_count / len(snapshot))
+        job.heartbeat_at = datetime.now(UTC)
+        db.commit()  # Relations and checkpoint commit together; retry skips these batches.
 
 
 def process_forest_job(job_id: str) -> None:
@@ -473,6 +569,8 @@ def process_forest_job(job_id: str) -> None:
                 record.status = "processing"
                 db.commit()
                 extract_curriculum(db, record, client=DeepSeekClient())
+            elif job.kind == "validate_legacy_relations":
+                _validate_legacy_relations(db, job)
             elif job.kind == "cross_course_relations":
                 db.commit()
                 _generate_relations(db, job, DeepSeekClient())

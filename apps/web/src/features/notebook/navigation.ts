@@ -1,4 +1,4 @@
-type Section = { id: string; material_id: string | null }
+type Section = { id: string; material_id: string | null; notebook_id?: string | null }
 type Outline<T extends Section> = {
   chapters: Array<{ id: string; sections: T[] }>
   historical_sections: T[]
@@ -22,11 +22,11 @@ export function adjacentSection<T extends Section>(outline: Outline<T>, id: stri
   return index < 0 ? undefined : sections[index + direction]
 }
 
-export function notebookPath(courseId: string, section?: Section, mode?: string): string {
+export function notebookPath(courseId: string, section?: Section, mode?: string, notebookId = section?.notebook_id ?? undefined): string {
   const query = new URLSearchParams()
   if (section) { query.set('chapter', section.material_id ?? 'history'); query.set('section', section.id) }
   if (mode === 'book') query.set('mode', 'book')
-  return `/courses/${courseId}/notebook${query.size ? `?${query}` : ''}`
+  return `/courses/${courseId}/${notebookId ? `notebooks/${notebookId}` : 'notebook'}${query.size ? `?${query}` : ''}`
 }
 
 export function shouldBlockNoteNavigation(dirty: boolean, current: { pathname: string; search: string }, next: { pathname: string; search: string }): boolean {

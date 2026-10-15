@@ -18,9 +18,9 @@ from app.db.database import Base, engine
 
 INITIAL_REVISION = "964d70a06320"
 NOTEBOOK_COLUMNS = {
-    "courses": {"notebook_order_revision"},
-    "materials": {"chapter_order"},
-    "notes": {"material_id", "section_key", "section_order"},
+    "courses": {"notebook_order_revision", "last_opened_at"},
+    "materials": {"chapter_order", "notebook_id"},
+    "notes": {"material_id", "section_key", "section_order", "notebook_id", "tree_slot"},
 }
 PHASE_ONE_COLUMNS = {
     "courses": {"deleted_at"},
@@ -44,7 +44,7 @@ PHASE_THREE_TABLES = {
 FOREST_TABLES = {
     "forest_course_profiles", "curriculum_imports", "forest_jobs", "cross_course_relations",
 }
-MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES
+MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES | {"notebooks", "notebook_reading_positions"}
 LEGACY_COLUMNS = {
     "materials": {"topic_title": "VARCHAR(200)"},
     "processing_jobs": {

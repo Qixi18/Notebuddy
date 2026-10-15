@@ -41,6 +41,7 @@ function App() {
           <Route path="/courses/:courseId" element={<CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard>} />
           <Route path="/notes" element={<NotesLibraryPage />} />
           <Route path="/courses/:courseId/notebook" element={<CourseRouteGuard><NotebookPage /></CourseRouteGuard>} />
+          <Route path="/courses/:courseId/notebooks/:notebookId" element={<CourseRouteGuard><NotebookPage /></CourseRouteGuard>} />
           <Route path="/courses/:courseId/notes" element={<Navigate to="/notes" replace />} />
           <Route path="/courses/:courseId/notes/:noteId" element={<CourseRouteGuard><NotesPage /></CourseRouteGuard>} />
           <Route path="/courses/:courseId/materials" element={<CourseRouteGuard><MaterialsPage /></CourseRouteGuard>} />

@@ -31,6 +31,7 @@ class ForestSearchRead(BaseModel):
     course_id: str
     course_name: str
     note_id: str
+    notebook_id: str | None = None
     title: str
     material_id: str | None
 
@@ -76,6 +77,8 @@ class CrossCourseRelationRead(BaseModel):
     reason: str
     status: RelationStatus
     origin: Literal["manual", "ai"]
+    activation_mode: Literal["automatic", "manual"] | None = None
+    evidence_fingerprint: str | None = None
     source_revision: int
     target_revision: int
     stale: bool

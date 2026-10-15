@@ -48,8 +48,8 @@ def forest_data(tmp_path):
             db.add(note); notes.append(note)
             db.add(ForestCourseProfile(course_id=course.id, position=i, semester=2, learning_state="completed"))
         db.flush()
-        db.add(CrossCourseRelation(source_course_id=courses[0].id, target_course_id=courses[1].id, source_note_id=notes[0].id, target_note_id=notes[1].id, source_revision=4, target_revision=4, relation_type="related", reason="真实关联", status="confirmed"))
-        db.add_all([ForestJob(kind="curriculum_import", curriculum_import_id=curriculum.id), ForestJob(kind="cross_course_relations", course_id=courses[0].id), ForestJob(kind="cross_course_relations")])
+        db.add(CrossCourseRelation(source_course_id=courses[0].id, target_course_id=courses[1].id, source_note_id=notes[0].id, target_note_id=notes[1].id, source_revision=4, target_revision=4, relation_type="related", reason="真实关联", status="confirmed", activation_mode="manual", evidence_fingerprint="a" * 64))
+        db.add_all([ForestJob(kind="curriculum_import", curriculum_import_id=curriculum.id), ForestJob(kind="cross_course_relations", course_id=courses[0].id, source_snapshot_json=json.dumps([{"note_id": notes[0].id, "revision": 4, "evidence": "b" * 64}]), completed_source_count=1), ForestJob(kind="cross_course_relations")])
         db.commit()
     engine.dispose()
     return data
@@ -68,6 +68,9 @@ def test_full_backup_includes_only_stored_curriculum_original_and_preserves_rela
         assert db.execute("SELECT source_note_id,target_note_id FROM cross_course_relations").fetchall() == [("note-0", "note-1")]
         assert db.execute("SELECT revision_number,content_markdown,user_locked FROM notes").fetchall() == [(4, "用户正文", 1)] * 2
         assert db.execute("SELECT count(*) FROM forest_jobs").fetchone()[0] == 3
+        assert db.execute("SELECT activation_mode,evidence_fingerprint FROM cross_course_relations").fetchone() == ("manual", "a" * 64)
+        snapshot, progress = db.execute("SELECT source_snapshot_json,completed_source_count FROM forest_jobs WHERE course_id='course-0'").fetchone()
+        assert json.loads(snapshot) == [{"note_id": "note-0", "revision": 4, "evidence": "b" * 64}] and progress == 1
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 
 

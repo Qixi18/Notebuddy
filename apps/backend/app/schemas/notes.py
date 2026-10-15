@@ -10,6 +10,7 @@ class NoteRead(BaseModel):
 
     id: str
     course_id: str
+    notebook_id: str | None = None
     knowledge_node_id: str
     material_id: str | None = None
     section_key: str | None = None

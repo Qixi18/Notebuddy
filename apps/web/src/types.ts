@@ -4,9 +4,11 @@ export type Course = {
   description: string | null
   created_at: string
   deleted_at?: string | null
+  last_opened_at?: string | null
 }
 
 export type Material = {
+  notebook_id?: string | null
   chapter_order?: number
   id: string
   course_id: string
@@ -178,6 +180,8 @@ export type TermExplanation = {
 }
 
 export type Note = {
+  notebook_id?: string | null
+  tree_slot?: number
   material_id: string | null
   section_key: string | null
   section_order: number
@@ -196,6 +200,25 @@ export type Note = {
 export type NotebookSection = Pick<Note, 'id' | 'knowledge_node_id' | 'material_id' | 'section_key' | 'section_order' | 'title' | 'revision_number' | 'user_locked' | 'updated_at'>
 export type NotebookChapter = { id: string; title: string; chapter_order: number; status: string; deleted_at: string | null; sections: NotebookSection[] }
 export type Notebook = { course_id: string; title: string; order_revision: number; chapters: NotebookChapter[]; historical_sections: NotebookSection[]; removed_chapters: NotebookChapter[] }
+
+// Keep legacy types compatible until their consumers switch to scoped routes.
+export type SectionRead = NotebookSection & { notebook_id: string; tree_slot: number }
+export type ChapterRead = Omit<NotebookChapter, 'sections'> & { sections: SectionRead[] }
+export type NotebookRead = Omit<Notebook, 'chapters' | 'historical_sections' | 'removed_chapters'> & {
+  id: string; tree_slot: number; chapters: ChapterRead[]
+  historical_sections: SectionRead[]; removed_chapters: ChapterRead[]
+}
+export type NotebookSummary = {
+  id: string; course_id: string; title: string; tree_slot: number
+  display_order: number; order_revision: number; is_default: boolean
+  created_at: string; updated_at: string
+}
+export type CourseTree = { course_id: string; notebooks: NotebookRead[] }
+export type NotebookReadingPosition = {
+  notebook_id: string; chapter_id: string | null; note_id: string | null
+  mode: 'chapter' | 'book'; section_offset: number; revision: number; updated_at: string
+}
+export type ReadingPositionUpdate = Omit<NotebookReadingPosition, 'notebook_id' | 'revision' | 'updated_at'> & { expected_revision: number }
 
 export type NoteRevision = {
   id: string

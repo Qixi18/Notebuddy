@@ -8,6 +8,7 @@ export function useForestCamera(
   width: number,
   height: number,
   viewportReady = true,
+  allowInteractivePan = false,
 ) {
   const svgRef = useRef<SVGSVGElement>(null)
   const sceneRef = useRef<SVGGElement>(null)
@@ -33,10 +34,11 @@ export function useForestCamera(
         [0, 0],
         [width, height],
       ])
-      .scaleExtent([0.35, 2.5])
+      .scaleExtent([allowInteractivePan ? 0.02 : 0.35, 2.5])
+      .clickDistance(6)
       .filter(
         (event: MouseEvent | WheelEvent) =>
-          !(event.target as Element)?.closest?.('[data-forest-interactive]') &&
+          (allowInteractivePan || !(event.target as Element)?.closest?.('[data-forest-interactive]')) &&
           (!event.ctrlKey || event.type === 'wheel') &&
           !event.button,
       )
@@ -63,7 +65,7 @@ export function useForestCamera(
       cancelAnimationFrame(frame)
       svg.on('.zoom', null)
     }
-  }, [width, height, viewportReady])
+  }, [width, height, viewportReady, allowInteractivePan])
   const move = useCallback((next: Camera) => {
     if (svgRef.current && behavior.current)
       select(svgRef.current).call(
@@ -83,14 +85,14 @@ export function useForestCamera(
   const scale = useCallback(
     (factor: number) => {
       const current = cameraRef.current
-      const k = Math.min(2.5, Math.max(0.35, current.k * factor))
+      const k = Math.min(2.5, Math.max(allowInteractivePan ? 0.02 : 0.35, current.k * factor))
       move({
         x: width / 2 - ((width / 2 - current.x) * k) / current.k,
         y: height / 2 - ((height / 2 - current.y) * k) / current.k,
         k,
       })
     },
-    [move, width, height],
+    [move, width, height, allowInteractivePan],
   )
   const focus = useCallback(
     (x: number, y: number) =>

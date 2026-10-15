@@ -45,5 +45,8 @@ export function resolveConversationCourseId(
   courses: Course[],
   read: (key: string) => string | null,
 ): string | undefined {
-  return urlCourseId ?? pickFallbackCourseId(courses, (id) => courseVisitedAt(id, read))
+  return urlCourseId ?? pickFallbackCourseId(courses, (id) => {
+    const serverTime = Date.parse(courses.find(course => course.id === id)?.last_opened_at ?? '')
+    return Number.isFinite(serverTime) ? serverTime : courseVisitedAt(id, read)
+  })
 }

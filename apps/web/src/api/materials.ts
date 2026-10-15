@@ -7,12 +7,13 @@ export const materialApi = {
   previewMaterialDeletion: (id: string) => request<DeletionPreview>(`/api/v1/materials/${id}/deletion-preview`),
   deleteMaterial: (id: string) => request<DeletionPreview>(`/api/v1/materials/${id}`, { method: 'DELETE' }),
   restoreMaterial: (id: string) => request<Material>(`/api/v1/materials/${id}/restore`, { method: 'POST' }),
-  uploadMaterial: (courseId: string, file: File, lectureTitle: string, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID()) => {
+  uploadMaterial: (courseId: string, file: File, lectureTitle: string, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID(), notebookId?: string) => {
     const form = new FormData()
     form.append('file', file)
     form.append('lecture_title', lectureTitle)
     form.append('topic_title', topicTitle)
     form.append('allow_duplicate', String(allowDuplicate))
+    if (notebookId) form.append('notebook_id', notebookId)
     return request<UploadResponse>(`/api/v1/courses/${courseId}/materials`, {
       method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: form,
     })

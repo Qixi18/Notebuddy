@@ -78,7 +78,7 @@ for node, raw_relations in pending_relations:
 
 新增全局 `/forest` 场景。React 管理 SVG 节点，`d3-zoom` 与 `d3-selection` 管理视口，`d3-shape` 生成植物曲线。装饰性树形和业务叶子分层，叶子绑定现有 Note ID；森林只按可见区域读取笔记本目录，避免加载所有课程正文。课程层级、顺序、学习状态与独立修订保存在 `ForestCourseProfile`，视口和布局缓存保存在浏览器。
 
-`CrossCourseRelation` 独立表示两门课具体笔记之间的藤蔓，绑定两端课程、笔记版本和来源。手动连接是显式确认；AI 生成 pending 候选，确认前不展示藤蔓。笔记改变或来源失效需要复核。原 `KnowledgeEdge` 仍仅用于课程内知识关系，原答疑接口继续校验课程归属。
+`CrossCourseRelation` 独立表示两门课具体笔记之间的藤蔓，绑定两端课程、笔记版本和来源。2026-10-11的 pending 后审核方案是历史行为；2026-10-15更新为独立持久任务校验来源与版本后直接生效，`activation_mode` 区分 automatic/manual，`evidence_fingerprint` 追踪来源变化。旧 pending 由执行器补验，迁移不调用模型。失效关系隐藏后重分析，用户隐藏保留 rejected，自动任务不恢复。原 `KnowledgeEdge` 仍仅用于课程内知识关系，原答疑接口继续校验课程归属。
 
 `CurriculumImport` 保存 PDF/DOCX 或文本导入、原文件、来源位置、模式、告警与预览行；确认后创建或关联课程。培养方案不进入 Material/课程讲次。新增 `ForestJob` 持久队列由 `app.workers.runner` 同一独立进程处理，承担培养方案解析与跨课程候选生成。资料成功生成笔记后登记任务，API 不在请求进程内执行 AI。
 
@@ -90,14 +90,23 @@ for node, raw_relations in pending_relations:
 
 ## 当前数据关系
 
-课程就是笔记本，Material 就是章节，Note 就是小节。`Course.notebook_order_revision` 对章节重排做乐观并发保护；上传、删除和恢复也使该版本失效。`Material.chapter_order` 保留讲次顺序，`Note.material_id + section_key` 唯一定位本讲位置，`section_order` 控制小节顺序。`KnowledgeNode.notes` 为一对多：概念复用，各讲正文和叶子独立。图的 `occurrences` 以 Note ID 为身份，重复概念关系从同一 concept ID 派生。
+课程包含多个 Notebook，Material 是所属本的章节，Note 是小节。`Notebook.order_revision` 对本内章节重排做乐观并发保护，上传、删除、恢复也递增所属本版本。旧 `Course.notebook_order_revision` 保留兼容。`Material.chapter_order` 保留讲次顺序，`Note.material_id + section_key` 定位本讲位置，`section_order` 控制小节顺序。Notebook/Note 的 `tree_slot` 持久分配，不因目录重排改变；同名点跨讲、跨本保留独立正文与Note ID。`KnowledgeNode.notes` 仍一对多、概念课程级复用。
+
+`NotebookReadingPosition` 按本保存在 SQLite，记录章节、Note ID、chapter/book模式、0..1小节相对偏移及独立CAS版本。阅读正文稳定后恢复一次，深链优先，滚动节流保存、切换离开补存；网络失败或409保留待重试位置并暂停后续写入。`Course.last_opened_at` 只由实际访问写入；首页选最近三课，浏览器返回保留原集合和相机。
+
+首页和森林共用 `KnowledgeTreeScene`，仅课程集合与初始布局不同。正常总览最多6本/枝各6真实叶标签，放大/目录/搜索/藤蔓端点临时透镜可达全部Note。相机按实际画布宽度显示1–3棵，可见及邻近课程才挂载目录。绘制为本地3根干/6叶片atlas与动态SVG；主枝沿三次曲线法向渐细，从同主干变体atlas采样不透明树皮，以14个切线方向的渐隐重叠段裁进轮廓，固定纹理尺度，无额外图片资源。叶柄从主枝不同位置连接原叶坐标。木质绘制与交互分层，枝基由树干覆盖，标签/hit独立；学习状态仅给叶片配色，不表示掌握度。使用已有D3模块，无新增运行依赖或远程字体。
+
+前端 `KnowledgeTreeView.knownNotebookIds?` 随既有session画布快照保存已加载课程的本ID基线，空课也保留[]。新增Notebook依据持久槽位生成独立枝；创建后经上传页返回同entry时，和基线相比仅新枝装饰层生长600ms，不缩放操作区、叶坐标或相机。首次无基线/旧缓存不全树动画，普通目录刷新不重播，reduced-motion直接显示；6本总览/完整目录规则不变。
+
+自动关联任务保存完整受影响源ID/版本/证据指纹集合，按每批≤30源、≤18外课候选执行；保存或生成合并尚未领取的任务，重试保留进度并复核快照，提交前再核对引用和修订。related对称去重，先修保留方向，无配置时明确failed。详细API与验证边界见 [接口](api.md) 和 [交接](handoffs/2026-10-14-knowledge-tree-home.md)。
 
 迁移先创建校验检查点；移除旧 notes 概念唯一约束时暂时关闭 SQLite 外键并检查迁移后引用，保留修订、建议和来源。只有来源归属单讲的旧笔记回填 material_id，多讲/无来源旧笔记保留历史整理。首次重解析在唯一可匹配的位置接续旧 Note ID；歧义旧笔记不自动拆分。多正文库拒绝有损降级。
 
 ```text
 Course
- ├─ Material ─ MaterialPage ─ PageBlock ─ SourceRef
- │                                  └─ RetrievalChunk
+ ├─ Notebook ─┬─ Material ─ MaterialPage ─ PageBlock ─ SourceRef
+ │            │                          └─ RetrievalChunk
+ │            └─ NotebookReadingPosition
  ├─ KnowledgeNode ─ KnowledgeEdge ─ KnowledgeNode
  │       └─ Notes（各讲独立）─ NoteRevision
  └─（知识点和笔记通过多对多关系引用 SourceRef）

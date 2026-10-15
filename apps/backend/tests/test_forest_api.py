@@ -177,7 +177,7 @@ def test_search_finds_hidden_courses_and_historical_sections_without_bodies(fore
     response = client.get("/api/v1/forest/search?q=程序设计")
     assert response.status_code == 200
     assert {row["note_id"] for row in response.json()} == {notes[1].id, historical.id}
-    assert set(response.json()[0]) == {"course_id", "course_name", "note_id", "title", "material_id"}
+    assert set(response.json()[0]) == {"course_id", "course_name", "note_id", "title", "material_id", "notebook_id"}
     assert client.get("/api/v1/forest/search?q=历史映射").json()[0]["note_id"] == historical.id
     materials[1].deleted_at = datetime.now(UTC); db.commit()
     assert [row["note_id"] for row in client.get("/api/v1/forest/search?q=程序设计").json()] == [historical.id]

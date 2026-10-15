@@ -43,3 +43,6 @@ test-*.pptx
 # 本地会话与工作记忆（WorkBuddy 生成，只属于本机，不是项目文件）
 .workbuddy/
 
+# Task implementation scratch and review evidence
+.superpowers/
+

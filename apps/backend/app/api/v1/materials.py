@@ -85,7 +85,7 @@ def restore_material(material_id: str, db: Session = Depends(get_db)) -> Materia
         raise HTTPException(status_code=404, detail="待恢复资料不存在")
     ensure_course(db, material.course_id)
     material.deleted_at = None
-    bump_order_revision(db, material.course_id)
+    bump_order_revision(db, material.course_id, material.notebook_id)
     db.commit()
     db.refresh(material)
     return material
@@ -101,6 +101,7 @@ def upload_material(
     lecture_title: str = Form(...),
     topic_title: str = Form(default=""),
     allow_duplicate: bool = Form(default=False),
+    notebook_id: str | None = Form(default=None),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
 ) -> UploadMaterialResponse:
@@ -111,6 +112,7 @@ def upload_material(
             filename=file.filename or "upload", lecture_title=lecture_title,
             topic_title=topic_title, media_type=file.content_type,
             allow_duplicate=allow_duplicate, idempotency_key=idempotency_key,
+            notebook_id=notebook_id,
         )
     except UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
