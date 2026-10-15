@@ -19,7 +19,10 @@ export function NotebookPage() {
   const forestReturn = (location.state as { fromForest?: boolean; forestReturn?: string } | null)?.fromForest ? (location.state as { forestReturn?: string }).forestReturn ?? '/forest' : undefined
   const { notes, materials, job, upsertNotes, setSelectedNoteId, courseContentLoading, noteDirty } = useWorkspace()
   const [outline, setOutline] = useState<NotebookRead>()
-  const [bookmark, setBookmark] = useState<NotebookReadingPosition | null>()
+  const bookmarkKey = `${courseId}:${notebookId}`
+  const [bookmarkState, setBookmarkState] = useState<{ key: string; value: NotebookReadingPosition | null }>()
+  const bookmark = bookmarkState?.key === bookmarkKey ? bookmarkState.value : undefined
+  const setBookmark = (value: NotebookReadingPosition | null | undefined) => setBookmarkState(value === undefined ? undefined : { key: bookmarkKey, value })
   const [resumeOffset, setResumeOffset] = useState(0)
   const [resumeMessage, setResumeMessage] = useState<string>()
   const [rootOpen, setRootOpen] = useState(false)
@@ -155,7 +158,7 @@ export function NotebookPage() {
     {progress.error && <p role="alert">{progress.error}<button onClick={() => void progress.retry()}>重试保存当前位置</button></p>}
     <div className="notebook-layout"><nav className="notebook-outline" aria-label="笔记本目录"><h2>目录</h2>
       {outline.chapters.map((item, index) => <div className="notebook-chapter-entry" key={item.id}>
-        <div className="notebook-chapter-title"><button onClick={() => navigate(`/courses/${courseId}/notebooks/${notebookId}?chapter=${item.id}${mode === 'book' ? '&mode=book' : ''}`)}>{index + 1}. {item.title}</button><span><button aria-label={`上移${item.title}`} disabled={index === 0 || ordering || noteDirty} onClick={() => void moveChapter(index, -1)}>↑</button><button aria-label={`下移${item.title}`} disabled={index === outline.chapters.length - 1 || ordering || noteDirty} onClick={() => void moveChapter(index, 1)}>↓</button></span></div>
+        <div className="notebook-chapter-title"><button onClick={() => navigate(`/courses/${courseId}/notebooks/${notebookId}?chapter=${item.id}${mode === 'book' ? '&mode=book' : ''}`, { state: location.state })}>{index + 1}. {item.title}</button><span><button aria-label={`上移${item.title}`} disabled={index === 0 || ordering || noteDirty} onClick={() => void moveChapter(index, -1)}>↑</button><button aria-label={`下移${item.title}`} disabled={index === outline.chapters.length - 1 || ordering || noteDirty} onClick={() => void moveChapter(index, 1)}>↓</button></span></div>
         {item.sections.map((s) => <button className={`notebook-section-link ${selected?.id === s.id ? 'active' : ''}`} key={s.id} aria-current={selected?.id === s.id ? 'location' : undefined} onClick={() => open(s)}>{s.title}{s.user_locked ? ' · 已编辑' : ''}</button>)}
         {!item.sections.length && <small>{item.status === 'failed' ? '解析失败，请在资料页重试' : item.status === 'completed' ? '暂无可生成的小节，请检查来源' : '资料处理中'}</small>}
       </div>)}

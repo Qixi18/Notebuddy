@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, act } from '@testing-library/react'
+import { useCallback, useState } from 'react'
 import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api, ApiError } from '../src/api'
@@ -36,6 +37,7 @@ test('removed bookmark stays in its own directory and explains the missing targe
 test('scroll in the actual reading container saves a relative section offset with server revision', async () => {
   mount('?chapter=m1&section=n1')
   await screen.findByText('正文 n1')
+  await waitFor(() => expect(screen.queryByText('正在按章节读取正文…')).toBeNull())
   const container = screen.getByRole('main', { name: '笔记本正文' })
   const article = document.getElementById('section-n1')!
   vi.spyOn(container, 'getBoundingClientRect').mockReturnValue({ top: 100 } as DOMRect)
@@ -81,16 +83,32 @@ test('first entry without a bookmark selects the first genuine section', async (
   mount()
   expect(await screen.findByText('正文 n1')).toBeTruthy()
 })
-test('switching books never queues an old section into the new book during loading', async () => {
-  const newSection = { ...s1, id: 'n3', notebook_id: 'second', material_id: 'm3' }
+test('switching books loads the uncached book bookmark and body, restores and saves its own position', async () => {
+  const newSection = { ...s1, id: 'n3', notebook_id: 'second', material_id: 'm3', content_markdown: '第二本新正文' }
   vi.mocked(api.getNotebookById).mockImplementation(async (_c, id) => id === 'second' ? { ...outline, id: 'second', title: '另一本', chapters: [{ id: 'm3', title: '讲3', sections: [newSection] }] } as never : outline as never)
-  vi.mocked(api.getReadingPosition).mockResolvedValue(null)
-  function Switch() { const navigate = useNavigate(); return <><NotebookPage /><button onClick={() => navigate('/courses/switch-course/notebooks/second')}>切换本</button></> }
-  render(<MemoryRouter initialEntries={['/courses/switch-course/notebooks/book']}><WorkspaceProvider value={{ notes: [s1, newSection], materials: [], upsertNotes: vi.fn(), setSelectedNoteId: vi.fn() } as unknown as WorkspaceContextValue}><Routes><Route path="/courses/:courseId/notebooks/:notebookId" element={<Switch />} /></Routes></WorkspaceProvider></MemoryRouter>)
+  vi.mocked(api.getReadingPosition).mockImplementation(async (_c, id) => id === 'second' ? { ...position, notebook_id: 'second', chapter_id: 'm3', note_id: 'n3', section_offset: .65, revision: 7 } as never : null)
+  vi.mocked(api.getNotebookChapter).mockImplementation(async (_c, _b, id) => ({ material_id: id, sections: id === 'm3' ? [newSection] : [] }) as never)
+  let sectionTop = 100
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    return { top: this.id === 'section-n3' ? sectionTop : 100, height: 400 } as DOMRect
+  })
+  function Switch() {
+    const navigate = useNavigate()
+    const [notes, setNotes] = useState([s1])
+    const upsertNotes = useCallback((incoming: typeof s1[]) => setNotes(current => [...current.filter(note => !incoming.some(next => next.id === note.id)), ...incoming]), [])
+    return <WorkspaceProvider value={{ notes, materials: [], upsertNotes, setSelectedNoteId: vi.fn() } as unknown as WorkspaceContextValue}><NotebookPage /><button onClick={() => navigate('/courses/switch-course/notebooks/second')}>切换本</button></WorkspaceProvider>
+  }
+  render(<MemoryRouter initialEntries={['/courses/switch-course/notebooks/book']}><Routes><Route path="/courses/:courseId/notebooks/:notebookId" element={<Switch />} /></Routes></MemoryRouter>)
   await screen.findByText('正文 n1')
   fireEvent.click(screen.getByRole('button', { name: '切换本' }))
+  await waitFor(() => expect(api.getReadingPosition).toHaveBeenCalledWith('switch-course', 'second'))
   await screen.findByText('正文 n3')
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect(api.getNotebookChapter).toHaveBeenCalledWith('switch-course', 'second', 'm3')
+  const container = screen.getByRole('main', { name: '笔记本正文' })
+  await waitFor(() => expect(container.scrollTop).toBe(260))
+  sectionTop = -100
+  fireEvent.scroll(container)
+  await waitFor(() => expect(vi.mocked(api.saveReadingPosition).mock.calls.some(call => call[1] === 'second' && call[2].note_id === 'n3' && call[2].section_offset === .5 && call[2].expected_revision === 7)).toBe(true))
   expect(vi.mocked(api.saveReadingPosition).mock.calls.filter(call => call[1] === 'second' && call[2].note_id === 'n1')).toHaveLength(0)
 })
 test('cached text does not restore early; the completed chapter restores once and later note updates keep the reader scroll', async () => {

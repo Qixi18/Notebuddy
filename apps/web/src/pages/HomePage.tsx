@@ -54,7 +54,7 @@ function HomeScene() {
   return <div className="home-tree-page">
     <header className="forest-header"><div><h1>让知识慢慢生长</h1><p>树根添加资料 · 主枝继续阅读 · 叶子打开知识点</p></div><div className="forest-header-actions"><Link to="/forest">走进知识森林</Link><button onClick={() => setCreateOpen(true)}>新建课程</button></div></header>
     <div className="home-tree-surface">
-      <KnowledgeTreeScene key={entry} mode="home" courses={visible} trees={directories.trees} initialView={restored?.view} onViewChange={saveView} onVisibleCourseIdsChange={directories.load}
+      <KnowledgeTreeScene key={entry} mode="home" courses={visible} trees={directories.trees} initialView={restored?.view} onViewChange={saveView} onVisibleCourseIdsChange={directories.watch}
         onRoot={setRoot} onNotebook={(courseId, notebookId) => navigate(notebookPath(courseId, undefined, undefined, notebookId), { state: returnState })}
         onNote={(courseId, notebookId, section) => navigate(notebookPath(courseId, section, undefined, notebookId), { state: returnState })} onRelation={() => undefined} />
       {coursesLoading && <p className="forest-scene-message" role="status">正在读取课程…</p>}

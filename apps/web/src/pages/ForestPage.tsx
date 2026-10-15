@@ -38,11 +38,12 @@ export function ForestPage() {
   const [job, setJob] = useState<ForestJob>()
   const directories = useTreeDirectories()
   const [visibleIds, setVisibleIds] = useState<string[]>([])
-  const visibleDirectories = useCallback((ids: string[]) => { setVisibleIds(ids); directories.load(ids) }, [directories.load])
+  const visibleDirectories = useCallback((ids: string[]) => { setVisibleIds(ids); directories.watch(ids) }, [directories.watch])
   const pins = relations.filter(relation => relation.status === 'confirmed' && !relation.stale && visibleIds.includes(relation.source_course_id) && visibleIds.includes(relation.target_course_id)).flatMap(relation => [relation.source_note_id, relation.target_note_id])
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const reload = useCallback(async () => {
+    void directories.refresh()
     const [forest, links] = await Promise.allSettled([api.getForest(), api.getForestRelations()])
     if (!mounted.current) return
     if (forest.status === 'fulfilled') setCourses(forest.value.courses)
@@ -50,7 +51,7 @@ export function ForestPage() {
     if (links.status === 'fulfilled') setRelations(links.value)
     else setError(links.reason instanceof Error ? links.reason.message : '关联读取失败')
     setLoading(false)
-  }, [])
+  }, [directories.refresh])
   useEffect(() => { void reload() }, [reload])
   useEffect(() => { if (query.get('course')) setFocusId(query.get('course')!) }, [query])
   useEffect(() => {
