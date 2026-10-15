@@ -76,7 +76,7 @@ export function NotebookPage() {
         if (!initialQuery.current && saved) {
           const valid = saved.notebook_id === notebookId && (saved.mode === 'book' || saved.mode === 'chapter') && Number.isFinite(saved.section_offset) && saved.section_offset >= 0 && saved.section_offset <= 1
           const section = valid && saved.note_id ? resolveSection(book, saved.chapter_id ?? 'history', saved.note_id) : undefined
-          if (!valid || (saved.note_id && !section) || (saved.chapter_id && !saved.note_id && !book.chapters.some(ch => ch.id === saved.chapter_id))) {
+          if (!valid || (saved.note_id && !section) || (saved.chapter_id && !book.chapters.some(ch => ch.id === saved.chapter_id))) {
             setResumeMessage('上次阅读位置已失效；请从这本笔记的目录重新选择。')
             navigate(`/courses/${courseId}/notebooks/${notebookId}?directory=1`, { replace: true, state: location.state })
           } else {

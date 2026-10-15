@@ -6,7 +6,7 @@ import { api, ApiError } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { NotebookPage } from '../src/pages/NotebookPage'
 import { positionWriter } from '../src/features/notebook/readingPosition'
-vi.mock('../src/api', () => ({ ApiError: class extends Error { constructor(message: string, readonly status: number) { super(message) } }, api: { getNotebook: vi.fn(), getNotebookById: vi.fn(), getReadingPosition: vi.fn(), saveReadingPosition: vi.fn(), getNotebookChapter: vi.fn(), getChapter: vi.fn() } }))
+vi.mock('../src/api', () => ({ ApiError: class extends Error { constructor(message: string, readonly status: number) { super(message) } }, api: { getNotebook: vi.fn(), getNotebookById: vi.fn(), getReadingPosition: vi.fn(), saveReadingPosition: vi.fn(), getNotebookChapter: vi.fn(), getChapter: vi.fn(), getNote: vi.fn() } }))
 vi.mock('../src/pages/NotesPage', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
 const s1 = { id: 'n1', notebook_id: 'book', material_id: 'm1', tree_slot: 0, title: '第一节' }
 const s2 = { ...s1, id: 'n2', material_id: 'm2', title: '第二节' }
@@ -34,6 +34,44 @@ test('removed bookmark stays in its own directory and explains the missing targe
   expect(await screen.findByText(/上次阅读位置已失效/)).toBeTruthy()
   expect(screen.queryByText('正文 n1')).toBeNull()
 })
+test.each(['chapter', 'book'])('automatic %s resume rejects a removed chapter even when its original note remains', async mode => {
+  vi.mocked(api.getNotebookById).mockResolvedValue({ ...outline, chapters: [outline.chapters[0]], removed_chapters: [{ ...outline.chapters[1], deleted_at: '2026-10-15T00:00:00Z' }] } as never)
+  vi.mocked(api.getReadingPosition).mockResolvedValue({ ...position, mode } as never)
+  vi.mocked(api.getNote).mockResolvedValue({ ...s2, course_id: 'c' } as never)
+  const page = mount()
+  expect(await screen.findByText(/上次阅读位置已失效/)).toBeTruthy()
+  expect(screen.getByRole('navigation', { name: '笔记本目录' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '1. 讲1' })).toBeTruthy()
+  expect(screen.queryByText('正文 n2')).toBeNull()
+  expect(screen.queryByText('正文 n1')).toBeNull()
+  expect(api.getNote).not.toHaveBeenCalled()
+  fireEvent.scroll(screen.getByRole('main', { name: '笔记本正文' }))
+  fireEvent(window, new Event('pagehide'))
+  page.unmount()
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 650)) })
+  expect(api.saveReadingPosition).not.toHaveBeenCalled()
+})
+
+test('an explicit old section link still opens the retained note from a removed chapter', async () => {
+  vi.mocked(api.getNotebookById).mockResolvedValue({ ...outline, chapters: [outline.chapters[0]], removed_chapters: [{ ...outline.chapters[1], deleted_at: '2026-10-15T00:00:00Z' }] } as never)
+  vi.mocked(api.getNote).mockResolvedValue({ ...s2, course_id: 'c' } as never)
+  mount('?chapter=m2&section=n2')
+  expect(await screen.findByText('正文 n2')).toBeTruthy()
+  expect(screen.getByRole('heading', { name: '讲2 · 资料已移除' })).toBeTruthy()
+  expect(screen.queryByText(/上次阅读位置已失效/)).toBeNull()
+  await waitFor(() => expect(api.getNote).toHaveBeenCalledWith('n2'))
+})
+
+test('a historical section bookmark with no material still resumes its retained note', async () => {
+  const historical = { ...s2, material_id: null }
+  vi.mocked(api.getNotebookById).mockResolvedValue({ ...outline, chapters: [outline.chapters[0]], historical_sections: [historical] } as never)
+  vi.mocked(api.getReadingPosition).mockResolvedValue({ ...position, chapter_id: null } as never)
+  vi.mocked(api.getNote).mockResolvedValue({ ...historical, course_id: 'c' } as never)
+  mount()
+  expect(await screen.findByText('正文 n2')).toBeTruthy()
+  expect(screen.queryByText(/上次阅读位置已失效/)).toBeNull()
+})
+
 test('scroll in the actual reading container saves a relative section offset with server revision', async () => {
   mount('?chapter=m1&section=n1')
   await screen.findByText('正文 n1')
