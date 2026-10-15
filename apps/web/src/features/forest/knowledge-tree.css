@@ -15,11 +15,11 @@
 .kt-action text { pointer-events: none; }
 .kt-course-title, .kt-book-title { font-family: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', serif; }
 .kt-course-title { fill: #284b39; font-size: 25px; font-weight: 700; letter-spacing: 1px; }
-.kt-book-title { fill: #284b39; font-size: 18px; font-weight: 700; }
+.kt-book-title { fill: #344c36; font-size: 17px; font-weight: 600; }
 .kt-note-label { fill: #334b35; font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif; }
 .kt-state { fill: #54624b; font: 12px 'Microsoft YaHei', system-ui, sans-serif; }
-.kt-tree-planned .kt-branch image { opacity: .65; filter: saturate(.42); }
-.kt-tree-completed .kt-branch image { filter: saturate(1.1) brightness(.9); }
+.kt-tree-planned .kt-branch image, .kt-tree-planned [data-leaf-paint] image { opacity: .65; filter: saturate(.42); }
+.kt-tree-completed .kt-branch image, .kt-tree-completed [data-leaf-paint] image { filter: saturate(1.1) brightness(.83); }
 .kt-note-label-bg, .kt-leaf-hit, .kt-book-plaque { stroke: transparent; stroke-width: 2; transition: fill 150ms, stroke 150ms; }
 .kt-action:hover .kt-leaf-hit, .kt-action:focus-visible .kt-leaf-hit, .kt-note-pinned .kt-leaf-hit { stroke: #b5a04d; fill: #d5ba631f; }
 .kt-action:hover .kt-note-label-bg, .kt-action:focus-visible .kt-note-label-bg { fill: #f5edcd; }

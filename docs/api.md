@@ -1,6 +1,26 @@
 # API 契约
 
-## 课程笔记本（2026-10-08）
+## 多笔记本与续读（2026-10-15）
+
+以下地址均使用 `/api/v1` 前缀。每个本、章节、笔记读写同时校验课程与笔记本归属，越界返回 404。
+
+| 接口 | 契约 |
+| --- | --- |
+| `GET/POST /courses/{course_id}/notebooks` | 列出/创建笔记本；创建体 `{title}`，201 返回 `NotebookSummary`：`id,course_id,title,tree_slot,display_order,order_revision,is_default,created_at,updated_at`。空课程返回空列表，不在读取时创建默认本 |
+| `GET/PATCH /courses/{course_id}/notebooks/{notebook_id}` | 返回 `NotebookRead`：`id,course_id,title,tree_slot,order_revision,chapters,historical_sections,removed_chapters`；PATCH 体 `{title}`。目录不含正文 |
+| `GET .../notebooks/{notebook_id}/chapters/{material_id}` | 返回 `material_id,sections: NoteRead[]`；跨本、跨课或已移除章节返回 404 |
+| `PATCH .../notebooks/{notebook_id}/order` | `{material_ids,expected_order_revision}`，必须完整列出本内活动章节；过期409、无效列表422。上传、移除、恢复只递增所属本目录版本 |
+| `GET/PUT .../notebooks/{notebook_id}/reading-position` | GET 无记录返回 null。PUT 体 `{chapter_id,note_id,mode,section_offset,expected_revision}`，mode 为 chapter/book，offset 为 0..1；首次 expected_revision=0，成功返回 notebook_id、上述位置、新 revision 与 updated_at；冲突409 |
+| `POST /courses/{course_id}/visit` | 服务端记录实际访问时间并返回 `{last_opened_at}`；课程查询包含该字段，后台生成与森林悬停不登记访问 |
+| `GET /forest/courses/{course_id}/tree` | `{course_id,notebooks: NotebookRead[]}`；首页/森林共用轻量目录，不读取正文 |
+
+上传 multipart 增加 `notebook_id`；多本课程必须明确目标，省略时仅单本兼容（空课程需先创建本）。重复文件检查和上传幂等键均包含本 ID：同本重复须显式确认，异本可分别导入。`MaterialRead`、`NoteRead`、`SectionRead` 和森林笔记搜索结果均包含 `notebook_id`；小节还包含持久 `tree_slot`，不因重排改变。书签保存采用乐观并发，可信本地 CORS 已允许 PUT；正文保存版本与书签版本独立。
+
+Web 路由为 `/courses/:courseId/notebooks/:notebookId?chapter=<materialId>&section=<noteId>`，整本模式加 `mode=book`，历史整理用 `chapter=history`。叶子和搜索深链优先于旧书签；枝干恢复该本书签，失败保留待重试位置并提示。目标已移除时回到原本目录，不转到别本。旧单数 API 指向默认本；真正空课返回404，不自动写库。旧单数阅读路由和 `/courses/:courseId/notes/:noteId` 按真实Note归属解析。
+
+## 课程笔记本历史契约（2026-10-08）
+
+本段记录旧单本契约；单数接口通过默认本兼容。多本作用域、空课与显式新路由以上方2026-10-15契约为准。
 
 以下地址使用 `/api/v1` 前缀。
 
@@ -89,6 +109,10 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 | 最近课程关联任务 | `GET /forest/courses/{course_id}/latest-job` | 返回最近持久任务或 null；聚焦课程时显示自动任务错误和原任务重试入口 |
 | 森林任务查询/重试 | `GET /forest/jobs/{id}`、`POST /forest/jobs/{id}/retry` | 持久任务状态和可读错误，失败重试由独立执行器领取 |
 
-详细课程树复用 `/courses/{id}/notebook` 轻量目录；叶子复用 `chapter` 与 `section` 查询参数定位原笔记。关系两端需真实笔记 ID，不能拿概念 ID 代替同一概念在各讲的具体笔记。
+详细课程树现使用 `/forest/courses/{course_id}/tree` 多本目录；叶子携带真实 notebook_id、chapter 与 section 定位原笔记。关系两端需真实笔记 ID，不能拿概念 ID 代替同一概念在各讲的具体笔记。
 
-自动资料任务按本讲笔记修订幂等登记；显式再次分析会创建新的待处理任务，重复点击仍复用活动任务。候选先对有效笔记的轻量标题排序，再读取最多30个本课与18个外课笔记的可验证来源片段；不读取全森林笔记正文。候选有数量与标题匹配范围限制，不能视为完整的跨学科语义关系识别。
+2026-10-15 自动藤蔓更新：`CrossCourseRelationRead` 增加 `activation_mode=automatic/manual/null` 与 `evidence_fingerprint`，保留 `status=confirmed` 兼容。资料生成及笔记保存后，将受影响 Note ID、修订与来源指纹登记为持久 ForestJob；源集合每批不超过30，31个以上会连续分批处理，每批外课证据最多18。任务提交前重读当前端点、版本和真实引用；合法 AI 结果直接 confirmed/automatic，无需逐条确认，界面标记“自动关联”和“模型推断”。不承诺全量语义召回。
+
+旧 pending 候选由独立任务重新校验后生效，迁移不调用模型；旧 confirmed 来源快照也会补验。来源或正文变化后旧关系隐藏并登记重分析，`GET` 不执行模型。`DELETE /forest/relations/{id}` 保留 rejected 记录，自动任务和重试不会复活；用户显式重新连接（POST同端点/类型）或对有效证据显式确认可恢复，过期关系确认返回409。手动连接仍为 manual。无模型时任务 failed 并返回明确错误，不生成虚假藤蔓；配置后从原任务重试。显式重新分析去重活动任务，读取仅限轻量标题及可验证片段。
+
+上表“审核/移除关系”的 pending 审核描述是2026-10-11兼容接口，当前自动生效行为以本节更新为准；培养方案的预览确认及课程内知识提案不受此更改影响。
