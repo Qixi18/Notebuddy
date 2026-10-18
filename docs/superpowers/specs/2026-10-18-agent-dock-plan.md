@@ -1,7 +1,7 @@
 # 答疑悬浮坞 Agent 化实施计划
 
 - 日期：2026-10-18
-- 状态：**计划已制定并经用户确认范围，尚未开工**。实施进度记录在 `docs/handoffs/`（开工后新建）。
+- 状态：**P0 已实现并通过本地验证**（详见文末「实际交付记录」）；当前进入本地迭代完善阶段，**新改动只提交本地、暂不推送**。
 - 需求来源：用户要求把右侧 AI 答疑悬浮坞从"单轮检索问答"升级为真正能干活的 agent（对标 Notion Agent 能力），并支持通过 agent 对话对当前打开的笔记进行编辑与问答（2026-10-18 用户确认）。
 - 范围：本文档为 P0 实施计划；P1（知识树叶跳转卡、覆盖诊断多步任务、深度研究模式）、P2（技能库、定时任务）为后续迭代，不在本次。
 
@@ -168,3 +168,77 @@ apps/web/tests/
 - 本地 main 已快进至 `7814f87`（= origin/main，含悬浮坞改进版与知识树首页 PR #7），工作区干净。
 - 因此 agent 任务分支基点 = **main（7814f87）**，命名 `feature/agent-dock`，PR 目标 main。
 - 本计划文件在开工前保持未跟踪状态（不直接在 main 上提交）；随 `feature/agent-dock` 首次提交入库。
+
+## 10. 实际交付记录（2026-10-18，P0 完成后回填）
+
+### 10.1 实际变更文件树
+
+与第 5 节计划的差异：新增 `agentStream.ts`（SSE 解析纯函数，便于 node:test 直测）、
+`conversations.py`/`api.py` 有小幅必要改动（agent 模式标签识别、schema 兼容导出）、
+后端测试拆为 4 个文件、前端渲染层额外接入 `remark-gfm`（修复全项目表格不解析的既有缺陷）。
+
+```
+apps/backend/
+  app/ai/
+    deepseek.py          [修改] 新增 chat_stream：流式 + function calling；
+                                  思考模型 reasoning_content 回传、并行工具调用、每轮必须带 tools
+    prompts.py           [修改] 新增 AGENT_SYSTEM（工具规则/来源规范/注入防护）+ build_agent_messages
+    agent_loop.py        [新建] run_agent 事件循环：≤6 轮工具调用，产出 step/delta/final/error，
+                                  思维链不外发、工具失败降级为文本
+    agent_tools.py       [新建] 工具注册表：search_course / read_note / list_course_notes /
+                                  search_forest / get_note_coverage / explain_term / web_search（只读 7 个）
+                                  + propose_note_edit / propose_knowledge_node（只建 pending）；
+                                  按 scope 装配，全部校验课程归属，结果截断
+  app/api/v1/
+    agent.py             [新建] POST /conversations/{id}/agent-messages（SSE）；
+                                  消息与 evidence 等价复刻旧落库；agent 失败自动回退 run_answer
+    routes.py            [修改] 注册 agent 路由
+    conversations.py     [修改] 仅 _mode_from_evidence 增加 agent 前缀识别（历史回读标签），旧端点行为不变
+  app/schemas/
+    conversations.py     [修改] ReadingContext + AgentMessageCreate（scope: note|course|global）
+    api.py               [修改] AgentMessageCreate / ReadingContext 兼容导出
+  tests/
+    test_deepseek_stream.py  [新建] 5 用例：流式事件/分片聚合/reasoning 回传/无 key/HTTP 错误映射
+    test_agent_tools.py      [新建] 9 用例：范围装配/课程隔离/锁定限制/建议 pending/错误降级/森林搜索
+    test_agent_loop.py       [新建] 5 用例：事件序列/建议收集/无 key/轮次上限/工具失败降级
+    test_agent_api.py        [新建] 4 用例：SSE 流与落库/降级回退/幂等 409/范围与归属校验
+
+apps/web/
+  src/
+    api/agentStream.ts   [新建] SSE 帧解析纯函数 + agent 事件/载荷类型（零运行时依赖，node:test 直测）
+    api/agent.ts         [新建] streamAgentMessage：fetch 流式客户端（EventSource 不支持 POST）
+    components/AssistantDock.tsx
+                         [修改] 发送走 askAgent；范围三档选择器（锁定当前笔记/整门课程/全局可查）；
+                                  执行时间线 + 流式光标实时块；待确认建议卡与知识提议卡；
+                                  「如何打开笔记」提示；NOTE_PATH 扩展匹配 /notebooks/<id>（修复既有缺陷）；
+                                  Markdown 渲染接入 remark-gfm
+    features/conversation/useConversation.ts
+                         [修改] 新增 askAgent()/agentRun 流式通道与 AgentRunState；旧 ask() 保留
+    features/assistant/AgentSteps.tsx   [新建] 执行时间线（running→done 折叠）
+    features/assistant/AgentCards.tsx   [新建] 笔记修改建议卡（采纳/忽略）+ 知识提议信息卡
+    features/assistant/answerMeta.ts    [修改] agent 模式标签（完整 + 短版）
+    pages/AssistantPage.tsx             [修改] remark-gfm
+    pages/NotesPage.tsx                 [修改] remark-gfm
+    pages/NotebookPage.tsx              [修改] remark-gfm
+    styles.css           [修改] 时间线/光标/建议卡/表格样式（窄栏横向滚动）+ 打开笔记提示样式
+  tests/
+    agent-sse.test.ts    [新建] 3 用例：帧拆分/五类事件/坏帧容错（node:test）
+    agent-dock.test.tsx  [新建] 6 用例：范围三档调用/时间线与流式/知识提议卡与建议采纳/GFM 表格/无笔记提示
+    dock-interaction.test.tsx [修改] mock 扩展（askAgent/agentRun/listSuggestions）
+  package.json           [修改] 新增 remark-gfm@^4.0.1
+```
+
+### 10.2 交付状态与提交
+
+| 提交 | 内容 | 状态 |
+| --- | --- | --- |
+| `5b0449e` | P0 主体（后端 agent 层 + SSE 端点 + 前端 dock 改造 + 计划/交接文档） | 已推送 origin/feature/agent-dock |
+| `e355a36` | 追加修复：GFM 表格渲染、「打开笔记」引导（UI 提示 + agent 话术） | 已推送 origin/feature/agent-dock |
+| 此后改动 | **按用户要求只提交本地、暂不推送**，待功能完善后一并处理 | 本地 |
+
+验证状态：后端 ruff + pytest 232 passed；前端 node:test 34 + vitest 全绿（个别森林/首页重负载导航测试在整机高负载下偶发超时，单跑必过，与本任务无关）；npm run build 通过；真机 deepseek-flash 循环与浏览器端到端（锁定笔记→时间线→流式→建议卡→采纳→笔记 v2 可回退→全局档）全部通过。
+
+### 10.3 待完善（本地迭代中，等待具体需求）
+
+- P1 候选：知识树叶子跳转卡、覆盖诊断多步任务、深度研究模式；P2 候选：技能/指令页、定时任务。
+- 体验类：表格在极窄栏下的阅读优化、回答中笔记内链跳转、agent 过程的耗时可展示化。
