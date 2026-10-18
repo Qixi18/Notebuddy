@@ -281,7 +281,7 @@ def _explain_term(db: Session, *, course_id: str, arguments: dict[str, Any]) -> 
     return ToolOutcome(f"定位术语「{term}」的课件原文", _truncate("\n".join(lines)))
 
 
-def _web_search(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
+def _web_search(db: Session, *, course_id: str, arguments: dict[str, Any], allow_web: bool = True) -> ToolOutcome:
     from app.web_search.policy import (
         SearchPolicy,
         cache_search,
@@ -297,7 +297,7 @@ def _web_search(db: Session, *, course_id: str, arguments: dict[str, Any]) -> To
     query = str(arguments.get("query") or "").strip()[:200]
     if not query:
         return ToolOutcome("搜索词为空", "请提供非空 query。")
-    policy = SearchPolicy(allow=True, max_results=4, daily_limit=30, timeout_seconds=settings.web_search_timeout_seconds)
+    policy = SearchPolicy(allow=allow_web, max_results=4, daily_limit=30, timeout_seconds=settings.web_search_timeout_seconds)
     allowed, reason = can_search(policy)
     if not allowed or not web_search_configured():
         detail = f"联网搜索当前不可用（{reason or '未配置'}）。请只依据课程资料回答，并向用户说明该限制。"
@@ -426,6 +426,19 @@ _EXECUTORS = {
     "propose_knowledge_node": _propose_knowledge_node,
 }
 
+# 工具 → 执行器关键字参数白名单：分发时按此组装，签名不匹配在代码审查期即可发现
+_EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
+    "search_course": ("course_id", "arguments"),
+    "read_note": ("course_id", "arguments", "scope", "locked_note_id"),
+    "list_course_notes": ("course_id",),
+    "search_forest": ("course_id", "arguments"),
+    "get_note_coverage": ("course_id", "arguments"),
+    "explain_term": ("course_id", "arguments"),
+    "web_search": ("course_id", "arguments", "allow_web"),
+    "propose_note_edit": ("course_id", "arguments", "editable_note_id"),
+    "propose_knowledge_node": ("course_id", "arguments"),
+}
+
 
 def execute_tool(
     db: Session,
@@ -438,17 +451,24 @@ def execute_tool(
     editable_note_id: str | None = None,
     allow_web: bool = True,
 ) -> ToolOutcome:
-    """执行一个工具调用；任何异常都折算成错误文本回给模型，绝不让循环中断。"""
+    """执行一个工具调用；任何异常都折算成错误文本回给模型，绝不让循环中断。
+
+    每个工具显式声明自己接收的参数（``_EXECUTOR_PARAMS``），分发时按白名单
+    组装 kwargs——此前"给所有执行器统一塞 ``arguments``"的写法让不接收它的
+    ``list_course_notes`` 每次调用都 TypeError。
+    """
     handler = _EXECUTORS.get(name)
     if handler is None:
         return ToolOutcome(f"未知工具 {name}", f"工具 {name} 不存在；可用工具见系统提示。")
-    kwargs: dict[str, Any] = {"course_id": course_id, "arguments": arguments}
-    if name == "read_note":
-        kwargs |= {"scope": scope, "locked_note_id": locked_note_id}
-    if name in ("web_search",):
-        kwargs |= {"allow_web": allow_web}
-    if name == "propose_note_edit":
-        kwargs |= {"editable_note_id": editable_note_id}
+    available: dict[str, Any] = {
+        "course_id": course_id,
+        "arguments": arguments,
+        "scope": scope,
+        "locked_note_id": locked_note_id,
+        "editable_note_id": editable_note_id,
+        "allow_web": allow_web,
+    }
+    kwargs = {key: available[key] for key in _EXECUTOR_PARAMS.get(name, ())}
     try:
         return handler(db, **kwargs)
     except Exception as exc:  # 工具失败必须降级为文本回给模型，不能打断 SSE 流

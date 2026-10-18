@@ -215,6 +215,37 @@ def test_execute_tool_degrades_errors_to_text() -> None:
         assert "不存在" in missing.payload_text
 
 
+def test_list_course_notes_returns_titles_and_stays_in_course() -> None:
+    """回归：该工具曾因分发器统一塞 arguments 而每次 TypeError，导致「查有哪些笔记」无法返回。"""
+    for db, ids in _world():
+        outcome = execute_tool(db, course_id=ids["course_a"], name="list_course_notes", arguments={})
+        assert "《行列式》" in outcome.payload_text and "《矩阵》" in outcome.payload_text
+        assert "《阅读方法》" not in outcome.payload_text, "不得列出其他课程的笔记"
+
+
+def test_every_tool_dispatches_without_signature_errors() -> None:
+    """全工具分发回归：任何工具都不应因执行器签名不匹配而 TypeError。"""
+    for db, ids in _world():
+        calls: dict[str, dict] = {
+            "search_course": {"query": "行列式"},
+            "read_note": {},
+            "list_course_notes": {},
+            "search_forest": {"query": "阅读"},
+            "get_note_coverage": {"material_id": ids["material_a"]},
+            "explain_term": {"term": "行列式"},
+            "web_search": {"query": "测试"},
+            "propose_note_edit": {"proposed_markdown": "# 行列式\n新全文", "rationale": "r"},
+            "propose_knowledge_node": {"candidate_name": "x", "candidate_summary": "y", "rationale": "r"},
+        }
+        for name, arguments in calls.items():
+            outcome = execute_tool(
+                db, course_id=ids["course_a"], name=name, arguments=arguments,
+                scope="global", locked_note_id=ids["note_a1"], editable_note_id=ids["note_a1"],
+            )
+            assert "TypeError" not in outcome.payload_text, f"{name}: {outcome.payload_text}"
+            assert outcome.summary != f"工具 {name} 执行失败", f"{name}: {outcome.payload_text}"
+
+
 def test_search_forest_covers_courses_and_skips_deleted() -> None:
     for db, ids in _world():
         found = execute_tool(db, course_id=ids["course_a"], name="search_forest", arguments={"query": "阅读"})
