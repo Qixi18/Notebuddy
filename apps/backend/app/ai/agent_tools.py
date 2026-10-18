@@ -32,6 +32,8 @@ TOOL_RESULT_MAX_CHARS = 1600
 CHUNK_TEXT_MAX_CHARS = 400
 COVERAGE_PREVIEW_LIMIT = 8
 NOTE_SUGGESTION_MAX_CHARS = 20000
+# 笔记清单每条都带 36 位 note_id，默认截断会让大课程只看到一半，单独放宽
+LIST_RESULT_MAX_CHARS = 6000
 
 # proposed_markdown 中不允许出现的对话性文字（agent 聊天口吻混入正文的典型特征）。
 # 命中即拒绝并要求模型重写；若笔记确实需要这些字样，模型换个说法即可通过。
@@ -210,8 +212,21 @@ def _list_course_notes(db: Session, *, course_id: str) -> ToolOutcome:
     ).all()
     if not rows:
         return ToolOutcome("课程暂无笔记", "这门课还没有任何笔记。")
+    # 每条带 36 位 note_id（模型后续 read_note 要用），大课程很容易超过默认截断，
+    # 这里单独放宽到 6000 并在截断时说明还有多少条未列出
     lines = [f"- {note_id} 《{title}》{f'（{lecture}）' if lecture else ''}" for note_id, title, lecture in rows]
-    return ToolOutcome(f"列出课程笔记 {len(rows)} 条", _truncate("\n".join(lines)))
+    body = "\n".join(lines)
+    if len(body) > LIST_RESULT_MAX_CHARS:
+        kept = 0
+        used = 0
+        for line in lines:
+            used += len(line) + 1
+            if used > LIST_RESULT_MAX_CHARS:
+                break
+            kept += 1
+        body = "\n".join(lines[:kept]) + f"\n（课程笔记共 {len(rows)} 条，已列出前 {kept} 条；需要其余部分请按关键词让我再查）"
+        return ToolOutcome(f"列出课程笔记前 {kept}/{len(rows)} 条", body)
+    return ToolOutcome(f"列出课程笔记 {len(rows)} 条", body)
 
 
 def _search_forest(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
