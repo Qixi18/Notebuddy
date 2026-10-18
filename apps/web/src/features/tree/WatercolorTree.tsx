@@ -4,7 +4,7 @@ import type { TreePosition } from './layout'
 import { hashId } from './layout'
 import { stateLabels } from '../forest/types'
 import { overviewBranches, overviewLeaves, type NotebookGeometry, type KnowledgeLeaf } from './treeGeometry'
-import { TrunkSprite } from './TreeSprites'
+import { LeafSprite, TrunkSprite } from './TreeSprites'
 import { NotebookBranch } from './NotebookBranch'
 import { TreeAction } from './TreeAction'
 import { detailInteraction, operationSize } from './treeInteraction'
@@ -23,6 +23,7 @@ export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoo
   const { course } = tree
   const visible = useMemo(() => overviewBranches(branches, pins, search), [branches, pins, search])
   const empty = branches.length === 0
+  const bare = empty || branches.every(branch => branch.leaves.length === 0)
   const detail = detailInteraction(zoom)
   const hitSize = detail ? operationSize(zoom) : 44
   const items = useMemo(() => visible.map(branch => ({ branch, leaves: overviewLeaves(branch, pins, search, expandedBookId === branch.book.id) })), [visible, pins, search, expandedBookId])
@@ -44,7 +45,20 @@ export const WatercolorTree = memo(function WatercolorTree({ tree, branches, zoo
       <mask id={`${id}-bark-edge`} maskContentUnits="objectBoundingBox"><rect width="1" height="1" fill={`url(#${id}-bark-feather)`} /></mask>
       <linearGradient id={`${id}-crown-fade`} x1="0" x2="0" y1={crown - 24} y2={crown + 14} gradientUnits="userSpaceOnUse"><stop stopColor="black" /><stop offset="1" stopColor="white" /></linearGradient>
       <mask id={`${id}-trunk-junction`} maskUnits="userSpaceOnUse" x="-150" y="-600" width="300" height="650"><rect x="-150" y="-600" width="300" height="650" fill={`url(#${id}-crown-fade)`} /></mask>
+      <filter id={`${id}-wash`} x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="16" /></filter>
     </defs>
+    {bare && <g aria-hidden="true" pointerEvents="none">
+      <ellipse cx="-52" cy="-286" rx="96" ry="62" fill="#8fa98c" opacity=".2" filter={`url(#${id}-wash)`} transform="rotate(-14 -52 -286)" />
+      <ellipse cx="32" cy="-330" rx="104" ry="66" fill="#a9be9c" opacity=".18" filter={`url(#${id}-wash)`} />
+      <ellipse cx="82" cy="-270" rx="72" ry="48" fill="#7f9c7c" opacity=".16" filter={`url(#${id}-wash)`} transform="rotate(12 82 -270)" />
+      {Array.from({ length: 18 }, (_, index) => {
+        const angle = index * 2.399
+        const radius = .28 + ((index * 7) % 11) / 11 * .72
+        const x = Math.cos(angle) * 96 * radius
+        const y = -304 + Math.sin(angle) * 62 * radius
+        return <g key={index} transform={`translate(${x.toFixed(1)},${y.toFixed(1)}) scale(.48)`}><LeafSprite variant={index % 6} angle={(index * 37) % 180 - 90} /></g>
+      })}
+    </g>}
     <g aria-hidden="true" pointerEvents="none">
       <ellipse cy="9" rx="182" ry="24" fill="#839063" opacity=".09" />
       <ellipse cx="-25" cy="14" rx="132" ry="14" fill="#b7be77" opacity=".12" />
