@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -13,7 +12,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import Session
 
 from app.ai.deepseek import DeepSeekClient, DeepSeekError
 from app.core.config import settings
@@ -23,11 +22,11 @@ from app.db.models import (
     CrossCourseRelation,
     CurriculumImport,
     ForestJob,
-    Material,
     Note,
     new_id,
 )
 from app.forest.curriculum import CurriculumError, extract_curriculum
+from app.forest.relation_candidates import candidate_snapshots, source_snapshot
 from app.forest.service import (
     active_note_sources,
     evidence_fingerprint,
@@ -64,31 +63,6 @@ class RelationOutput(BaseModel):
     relations: list[RelationCandidate] = Field(max_length=30)
 
 
-def _live_note_query(course_id: str | None = None):
-    query = (
-        select(Note)
-        .join(Course, Note.course_id == Course.id)
-        .outerjoin(Material, Note.material_id == Material.id)
-        .where(
-            Course.deleted_at.is_(None),
-            or_(Note.material_id.is_(None), Material.deleted_at.is_(None)),
-        )
-    )
-    return query.where(Note.course_id == course_id) if course_id else query
-
-
-def _source_snapshot(db: Session, course_id: str, *, material_id: str | None = None,
-                     note_ids: list[str] | None = None) -> list[dict]:
-    query = _live_note_query(course_id).options(load_only(
-        Note.id, Note.course_id, Note.material_id, Note.revision_number)).order_by(Note.id)
-    if material_id is not None:
-        query = query.where(Note.material_id == material_id)
-    if note_ids is not None:
-        query = query.where(Note.id.in_(note_ids))
-    return [{"note_id": note.id, "revision": note.revision_number,
-             "evidence": evidence_fingerprint(db, note)} for note in db.scalars(query)]
-
-
 def enqueue_relations(
     db: Session, course_id: str, *, material_id: str | None = None, explicit: bool = False,
     note_ids: list[str] | None = None,
@@ -100,7 +74,7 @@ def enqueue_relations(
     db.flush()
     # Reserve SQLite's writer before reading/coalescing, including concurrent saves.
     db.execute(update(Course).where(Course.id == course_id).values(name=Course.name))
-    revisions = _source_snapshot(db, course_id, material_id=material_id, note_ids=note_ids)
+    revisions = source_snapshot(db, course_id, material_id=material_id, note_ids=note_ids)
     if not revisions:
         return None
     if explicit:
@@ -117,7 +91,7 @@ def enqueue_relations(
         if pending:
             ids = {row["note_id"] for row in json.loads(pending.source_snapshot_json)}
             ids.update(row["note_id"] for row in revisions)
-            revisions = _source_snapshot(db, course_id, note_ids=list(ids))
+            revisions = source_snapshot(db, course_id, note_ids=list(ids))
         key = "relations:" + hashlib.sha256(json.dumps([course_id, revisions],
             ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         existing = db.scalar(select(ForestJob).where(ForestJob.idempotency_key == key))
@@ -222,7 +196,7 @@ def retry_job(db: Session, job: ForestJob) -> ForestJob:
     values = {}
     if job.kind == "cross_course_relations":
         original = json.loads(job.source_snapshot_json)
-        current = _source_snapshot(db, job.course_id,
+        current = source_snapshot(db, job.course_id,
                                    note_ids=[row["note_id"] for row in original] or None)
         if current != original:
             key = "relations:" + hashlib.sha256(json.dumps([job.course_id, current],
@@ -258,116 +232,13 @@ def retry_job(db: Session, job: ForestJob) -> ForestJob:
     return job
 
 
-def _tokens(title: str) -> set[str]:
-    words = set(re.findall(r"[a-zA-Z0-9]+", title.lower()))
-    chinese = re.findall(r"[\u4e00-\u9fff]+", title)
-    words.update(
-        group[index : index + 2] for group in chinese for index in range(max(1, len(group) - 1))
-    )
-    return words
-
-
-def _note_snapshot(db: Session, note: Note) -> dict | None:
-    refs = active_note_sources(db, note)
-    if not refs:
-        return None
-    return {
-        "note_id": note.id,
-        "course_id": note.course_id,
-        "course_name": note.course.name,
-        "title": note.title,
-        "revision": note.revision_number,
-        "fingerprint": evidence_fingerprint(db, note),
-        "evidence": [
-            {
-                "ref_id": source.id,
-                "quote": source.quote[:600],
-                "location": source.target_label
-                or source.page_block.location_label
-                or source.page_block.page.location_label,
-            }
-            for source in refs[:3]
-        ],
-    }
-
-
-def _candidate_snapshots(db: Session, course_id: str, source_ids: list[str] | None = None) -> tuple[list[dict], list[dict]]:
-    # Rank all lightweight titles before applying evidence/prompt budgets. Taking
-    # the newest rows first permanently hid older prerequisite material.
-    own_metadata = list(
-        db.execute(
-            _live_note_query(course_id).where(Note.id.in_(source_ids) if source_ids is not None else True)
-            .with_only_columns(Note.id, Note.title, Note.course_id)
-        ).all()
-    )
-    metadata = list(
-        db.execute(
-            _live_note_query()
-            .where(Note.course_id != course_id)
-            .with_only_columns(Note.id, Note.title, Note.course_id)
-        ).all()
-    )
-    other_titles = {row.title.casefold() for row in metadata}
-    other_terms = set().union(*(_tokens(row.title) for row in metadata)) if metadata else set()
-    own_metadata.sort(
-        key=lambda row: (
-            -int(row.title.casefold() in other_titles),
-            -len(other_terms & _tokens(row.title)),
-            row.id,
-        )
-    )
-
-    # Even selected note objects defer the body: only titles, versions and
-    # verified source excerpts are needed by this candidate analysis.
-    def load_snapshot(note_id: str):
-        note = db.scalar(
-            select(Note)
-            .where(Note.id == note_id)
-            .options(
-                load_only(
-                    Note.id,
-                    Note.course_id,
-                    Note.material_id,
-                    Note.title,
-                    Note.revision_number,
-                )
-            )
-        )
-        return _note_snapshot(db, note)
-
-    source = []
-    for row in own_metadata:
-        snapshot = load_snapshot(row.id)
-        if snapshot:
-            source.append(snapshot)
-        if len(source) == 30:
-            break
-    terms = set().union(*(_tokens(item["title"]) for item in source)) if source else set()
-    source_titles = {item["title"].casefold() for item in source}
-    metadata.sort(
-        key=lambda row: (
-            -int(row.title.casefold() in source_titles),
-            -len(terms & _tokens(row.title)),
-            row.id,
-        )
-    )
-    target = []
-    for row in metadata:
-        snapshot = load_snapshot(row.id)
-        if snapshot:
-            target.append(snapshot)
-        if len(target) == 18:
-            break
-    return source, target
-
-
 def _generate_batch(db: Session, job: ForestJob, client: DeepSeekClient, batch: list[dict]) -> None:
     if not client.configured:
         raise RelationError("AI 模型未配置，无法生成跨课候选；配置后可重试，也可手动建立藤蔓")
     course = db.get(Course, job.course_id)
     if course is None or course.deleted_at is not None:
         raise RelationError("课程已删除或不存在，无法生成跨课候选")
-    own, other = _candidate_snapshots(db, course.id, [row["note_id"] for row in batch])
+    own, other = candidate_snapshots(db, course.id, [row["note_id"] for row in batch])
     expected = {row["note_id"]: row for row in batch}
     for item in own:
         note = db.get(Note, item["note_id"])
@@ -543,7 +414,7 @@ def _validate_legacy_relations(db: Session, job: ForestJob) -> None:
 def _generate_relations(db: Session, job: ForestJob, client: DeepSeekClient) -> None:
     snapshot = json.loads(job.source_snapshot_json)
     if not snapshot:  # Existing queued jobs from before source snapshot migration.
-        snapshot = _source_snapshot(db, job.course_id)
+        snapshot = source_snapshot(db, job.course_id)
         job.source_snapshot_json = json.dumps(snapshot)
         db.commit()
     for offset in range(job.completed_source_count, len(snapshot), 30):
