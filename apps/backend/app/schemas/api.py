@@ -13,11 +13,13 @@ from app.schemas.backup import (
     RestoreRequest,
 )
 from app.schemas.conversations import (
+    AgentMessageCreate,
     ConversationCreate,
     ConversationMessageCreate,
     ConversationMessageRead,
     ConversationRead,
     MessageEvidenceRead,
+    ReadingContext,
 )
 from app.schemas.courses import CourseCreate, CourseRead, CourseUpdate, DeletionPreview
 from app.schemas.coverage import CoverageLocation, CoverageRead
@@ -52,6 +54,7 @@ from app.schemas.settings import (
 from app.schemas.terms import TermExplanationRequest, TermExplanationResponse, TermExplanationSource
 
 __all__ = [
+    'AgentMessageCreate',
     'AssistantClaim',
     'AssistantRequest',
     'AssistantResponse',
@@ -92,6 +95,7 @@ __all__ = [
     'ProposalReview',
     'ProviderCallRead',
     'ProviderConnectivityTestRequest',
+    'ReadingContext',
     'RestoreRequest',
     'SettingsStatus',
     'SettingsUpdate',

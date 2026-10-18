@@ -65,3 +65,26 @@ class ConversationMessageCreate(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=120)
     # 本次回答使用哪一位 AI 教师的人设；未知取值由 app.ai.personas 回落到默认角色的做法保持一致
     teacher_persona: TeacherPersonaId = "elf"
+
+
+class ReadingContext(BaseModel):
+    """悬浮坞 agent 的阅读上下文：用户当前打开（或锁定）的笔记。"""
+
+    note_id: str | None = None
+    note_title: str | None = Field(default=None, max_length=300)
+    section_title: str | None = Field(default=None, max_length=300)
+    excerpt: str | None = Field(default=None, max_length=1200)
+
+
+class AgentMessageCreate(BaseModel):
+    """悬浮坞 agent 提问（SSE 流式端点的请求体）。"""
+
+    question: str = Field(min_length=1, max_length=2000)
+    # note=锁定当前笔记 / course=整门课程 / global=跨课程全局可查（写建议仍只对打开的笔记）
+    scope: Literal["note", "course", "global"] = "course"
+    learning_goal: str | None = Field(default=None, max_length=60)
+    material_id: str | None = None
+    allow_web: bool = True
+    idempotency_key: str | None = Field(default=None, max_length=120)
+    teacher_persona: TeacherPersonaId = "elf"
+    reading_context: ReadingContext | None = None

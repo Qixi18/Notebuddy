@@ -85,6 +85,9 @@ def _mode_from_evidence(message: ConversationMessage) -> str:
     """
     if message.status == "failed":
         return "failed"
+    if message.model_version and message.model_version.startswith("agent"):
+        # agent 循环产出的回答；旧消息不会有该前缀，行为不变
+        return "agent"
     if message.model_version == "keyword-or-hybrid-fallback":
         return "local-retrieval-fallback"
     evidence_types = {item.evidence_type for item in message.evidence}

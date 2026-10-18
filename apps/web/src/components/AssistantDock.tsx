@@ -8,9 +8,12 @@ import { featurePath, useWorkspace } from './AppLayout'
 import { SourceCard } from './SourceCard'
 import { TeacherCharacter } from './TeacherCharacter'
 import { ApiError, api } from '../api'
+import type { AgentScope } from '../api/agent'
 import type { Material } from '../types'
 import { teacherPersonaMeta } from '../features/persona/personas'
 import { modeLabelsShort } from '../features/assistant/answerMeta'
+import { AgentSteps } from '../features/assistant/AgentSteps'
+import { KnowledgeProposalCards, NoteSuggestionCards, type PendingNoteSuggestion } from '../features/assistant/AgentCards'
 import {
   clampDockWidth,
   DOCK_WIDTH_DEFAULT,
@@ -34,8 +37,9 @@ const QUICK_PROMPTS: Array<{ label: string; prompt: string }> = [
   { label: '总结要点', prompt: '把主要内容总结成几条要点。' },
 ]
 
-/** 只有正打开着笔记的页面才谈得上「写入当前笔记」 */
-const NOTE_PATH = /\/(notebook|notes\/[^/]+)$/
+/** 只有正打开着笔记的页面才谈得上「锁定当前笔记 / 写入当前笔记」：
+    章节总览 /notebook、分册阅读 /notebooks/<id>、独立笔记 /notes/<id> */
+const NOTE_PATH = /\/(notebook|notebooks\/[^/]+|notes\/[^/]+)$/
 
 /**
  * 悬浮答疑坞。与答疑页共用 useConversation 的同一份会话，
@@ -65,16 +69,20 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const navigate = useNavigate()
   const location = useLocation()
   const [draft, setDraft] = useState('')
-  const [scopeMaterialId, setScopeMaterialId] = useState<string>()
+  /** 作用范围：'' 整门课程 / '__note__' 锁定当前笔记 / '__global__' 全局可查 / 具体 material id */
+  const [scopeChoice, setScopeChoice] = useState<string>('')
   const [ownMaterials, setOwnMaterials] = useState<Material[]>([])
   const [writeBackBusy, setWriteBackBusy] = useState(false)
   const [writeBackNotice, setWriteBackNotice] = useState<string>()
+  const [pendingSuggestions, setPendingSuggestions] = useState<PendingNoteSuggestion[]>([])
+  const [pendingBusyId, setPendingBusyId] = useState<string>()
   const messagesRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const persona = teacherPersonaMeta(teacherPersona)
   const conversationCourse = courses.find((item) => item.id === conversationCourseId)
   const fellBackToRecent = Boolean(conversationCourseId) && !courseId
+  const notePath = NOTE_PATH.test(location.pathname)
 
   /* 课程页上工作区已经加载了同一门课的资料，直接复用；其余页面（首页、回收站…）自己拉一份，
      否则「限定资料」在那些页面上会是空的 */
@@ -90,26 +98,50 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const scopeMaterials = reusingWorkspaceMaterials ? workspaceMaterials : ownMaterials
   /* 范围落不到实处时收回「整门课程」，而不是让请求带着一个已失效的 id */
   useEffect(() => {
-    if (scopeMaterialId && !scopeMaterials.some((item) => item.id === scopeMaterialId)) setScopeMaterialId(undefined)
-  }, [scopeMaterialId, scopeMaterials])
+    if (scopeChoice && scopeChoice !== '__note__' && scopeChoice !== '__global__'
+      && !scopeMaterials.some((item) => item.id === scopeChoice)) setScopeChoice('')
+  }, [scopeChoice, scopeMaterials])
+
+  /* 作用范围三档：锁定当前笔记 / 整门课程（可再收窄到课件）/ 全局可查。
+     锁定档要求「正打开着笔记的页面」，否则选项自动失效落回课程档 */
+  const canLockNote = Boolean(notePath && selectedNote)
+  const lockedActive = scopeChoice === '__note__' && canLockNote
+  const scope: AgentScope = lockedActive ? 'note' : scopeChoice === '__global__' ? 'global' : 'course'
+  const agentMaterialId = scope === 'course' && scopeChoice && scopeChoice !== '__note__' && scopeChoice !== '__global__'
+    ? scopeChoice
+    : undefined
+  /* 阅读上下文：锁定档带正文节选（agent 可定点建议修改）；其余档只报笔记身份，内容由 agent 按需用工具读 */
+  const readingContext = canLockNote && selectedNote
+    ? {
+      note_id: selectedNote.id,
+      note_title: selectedNote.title,
+      section_title: selectedNote.section_key ?? undefined,
+      excerpt: lockedActive ? selectedNote.content_markdown.slice(0, 1200) : undefined,
+    }
+    : undefined
 
   const messages = conversation.messages
   const lastMessage = messages[messages.length - 1]
   const lastAnswer = [...messages].reverse().find((message) => message.role === 'assistant' && message.id !== 'local-greeting')
-  const bottomKey = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.busy}`
+  const streamingTextLength = conversation.agentRun?.streamingText.length ?? 0
+  const bottomKey = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.busy}:${streamingTextLength}:${conversation.agentRun?.steps.length ?? 0}`
 
-  /* 消息变化后重新定位视口：新回复很长时把它的开头对齐到顶部（读到的是正文开头），
-     等待回复或最后一条是自己提问时落到最底部 */
+  /* 消息变化后重新定位视口：agent 流式执行期间跟随底部（步骤与正文持续增长），
+     其余情况把新回复的开头对齐到顶部（读到的是正文开头） */
   useEffect(() => {
     const node = messagesRef.current
     if (!node) return
+    if (conversation.agentRun && !conversation.agentRun.final) {
+      node.scrollTop = node.scrollHeight
+      return
+    }
     const last = node.lastElementChild as HTMLElement | null
     if (last?.classList.contains('assistant-dock-message-assistant')) {
       node.scrollTop += Math.round(last.getBoundingClientRect().top - node.getBoundingClientRect().top) - 2
     } else {
       node.scrollTop = node.scrollHeight
     }
-  }, [bottomKey])
+  }, [bottomKey, conversation.agentRun])
 
   /* 外壳总宽：上限比例要按它算，否则窄窗口下抽屉能把正文挤没。
      拿不到外壳（理论上不会）时退回窗口宽度。 */
@@ -169,11 +201,45 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
     if (!conversationCourseId || !text || conversation.busy) return
     setDraft('')
     setWriteBackNotice(undefined)
-    if (!await conversation.ask(text, { materialId: scopeMaterialId })) setDraft(text)
+    if (!await conversation.askAgent(text, { scope, materialId: agentMaterialId, readingContext })) setDraft(text)
+  }
+
+  /* 当前笔记的待确认建议：打开笔记或 agent 产出新建议后刷新；建议持久化在服务端，重开悬浮坞仍在 */
+  const lastAgentFinalId = conversation.agentRun?.final?.message_id
+  useEffect(() => {
+    if (!selectedNote || !notePath) { setPendingSuggestions([]); return }
+    let active = true
+    api.listSuggestions(selectedNote.id)
+      .then((items) => {
+        if (active) setPendingSuggestions(items.filter((item) => item.status === 'pending') as PendingNoteSuggestion[])
+      })
+      .catch(() => { if (active) setPendingSuggestions([]) })
+    return () => { active = false }
+  }, [selectedNote, notePath, lastAgentFinalId])
+
+  /* 建议-确认：采纳走现有 review 接口（服务端整文替换 + 修订历史），忽略只标记状态 */
+  async function reviewPending(suggestion: PendingNoteSuggestion, decision: 'confirm' | 'reject') {
+    setPendingBusyId(suggestion.id)
+    setWriteBackNotice(undefined)
+    try {
+      await api.reviewSuggestion(suggestion.note_id, suggestion.id, decision)
+      setPendingSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
+      if (decision === 'confirm') {
+        await refreshCurrentNotes()
+        setWriteBackNotice(`已采纳建议，《${selectedNote?.title ?? '笔记'}》已更新，可在修订历史中回退。`)
+      } else {
+        setWriteBackNotice('已忽略该建议。')
+      }
+    } catch (cause) {
+      setWriteBackNotice(cause instanceof ApiError && cause.status === 409
+        ? '这条建议已处理或笔记刚更新过。'
+        : cause instanceof Error ? cause.message : '处理建议失败')
+    } finally {
+      setPendingBusyId(undefined)
+    }
   }
 
   /* 回写：只追加、绝不覆盖原文；编辑器里有未保存改动时直接禁用，避免把用户的字冲掉 */
-  const notePath = NOTE_PATH.test(location.pathname)
   const canWriteBack = Boolean(selectedNote && lastAnswer && notePath && !noteDirty && !noteSaving) && !writeBackBusy
   const writeBackHint = !notePath
     ? '先在课程笔记本里打开一条笔记，再回来点这里'
@@ -201,10 +267,14 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
      否则跳过去会带着另一门课的页码，把用户引到错的地方 */
   const sourcesOpenable = Boolean(courseId) && conversationCourseId === courseId
 
-  const scopeLabel = scopeMaterialId
-    ? `课件《${scopeMaterials.find((item) => item.id === scopeMaterialId)?.lecture_title ?? '未命名'}》`
-    : '整门课程'
-  const contextLabel = notePath && selectedNote ? `当前笔记《${selectedNote.title}》` : scopeLabel
+  const rangeLabel = lockedActive
+    ? `锁定《${selectedNote?.title ?? ''}》`
+    : scopeChoice === '__global__'
+      ? '全局可查'
+      : agentMaterialId
+        ? `课件《${scopeMaterials.find((item) => item.id === agentMaterialId)?.lecture_title ?? '未命名'}》`
+        : '整门课程'
+  const contextLabel = notePath && selectedNote ? `当前笔记《${selectedNote.title}》` : rangeLabel
 
   return (
     <aside className="assistant-dock" aria-label="课程学习助手">
@@ -238,14 +308,14 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
             {fellBackToRecent ? <em>（按最近访问自动选定）</em> : null}
           </p>
 
-          {scopeMaterials.length > 0 && (
-            <label className="assistant-dock-scope">作用范围
-              <select value={scopeMaterialId ?? ''} onChange={(event) => setScopeMaterialId(event.target.value || undefined)} aria-label="本次提问的作用范围">
-                <option value="">整门课程</option>
-                {scopeMaterials.map((material) => <option key={material.id} value={material.id}>{material.lecture_title}</option>)}
-              </select>
-            </label>
-          )}
+          <label className="assistant-dock-scope">作用范围
+            <select value={scopeChoice} onChange={(event) => setScopeChoice(event.target.value)} aria-label="本次提问的作用范围">
+              {canLockNote && selectedNote ? <option value="__note__">📌 锁定当前笔记《{selectedNote.title}》</option> : null}
+              <option value="">整门课程</option>
+              {scopeMaterials.map((material) => <option key={material.id} value={material.id}>{material.lecture_title}</option>)}
+              <option value="__global__">🌲 全局可查（跨课程）</option>
+            </select>
+          </label>
 
           <div className="assistant-dock-messages" aria-live="polite" ref={messagesRef}>
             {messages.map((message, index) => (
@@ -283,7 +353,32 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 ) : null}
               </article>
             ))}
+            {/* agent 执行中的实时块：步骤时间线 + 流式回答；final 到达后由历史消息接管，不再重复展示 */}
+            {conversation.agentRun && !conversation.agentRun.final ? (
+              <article className="assistant-dock-message assistant-dock-message-assistant assistant-dock-live">
+                <small>{persona.name}</small>
+                <AgentSteps steps={conversation.agentRun.steps} />
+                {conversation.agentRun.notice ? <p className="assistant-dock-agent-notice">{conversation.agentRun.notice}</p> : null}
+                {conversation.agentRun.streamingText ? (
+                  <div className="assistant-dock-answer assistant-dock-streaming">
+                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{conversation.agentRun.streamingText}</ReactMarkdown>
+                    <span className="assistant-dock-cursor" aria-hidden="true" />
+                  </div>
+                ) : null}
+              </article>
+            ) : null}
           </div>
+
+          {conversation.agentRun?.final?.suggestions?.some((item) => item.type === 'knowledge_proposal') ? (
+            <KnowledgeProposalCards
+              suggestions={conversation.agentRun.final.suggestions.filter((item): item is Extract<typeof item, { type: 'knowledge_proposal' }> => item.type === 'knowledge_proposal')}
+            />
+          ) : null}
+          <NoteSuggestionCards
+            suggestions={pendingSuggestions}
+            busyId={pendingBusyId}
+            onReview={(suggestion, decision) => void reviewPending(suggestion, decision)}
+          />
 
           <div className="assistant-dock-quick">
             {QUICK_PROMPTS.map((item) => (
