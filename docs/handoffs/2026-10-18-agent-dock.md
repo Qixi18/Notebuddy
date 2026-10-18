@@ -3,6 +3,7 @@
 - 日期：2026-10-18
 - 分支：`feature/agent-dock`（基于 main `7814f87`），PR 目标 main
 - 计划文档：`docs/superpowers/specs/2026-10-18-agent-dock-plan.md`（含范围确认与文件级计划）
+- 功能交付清单：[2026-10-18-agent-dock-features.md](./2026-10-18-agent-dock-features.md)（面向使用者的功能总览与验证状态）
 
 ## 1. 目标与需求决定
 
