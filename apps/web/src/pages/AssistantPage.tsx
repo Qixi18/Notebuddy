@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
+import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
@@ -231,6 +232,7 @@ export function AssistantPage() {
                 <button className="secondary-button" type="submit" disabled={!term.trim() || termBusy}>{termBusy ? '查询中…' : '解释术语'}</button>
               </form>
               {termError && <p className="form-error" role="alert">{termError}</p>}
+
               {termExplanation && (
                 <div className={`pet-term-result${termExplanation.uncertain ? ' is-uncertain' : ''}`} role="status">
                   <strong>{termExplanation.original}{termExplanation.discipline ? ` · ${termExplanation.discipline}` : ''}</strong>
@@ -239,6 +241,7 @@ export function AssistantPage() {
                   <small>{termExplanation.source_note}{termExplanation.uncertain ? ' · 不确定' : ''}</small>
                   {termExplanation.sources?.map((source) => (
                     <small key={`${source.material_id}-${source.page_number}`}>课程来源：{source.lecture_title} · 第 {source.page_number} 页 · {source.snippet}</small>
+
                   ))}
                 </div>
               )}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentReadingContext, type AgentScope, type AgentStepEvent } from '../../api/agent'
 import type { TeacherCharacterId } from '../../components/TeacherCharacter'
 import type { Conversation, ConversationMessage } from '../../types'
 import { teacherPersonaMeta } from '../persona/personas'
@@ -11,12 +12,29 @@ import { teacherPersonaMeta } from '../persona/personas'
  * 首页「问 AI」、答疑页、悬浮答疑坞三个入口都读写这一份会话，
  * 提问统一走 POST /conversations/{id}/messages（落库 + 历史 + 来源），
  * 不再保留只存内存的第二条链路。
+ *
+ * 悬浮坞的 agent 模式走 ``askAgent``（SSE 流式端点）：旧 ``ask`` 保留不动，
+ * 最终回答同样规范成 ConversationMessage 追加入历史，三入口依然共享同一份历史。
  */
 
 export type AskScope = {
   materialId?: string
   pageNumber?: number
   learningGoal?: string
+}
+
+/** agent 执行中的实时状态：步骤时间线 + 流式文本 + 最终事件 */
+export type AgentRunState = {
+  steps: AgentStepEvent[]
+  streamingText: string
+  notice?: string
+  final?: AgentFinalEvent
+}
+
+export type AgentAskOptions = {
+  scope: AgentScope
+  materialId?: string
+  readingContext?: AgentReadingContext
 }
 
 export type ConversationState = {
@@ -28,11 +46,15 @@ export type ConversationState = {
   /** 会话与历史是否已就绪。首条问题宜等到就绪，避免与建会话竞态 */
   ready: boolean
   error?: string
+  /** agent 执行中的实时状态；非 agent 提问时为 null */
+  agentRun: AgentRunState | null
   selectConversation: (id: string) => Promise<void>
   /** 开一段新对话（悬浮坞的「新建对话」）。后端没有删除接口，所以用新建代替清空 */
   startNewConversation: () => Promise<void>
   /** 发送提问；返回 false 表示未发出（调用方可把文本还回输入框） */
   ask: (text: string, scope?: AskScope) => Promise<boolean>
+  /** agent 流式提问（悬浮坞专用）；成功把回答追加入历史时返回 true */
+  askAgent: (text: string, options: AgentAskOptions) => Promise<boolean>
 }
 
 function greetingMessage(conversationId: string | undefined, content: string): ConversationMessage {
@@ -66,6 +88,7 @@ export function useConversation(
   const [busy, setBusy] = useState(false)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string>()
+  const [agentRun, setAgentRun] = useState<AgentRunState | null>(null)
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
 
@@ -76,6 +99,7 @@ export function useConversation(
     setConversationId(undefined)
     setHistory([])
     setError(undefined)
+    setAgentRun(null)
     setReady(false)
     creatingRef.current = null
     if (!courseId) {
@@ -204,11 +228,82 @@ export function useConversation(
     }
   }, [courseId, teacherPersona, ensureConversation])
 
+  /* agent 流式提问：本地插入用户消息 → 逐步更新 agentRun → final 规范成消息入历史 */
+  const askAgent = useCallback(async (text: string, options: AgentAskOptions): Promise<boolean> => {
+    const question = text.trim()
+    const requestCourseId = courseId
+    if (!requestCourseId || !question || busyRef.current) return false
+    busyRef.current = true
+    setBusy(true)
+    setError(undefined)
+    setAgentRun({ steps: [], streamingText: '' })
+    try {
+      const targetId = await ensureConversation()
+      if (!targetId || courseRef.current !== requestCourseId) return false
+      const askedAt = Date.now()
+      setHistory((current) => [...current, {
+        id: `local-user-${askedAt}`,
+        conversation_id: targetId,
+        role: 'user',
+        content: question,
+        learning_goal: null,
+        status: 'completed',
+        model_version: null,
+        failure_type: null,
+        created_at: new Date(askedAt).toISOString(),
+        evidence: [],
+        mode: null,
+        sources: [],
+      }])
+      await streamAgentMessage(targetId, {
+        question,
+        scope: options.scope,
+        teacher_persona: teacherPersona,
+        material_id: options.materialId,
+        allow_web: true,
+        idempotency_key: `${targetId}-${askedAt}`,
+        reading_context: options.readingContext,
+      }, {
+        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
+        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
+        onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
+        onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId) setError(event.message) },
+        onFinal: (final: AgentFinalEvent) => {
+          if (courseRef.current !== requestCourseId) return
+          setAgentRun((current) => current ? { ...current, final } : current)
+          setHistory((current) => [...current, {
+            id: final.message_id ?? `local-agent-${askedAt}`,
+            conversation_id: targetId,
+            role: 'assistant',
+            content: final.answer,
+            learning_goal: null,
+            status: 'completed',
+            model_version: final.model_version ?? null,
+            failure_type: null,
+            created_at: new Date().toISOString(),
+            evidence: [],
+            mode: final.mode,
+            sources: final.sources ?? [],
+          }])
+        },
+      })
+      return true
+    } catch (cause) {
+      if (courseRef.current === requestCourseId) {
+        setError(cause instanceof Error ? cause.message : '智能问答请求失败')
+      }
+      return false
+    } finally {
+      busyRef.current = false
+      if (courseRef.current === requestCourseId) setBusy(false)
+    }
+  }, [courseId, teacherPersona, ensureConversation])
+
   /* 会话为空时由前端补一条开场白（不入库）；已有历史则原样展示 */
   const messages = useMemo(
     () => (history.length > 0 ? history : [greetingMessage(conversationId, greeting)]),
     [history, conversationId, greeting],
   )
 
-  return { conversations, conversationId, messages, busy, ready, error, selectConversation, startNewConversation, ask }
+  return { conversations, conversationId, messages, busy, ready, error, agentRun, selectConversation, startNewConversation, ask, askAgent }
 }

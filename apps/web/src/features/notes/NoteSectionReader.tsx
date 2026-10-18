@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
+import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { api } from '../../api'
+import { api, ApiError } from '../../api'
 import { EmptyState } from '../../components/EmptyState'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { featurePath, useWorkspace } from '../../components/AppLayout'
 import { SourceCard } from '../../components/SourceCard'
 import type { NoteRevision, NoteSourceRef } from '../../types'
+import { NoteSuggestionsInline } from '../assistant/NoteSuggestionsInline'
 
 export function NoteSectionReader({ noteId }: { noteId: string }) {
   const {
@@ -40,10 +42,14 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string>()
   const [previewRevision, setPreviewRevision] = useState<NoteRevision>()
+  const [restoringRevision, setRestoringRevision] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [pendingNoteAction, setPendingNoteAction] = useState<{ kind: 'revision'; revision: NoteRevision }>()
   const [webSources, setWebSources] = useState<import('../../types').WebSource[]>([])
   const [suggestions, setSuggestions] = useState<Array<{ id: string; proposed_markdown: string; impact: string; status: string }>>([])
+  /** 待确认建议原位展示：红删绿增嵌在正文里；可一键切回纯正文视图 */
+  const [inlineSuggestionsOpen, setInlineSuggestionsOpen] = useState(true)
+  const [suggestionBusyId, setSuggestionBusyId] = useState<string>()
   const readerNoteId = useRef(noteId)
   readerNoteId.current = noteId
   const readerActive = useRef(true)
@@ -82,16 +88,19 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
     return () => { active = false }
   }, [noteId, selectedNote?.id, selectedNote?.revision_number])
 
-  async function reviewSuggestion(suggestionId: string, decision: 'confirm' | 'reject') {
+  async function reviewSuggestion(suggestionId: string, decision: 'confirm' | 'reject', finalMarkdown?: string) {
     if (!selectedNote || noteDirty || noteSaving) return
     const requestedNoteId = selectedNote.id
+    setSuggestionBusyId(suggestionId)
     try {
-      const updated = await api.reviewSuggestion(requestedNoteId, suggestionId, decision)
+      const updated = await api.reviewSuggestion(requestedNoteId, suggestionId, decision, undefined, finalMarkdown)
       if (!readerActive.current || readerNoteId.current !== requestedNoteId) return
       upsertNotes([updated])
       setSuggestions((items) => items.map((item) => item.id === suggestionId ? { ...item, status: decision === 'confirm' ? 'accepted' : 'rejected' } : item))
     } catch (cause) {
       if (readerActive.current && readerNoteId.current === requestedNoteId) setError(cause instanceof Error ? cause.message : '建议处理失败')
+    } finally {
+      if (readerActive.current && readerNoteId.current === requestedNoteId) setSuggestionBusyId(undefined)
     }
   }
 
@@ -121,10 +130,33 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
     setPendingNoteAction(undefined)
   }
 
+  /* 回退：把选中历史版本的正文恢复为当前版本（生成新修订，历史本身不动） */
+  async function restoreRevision(revision: NoteRevision) {
+    if (!selectedNote || noteSaving) return
+    const requestedNoteId = selectedNote.id
+    setRestoringRevision(true)
+    try {
+      const updated = await api.updateNote(requestedNoteId, revision.content_markdown, selectedNote.revision_number)
+      if (!readerActive.current || readerNoteId.current !== requestedNoteId) return
+      upsertNotes([updated])
+      setNoteDraft(updated.content_markdown)
+      setPreviewRevision(undefined)
+    } catch (cause) {
+      if (readerActive.current && readerNoteId.current === requestedNoteId) {
+        setError(cause instanceof ApiError && cause.status === 409
+          ? '笔记已在其他操作中更新，可载入最新版本后重试。'
+          : cause instanceof Error ? cause.message : '版本恢复失败')
+      }
+    } finally {
+      if (readerActive.current && readerNoteId.current === requestedNoteId) setRestoringRevision(false)
+    }
+  }
+
   const storedContent = previewRevision?.content_markdown ?? selectedNote?.content_markdown ?? ''
   const contentLines = storedContent.split('\n')
   const firstHeading = contentLines[0]?.trim().match(/^#\s+(.+)$/)?.[1]?.trim()
   const displayedContent = firstHeading === selectedNote?.title ? contentLines.slice(1).join('\n').trimStart() : storedContent
+  const pendingSuggestions = suggestions.filter((item) => item.status === 'pending')
 
   if (!noteId) return null
 
@@ -147,7 +179,17 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
           <article className="note-detail-panel note-reader-document">
             <div className="note-detail-heading">
               <div><span className="eyebrow">{previewRevision ? `历史版本 · v${previewRevision.revision_number}` : selectedForRoute.content_origin === 'user' ? '用户版本' : selectedForRoute.content_origin === 'ai_web_augmented' ? '课程整理 · 含网络来源' : `${course?.name ?? '课程笔记'} · 学习笔记`}</span><h1>{selectedForRoute.title}</h1></div>
-              {previewRevision && <button className="secondary-button" onClick={() => setPreviewRevision(undefined)}>返回当前版本</button>}
+              {previewRevision && (
+                <div className="revision-preview-actions">
+                  <button className="secondary-button" onClick={() => setPreviewRevision(undefined)}>返回当前版本</button>
+                  <button
+                    className="primary-button"
+                    disabled={restoringRevision || previewRevision.revision_number === selectedForRoute.revision_number}
+                    title={previewRevision.revision_number === selectedForRoute.revision_number ? '这就是当前版本' : '把正文恢复为该版本内容（生成新修订，历史保留）'}
+                    onClick={() => void restoreRevision(previewRevision)}
+                  >{restoringRevision ? '恢复中…' : '恢复此版本内容'}</button>
+                </div>
+              )}
             </div>
             {editingNote && !previewRevision ? (
               <>
@@ -160,7 +202,26 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
                   </div>
                 </div>
               </>
-            ) : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{displayedContent || '此版本没有正文内容。'}</ReactMarkdown></div>}
+            ) : !previewRevision && pendingSuggestions.length > 0 && inlineSuggestionsOpen ? (
+              <>
+                <button className="text-button note-inline-toggle" onClick={() => setInlineSuggestionsOpen(false)}>隐藏 AI 修改标记，只看正文</button>
+                <NoteSuggestionsInline
+                  content={displayedContent}
+                  suggestions={pendingSuggestions}
+                  busyId={suggestionBusyId}
+                  onReview={(suggestion, decision, finalMarkdown) => void reviewSuggestion(suggestion.id, decision, finalMarkdown)}
+                />
+              </>
+            ) : (
+              <>
+                {!previewRevision && !editingNote && pendingSuggestions.length > 0 ? (
+                  <button className="text-button note-inline-toggle" onClick={() => setInlineSuggestionsOpen(true)}>
+                    在正文中显示 AI 修改标记（{pendingSuggestions.length} 条待确认）
+                  </button>
+                ) : null}
+                <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{displayedContent || '此版本没有正文内容。'}</ReactMarkdown></div>
+              </>
+            )}
 
             {error?.includes('笔记已在其他操作中更新') && <div className="note-conflict-panel" role="alert"><strong>检测到版本冲突</strong><p>可以载入最新版本重新编辑，或保留当前草稿并自行比较。载入最新版本会替换当前编辑内容。</p><button className="secondary-button" onClick={() => void reloadCurrentNote()}>载入最新版本</button><button className="text-button" onClick={() => setError(undefined)}>保留当前草稿</button></div>}
           </article>

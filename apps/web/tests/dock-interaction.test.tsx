@@ -2,13 +2,17 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
+
 vi.mock('../src/components/SettingsPanel', () => ({ SettingsPanel: () => null }))
 /* 悬浮坞在非课程页会自己拉一份资料列表；测试里不打真实请求 */
+
 vi.mock('../src/api', () => ({
   ApiError: class ApiError extends Error { status = 0 },
   api: {
     listMaterials: vi.fn(async () => []),
     updateNote: vi.fn(async () => ({ title: '依赖注入笔记' })),
+    listSuggestions: vi.fn(async () => []),
+    reviewSuggestion: vi.fn(async () => ({ title: '依赖注入笔记' })),
   },
 }))
 
@@ -26,8 +30,8 @@ const note = {
   created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
 }
 const idleConversation = {
-  messages: [], busy: false, error: undefined,
-  ask: async () => true, startNewConversation: async () => {},
+  messages: [], busy: false, error: undefined, agentRun: null,
+  ask: async () => true, askAgent: async () => true, startNewConversation: async () => {},
 }
 /** 一轮已完成的问答：一条提问 + 一条带来源的回答，用于验证来源清单与回写 */
 const answeredConversation = {
@@ -169,9 +173,9 @@ test('回答后展示来源清单与回答模式，检索结果显性化', () =>
 
 test('作用范围可收窄到某份课件，并随提问一起带给后端', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  const ask = vi.fn(async () => true)
+  const askAgent = vi.fn(async () => true)
   renderShell('/courses/c1/notebook', {
-    conversation: { ...idleConversation, ask },
+    conversation: { ...idleConversation, askAgent },
     materials: [{ id: 'm1', course_id: 'c1', lecture_title: '第 3 讲 · 设计模式' }],
   })
 
@@ -180,7 +184,9 @@ test('作用范围可收窄到某份课件，并随提问一起带给后端', as
 
   fireEvent.change(screen.getByRole('textbox', { name: '快速提问' }), { target: { value: '这个概念怎么理解' } })
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
-  await waitFor(() => expect(ask).toHaveBeenCalledWith('这个概念怎么理解', { materialId: 'm1' }))
+  await waitFor(() => expect(askAgent).toHaveBeenCalledWith('这个概念怎么理解', {
+    scope: 'course', materialId: 'm1', readingContext: undefined,
+  }))
 })
 
 test('写入当前笔记只在「正打开着笔记且没有未保存改动」时可用', () => {

@@ -30,6 +30,8 @@ class KnowledgeProposalRead(BaseModel):
 class ProposalReview(BaseModel):
     decision: str = Field(pattern="^(confirm|reject)$")
     note: str | None = Field(default=None, max_length=2000)
+    # 逐块审查后的最终正文：confirm 时若提供则以其为准（部分采纳）；不提供沿用建议原文（旧行为不变）
+    final_markdown: str | None = Field(default=None, max_length=20000)
 
 
 class NoteSuggestionRead(BaseModel):
