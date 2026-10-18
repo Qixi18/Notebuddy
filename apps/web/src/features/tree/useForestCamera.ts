@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { select } from 'd3-selection'
 import { zoom, zoomIdentity, type ZoomBehavior } from 'd3-zoom'
-import type { Camera } from './types'
+import type { Camera } from '../forest/types'
 
 export function useForestCamera(
   initial: Camera,

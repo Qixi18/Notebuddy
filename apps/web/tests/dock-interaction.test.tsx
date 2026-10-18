@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
-vi.mock('../src/SettingsPanel', () => ({ SettingsPanel: () => null }))
+vi.mock('../src/components/SettingsPanel', () => ({ SettingsPanel: () => null }))
 /* 悬浮坞在非课程页会自己拉一份资料列表；测试里不打真实请求 */
 vi.mock('../src/api', () => ({
   ApiError: class ApiError extends Error { status = 0 },

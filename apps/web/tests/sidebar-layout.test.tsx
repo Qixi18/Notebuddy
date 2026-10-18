@@ -2,8 +2,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 
-vi.mock('../src/components/AssistantDock', () => ({ AssistantDock: () => null }))
-vi.mock('../src/SettingsPanel', () => ({ SettingsPanel: () => <div data-testid="settings-panel" /> }))
+vi.mock('../src/features/assistant/AssistantDock', () => ({ AssistantDock: () => null }))
+vi.mock('../src/components/SettingsPanel', () => ({ SettingsPanel: () => <div data-testid="settings-panel" /> }))
 
 import { AppLayout, WorkspaceProvider } from '../src/components/AppLayout'
 import { primaryNavItems } from '../src/features/navigation/sidebarNav'

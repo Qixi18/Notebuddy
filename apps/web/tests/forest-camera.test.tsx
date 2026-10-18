@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { useForestCamera } from '../src/features/forest/useForestCamera'
+import { useForestCamera } from '../src/features/tree/useForestCamera'
 beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) =>
     window.setTimeout(() => callback(0), 0),

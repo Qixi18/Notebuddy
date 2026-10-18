@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
-import { NoteSectionReader } from '../src/pages/NotesPage'
+import { NoteSectionReader } from '../src/features/notes/NoteSectionReader'
 
 const state = vi.hoisted(() => ({ workspace: {} as Record<string, unknown> }))
 vi.mock('../src/components/AppLayout', () => ({ useWorkspace: () => state.workspace, featurePath: () => '/materials' }))

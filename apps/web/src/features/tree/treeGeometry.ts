@@ -1,6 +1,6 @@
 import type { NotebookRead, SectionRead } from '../../types'
 import { hashId } from './layout'
-import type { Camera } from './types'
+import type { Camera } from '../forest/types'
 
 export const BOTANICAL_SPACING = 620
 export type Point = { x: number; y: number }

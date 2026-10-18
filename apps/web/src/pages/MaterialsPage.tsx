@@ -8,7 +8,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useWorkspace } from '../components/AppLayout'
 import type { Capabilities } from '../api/config'
 import type { Coverage, DeletionPreview, PageEvidence, NotebookSummary } from '../types'
-import { NotebookRootMenu } from '../features/forest/NotebookRootMenu'
+import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 import type { ForestCourse } from '../features/forest/types'
 
 const statusLabels: Record<string, string> = { pending: '等待处理', processing: '解析中', completed: '已完成', failed: '解析失败' }

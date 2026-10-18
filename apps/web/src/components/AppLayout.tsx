@@ -10,10 +10,10 @@ import type {
   Page,
 } from '../types'
 import type { ConversationState } from '../features/conversation/useConversation'
-import { AssistantDock } from './AssistantDock'
+import { AssistantDock } from '../features/assistant/AssistantDock'
 import { ConfirmDialog } from './ConfirmDialog'
 import type { TeacherCharacterId } from './TeacherCharacter'
-import { SettingsPanel } from '../SettingsPanel'
+import { SettingsPanel } from './SettingsPanel'
 import { shouldBlockNoteNavigation } from '../features/notebook/navigation'
 import { footerNavItems, primaryNavItems, resolveActiveNav, type SidebarNavId } from '../features/navigation/sidebarNav'
 import { DOCK_STORAGE, resolveDockOpen, resolveDockWidth } from '../features/assistant/dockLayout'

@@ -7,7 +7,7 @@ import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components
 import { HomePage } from '../src/pages/HomePage'
 import { NotebookPage } from '../src/pages/NotebookPage'
 vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getCourseTree: vi.fn(), getNotebookById: vi.fn(), getReadingPosition: vi.fn().mockResolvedValue(null), getNotebookChapter: vi.fn().mockResolvedValue({ sections: [] }), saveReadingPosition: vi.fn().mockResolvedValue({ revision: 1 }) } }))
-vi.mock('../src/pages/NotesPage', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
+vi.mock('../src/features/notes/NoteSectionReader', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
 afterEach(() => { cleanup(); vi.restoreAllMocks(); sessionStorage.clear() })
 test('home leaf to another chapter retains return to the original home collection and camera', async () => {
   const section = { id: 'n1', notebook_id: 'book', material_id: 'm1', tree_slot: 0, title: '知识点' }

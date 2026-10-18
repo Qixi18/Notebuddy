@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 
-import { api } from './api'
-import type { ProviderStatus } from './api'
-import type { SettingsStatus } from './types'
+import { api } from '../api'
+import type { ProviderStatus } from '../api'
+import type { SettingsStatus } from '../types'
 
 type SettingsPanelProps = {
   onClose: () => void

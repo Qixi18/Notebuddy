@@ -11,7 +11,7 @@ vi.mock('../src/api', () => ({ api: {
   getChapter: vi.fn(), getNotebookChapter: vi.fn(), getNote: vi.fn(), getForest: vi.fn(), getCourseTree: vi.fn(),
   listMaterials: vi.fn().mockResolvedValue([]), listNotes: vi.fn().mockResolvedValue([]), listNotebooks: vi.fn(), createNotebook: vi.fn(),
 } }))
-vi.mock('../src/pages/NotesPage', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
+vi.mock('../src/features/notes/NoteSectionReader', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
 const section = { id: 'n2', notebook_id: 'b2', material_id: 'm2', tree_slot: 0, title: '第二本知识点' }
 const second = { id: 'b2', course_id: 'c', title: '第二本', tree_slot: 1, order_revision: 0, chapters: [{ id: 'm2', title: '第二讲', sections: [section] }], historical_sections: [], removed_chapters: [] }
 const first = { ...second, id: 'b1', title: '默认本', chapters: [] }

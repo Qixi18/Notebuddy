@@ -12,6 +12,11 @@ def default_notebook(db: Session, course: Course, *, create: bool = True) -> Not
     return book
 
 
+def list_course_notebooks(db: Session, course_id: str) -> list[Notebook]:
+    return list(db.scalars(select(Notebook).where(Notebook.course_id == course_id)
+                           .order_by(Notebook.display_order, Notebook.created_at, Notebook.id)).all())
+
+
 def bump_order_revision(db: Session, course_id: str, notebook_id: str | None = None) -> None:
     if notebook_id is None:
         notebook_id = default_notebook(db, db.get(Course, course_id)).id

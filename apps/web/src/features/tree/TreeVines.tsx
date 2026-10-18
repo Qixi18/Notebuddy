@@ -1,4 +1,4 @@
-import type { CrossCourseRelation } from './types'
+import type { CrossCourseRelation } from '../forest/types'
 import type { Point } from './treeGeometry'
 import { TreeAction } from './TreeAction'
 import { detailInteraction, operationSize } from './treeInteraction'

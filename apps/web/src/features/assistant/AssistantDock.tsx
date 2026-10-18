@@ -4,19 +4,19 @@ import rehypeKatex from 'rehype-katex'
 import remarkMath from 'remark-math'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
-import { featurePath, useWorkspace } from './AppLayout'
-import { SourceCard } from './SourceCard'
-import { TeacherCharacter } from './TeacherCharacter'
-import { ApiError, api } from '../api'
-import type { Material } from '../types'
-import { teacherPersonaMeta } from '../features/persona/personas'
-import { modeLabelsShort } from '../features/assistant/answerMeta'
+import { featurePath, useWorkspace } from '../../components/AppLayout'
+import { SourceCard } from '../../components/SourceCard'
+import { TeacherCharacter } from '../../components/TeacherCharacter'
+import { ApiError, api } from '../../api'
+import type { Material } from '../../types'
+import { teacherPersonaMeta } from '../persona/personas'
+import { modeLabelsShort } from './answerMeta'
 import {
   clampDockWidth,
   DOCK_WIDTH_DEFAULT,
   DOCK_WIDTH_SNAP,
   DOCK_WIDTH_STEP,
-} from '../features/assistant/dockLayout'
+} from './dockLayout'
 
 type AssistantDockProps = {
   /** 当前宽度，由外壳持有并持久化 */

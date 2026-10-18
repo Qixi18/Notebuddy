@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { WatercolorTree } from '../src/features/forest/WatercolorTree'
-import { TreeVines } from '../src/features/forest/TreeVines'
-import { notebookGeometry, sceneInitialCamera } from '../src/features/forest/treeGeometry'
+import { WatercolorTree } from '../src/features/tree/WatercolorTree'
+import { TreeVines } from '../src/features/tree/TreeVines'
+import { notebookGeometry, sceneInitialCamera } from '../src/features/tree/treeGeometry'
 import type { NotebookRead, SectionRead } from '../src/types'
 import type { CrossCourseRelation, ForestCourse } from '../src/features/forest/types'
 

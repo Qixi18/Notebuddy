@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { branchWood } from '../src/features/forest/branchWood'
-import { notebookGeometry, overviewLeaves } from '../src/features/forest/treeGeometry'
+import { branchWood } from '../src/features/tree/branchWood'
+import { notebookGeometry, overviewLeaves } from '../src/features/tree/treeGeometry'
 import type { NotebookRead } from '../src/types'
 
 function geometry(slot: number, count: number) {

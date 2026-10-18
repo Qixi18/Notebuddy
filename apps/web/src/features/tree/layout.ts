@@ -1,4 +1,4 @@
-import type { ForestCourse } from './types'
+import type { ForestCourse } from '../forest/types'
 
 export type TreePosition = { course: ForestCourse; x: number; y: number; seed: number }
 export type SavedSlot = { x: number; signature: string }

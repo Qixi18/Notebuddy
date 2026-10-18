@@ -26,7 +26,7 @@ from app.services.provider_audit import (
     finish_call,
     provider_status_from_error,
 )
-from app.services.uploads import UploadRejected, _validate_container
+from app.services.uploads import UploadRejected, validate_upload_container
 
 
 class CurriculumError(ValueError):
@@ -103,7 +103,7 @@ def create_import(
                     output.write(chunk)
             if not size:
                 raise UploadRejected("文件为空或无法读取", 415)
-            _validate_container(temporary, suffix)
+            validate_upload_container(temporary, suffix)
             destination = settings.originals_dir / f"curriculum-{record.id}{suffix}"
             os.replace(temporary, destination)
             temporary = None

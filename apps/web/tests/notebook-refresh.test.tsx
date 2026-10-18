@@ -6,7 +6,7 @@ import { NotebookPage } from '../src/pages/NotebookPage'
 
 const state = vi.hoisted(() => ({ workspace: {} as Record<string, unknown> }))
 vi.mock('../src/components/AppLayout', () => ({ useWorkspace: () => state.workspace }))
-vi.mock('../src/pages/NotesPage', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <div>{noteId}</div> }))
+vi.mock('../src/features/notes/NoteSectionReader', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <div>{noteId}</div> }))
 vi.mock('../src/api', () => ({ api: { getNotebookById: vi.fn(), getNotebookChapter: vi.fn(), getNote: vi.fn(), getReadingPosition: vi.fn().mockResolvedValue(null), saveReadingPosition: vi.fn().mockResolvedValue({revision: 1}) } }))
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 const chapter = { id: 'm', title: 'Lecture', sections: [], status: 'pending' }

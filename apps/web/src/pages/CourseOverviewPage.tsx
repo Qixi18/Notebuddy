@@ -6,7 +6,7 @@ import { ProcessingStatus } from '../components/ProcessingStatus'
 import { CourseKnowledgeStructure } from './CourseKnowledgeStructure'
 import { api } from '../api'
 import type { NotebookSummary } from '../types'
-import { NotebookRootMenu } from '../features/forest/NotebookRootMenu'
+import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 
 type CourseTab = 'overview' | 'structure'
 

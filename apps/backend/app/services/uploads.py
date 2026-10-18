@@ -62,6 +62,11 @@ def _validate_container(path: Path, extension: str) -> None:
         raise UploadRejected(f"文件不是可读取的 {extension[1:].upper()}", 415) from exc
 
 
+def validate_upload_container(path: Path, extension: str) -> None:
+    """Public validation entry for non-material uploads."""
+    _validate_container(path, extension)
+
+
 def ingest_document(
     db: Session, *, course_id: str, source: object, filename: str,
     lecture_title: str, topic_title: str, media_type: str | None,

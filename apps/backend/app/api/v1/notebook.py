@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.shared import ensure_course
 from app.db.database import get_db
 from app.db.models import Course, Material, Note, Notebook, NotebookReadingPosition, utc_now
-from app.notes.notebook import default_notebook, notebook_outline
+from app.notes.notebook import default_notebook, list_course_notebooks, notebook_outline
 from app.schemas.notebook import (
     ChapterContentRead,
     NotebookOrderUpdate,
@@ -31,8 +31,7 @@ def ensure_notebook(db: Session, course_id: str, notebook_id: str) -> Notebook:
 @router.get("/courses/{course_id}/notebooks", response_model=list[NotebookSummary])
 def list_notebooks(course_id: str, db: Session = Depends(get_db)):
     ensure_course(db, course_id)
-    return db.scalars(select(Notebook).where(Notebook.course_id == course_id)
-                      .order_by(Notebook.display_order, Notebook.created_at, Notebook.id)).all()
+    return list_course_notebooks(db, course_id)
 
 
 @router.post("/courses/{course_id}/notebooks", response_model=NotebookSummary, status_code=201)

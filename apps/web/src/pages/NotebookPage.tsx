@@ -7,9 +7,9 @@ import { api } from '../api'
 import { useWorkspace } from '../components/AppLayout'
 import { adjacentSection, notebookPath, resolveSection } from '../features/notebook/navigation'
 import type { NotebookRead, NotebookSection, NotebookReadingPosition } from '../types'
-import { NoteSectionReader } from './NotesPage'
+import { NoteSectionReader } from '../features/notes/NoteSectionReader'
 import { useReadingPosition } from '../features/notebook/useReadingPosition'
-import { NotebookRootMenu } from '../features/forest/NotebookRootMenu'
+import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 
 export function NotebookPage() {
   const { courseId = '', notebookId = '' } = useParams()

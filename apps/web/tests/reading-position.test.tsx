@@ -7,7 +7,7 @@ import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components
 import { NotebookPage } from '../src/pages/NotebookPage'
 import { positionWriter } from '../src/features/notebook/readingPosition'
 vi.mock('../src/api', () => ({ ApiError: class extends Error { constructor(message: string, readonly status: number) { super(message) } }, api: { getNotebook: vi.fn(), getNotebookById: vi.fn(), getReadingPosition: vi.fn(), saveReadingPosition: vi.fn(), getNotebookChapter: vi.fn(), getChapter: vi.fn(), getNote: vi.fn() } }))
-vi.mock('../src/pages/NotesPage', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
+vi.mock('../src/features/notes/NoteSectionReader', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
 const s1 = { id: 'n1', notebook_id: 'book', material_id: 'm1', tree_slot: 0, title: '第一节' }
 const s2 = { ...s1, id: 'n2', material_id: 'm2', title: '第二节' }
 const outline = { id: 'book', course_id: 'c', title: '本', chapters: [{ id: 'm1', title: '讲1', sections: [s1] }, { id: 'm2', title: '讲2', sections: [s2] }], historical_sections: [], removed_chapters: [] }

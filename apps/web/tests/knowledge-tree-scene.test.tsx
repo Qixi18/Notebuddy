@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { KnowledgeTreeScene } from '../src/features/forest/KnowledgeTreeScene'
-import { notebookGeometry, overviewLeaves, sceneInitialCamera } from '../src/features/forest/treeGeometry'
+import { KnowledgeTreeScene } from '../src/features/tree/KnowledgeTreeScene'
+import { notebookGeometry, overviewLeaves, sceneInitialCamera } from '../src/features/tree/treeGeometry'
 import type { NotebookRead, SectionRead } from '../src/types'
 import type { CrossCourseRelation, ForestCourse } from '../src/features/forest/types'
 

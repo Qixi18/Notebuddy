@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { forestLayout, signature } from '../src/features/forest/layout.ts'
+import { forestLayout, signature } from '../src/features/tree/layout.ts'
 
 const course = (id: string, semester = 1, position = 0, level = 'foundation') => ({
   course_id: id,

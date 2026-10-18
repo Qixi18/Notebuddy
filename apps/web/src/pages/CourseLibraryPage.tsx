@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { api } from '../api'
 import { useWorkspace } from '../components/AppLayout'
-import { CourseContextMenu, DeleteCourseDialog, RenameCourseDialog, type ContextMenuState } from '../CourseContextMenu'
+import { CourseContextMenu, DeleteCourseDialog, RenameCourseDialog, type ContextMenuState } from '../components/CourseContextMenu'
 
 const DAY = 86_400_000
 
