@@ -67,6 +67,7 @@
   2. 前端逐块 diff 审查：`noteDiff.ts` 行级 LCS（纯函数）→ 红删绿增视图，每块独立勾选，「采纳所选项」拼装 `final_markdown` 提交；`ProposalReview.final_markdown` 支持部分采纳（不提供时旧行为不变）。
   3. 采纳后卡片保留「撤销本次 AI 改动」，回写采纳前正文（期间被改过则 409 提示）。
 - 验证：后端 239 passed / 前端 node:test 38 + vitest 121 全绿；build 通过。
+- **建议原位内嵌（用户追加）**：待确认建议直接渲染在笔记阅读视图正文区（`NoteSuggestionsInline` + 共享 `DiffView`）——红删绿增嵌在原文位置、逐块勾选、就地采纳/忽略；正文上方有"隐藏/显示 AI 修改标记"开关；悬浮坞建议卡与原位视图操作同一份待确认数据。章节总览页暂不内嵌。前端 124 vitest + 38 node:test 全绿，build 通过。
 
 ## 5. 剩余工作（P1/P2，见计划文档）
 

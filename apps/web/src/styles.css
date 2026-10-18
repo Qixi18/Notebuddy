@@ -1984,6 +1984,15 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .agent-diff-removed { color: #8c3d33; background: #fbe9e7; }
 .agent-diff-added { color: #2f5e3f; background: #e8f4e4; }
 .agent-card-adopted { border-color: #cfe3d2; background: #f2f8f1; }
+/* 笔记原位建议：红删绿增直接嵌在阅读视图正文区 */
+.note-inline-suggestions { display: grid; gap: 10px; }
+.note-inline-banner { margin: 0; padding: 8px 11px; border: 1px solid #dce8d8; border-radius: 9px; color: #35553d; background: #f0f6ee; font-size: 12.5px; line-height: 1.7; }
+.note-inline-banner strong { color: #2f5e3f; }
+.note-inline-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.note-inline-actions small { color: #98a094; }
+.note-inline-toggle { justify-self: start; margin-bottom: 6px; }
+.note-inline-suggestions .agent-diff { max-height: none; font-size: 13px; }
+.note-inline-suggestions .agent-diff-row { padding: 4px 10px; }
 /* agent/回答里的 GFM 表格：窄栏可横向滚动，其余渲染容器统一描边风格 */
 .assistant-dock-answer { overflow-x: auto; }
 .markdown-preview table, .assistant-answer-content table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }

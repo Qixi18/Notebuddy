@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 
+import { DiffView } from './DiffView'
 import { applySelected, diffRows, hunksOf } from './noteDiff'
 
 /**
@@ -76,32 +77,7 @@ export function NoteSuggestionCards({
         return (
           <article key={suggestion.id} className="agent-card" role="listitem">
             <p className="agent-card-body">{suggestion.impact || 'AI 提出的修改建议'}</p>
-            <div className="agent-diff">
-              {rows.map((row, index) => {
-                const elements: ReactNode[] = []
-                const hunkKey = row.hunk
-                const hunkStarts = hunkKey !== undefined && rows[index - 1]?.hunk !== hunkKey
-                if (hunkStarts) {
-                  elements.push(
-                    <label key={`${hunkKey}-head`} className="agent-diff-hunk-head">
-                      <input
-                        type="checkbox"
-                        checked={!skipSet.has(hunkKey)}
-                        onChange={() => toggle(hunkKey)}
-                      />
-                      变更块 {hunkKey.slice(1)}
-                    </label>,
-                  )
-                }
-                elements.push(
-                  <div
-                    key={`${hunkKey ?? 'same'}-${index}`}
-                    className={`agent-diff-row agent-diff-${row.type}`}
-                  >{row.text || ' '}</div>,
-                )
-                return elements
-              })}
-            </div>
+            <DiffView rows={rows} skipped={skipSet} onToggle={toggle} />
             <div className="agent-card-actions">
               <button
                 type="button"

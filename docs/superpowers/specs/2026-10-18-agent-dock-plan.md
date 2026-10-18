@@ -299,13 +299,27 @@ apps/web/
   tests/test_agent_api.py      [修改] review final_markdown 部分采纳用例
 前端：
   src/features/assistant/noteDiff.ts   [新建] 行级 diff + hunk 分组（纯函数）
-  src/features/assistant/AgentCards.tsx [修改] diff 红绿视图、逐块勾选、采纳所选项、采纳后撤销
+  src/features/assistant/DiffView.tsx  [新建] 红删绿增逐块视图（悬浮坞卡与笔记内嵌共用）
+  src/features/assistant/AgentCards.tsx [修改] 改用 DiffView；diff 审查/撤销交互
+  src/features/assistant/NoteSuggestionsInline.tsx
+                                       [新建] 建议原位渲染进笔记阅读视图（用户追加需求）
+  src/pages/NotesPage.tsx              [修改] NoteSectionReader 接线：内嵌展示开关 + 最终正文提交
   src/api/notes.ts                     [修改] reviewSuggestion 支持最终正文
   src/components/AssistantDock.tsx     [修改] 传入当前正文、撤销回调接线
-  src/styles.css                       [修改] diff 红绿行/勾选样式
+  src/styles.css                       [修改] diff 红绿行/勾选/原位建议样式
   tests/note-diff.test.ts              [新建] diff 纯函数用例（node:test）
+  tests/note-inline.test.tsx           [新建] 原位建议组件用例
   tests/agent-dock.test.tsx            [修改] 逐块采纳与撤销交互用例
 文档：
   docs/superpowers/specs/2026-10-18-agent-dock-plan.md [修改] 本节
   docs/handoffs/2026-10-18-agent-dock.md               [修改] 实施记录回填
 ```
+
+### 12.3 原位内嵌（用户追加："把这些直接放到原文，而不是对话框"）
+
+- 待确认建议**直接渲染在笔记阅读视图正文区**（`NoteSuggestionsInline`）：红删绿增嵌在原文位置，
+  每处变更带勾选框，`采纳所选项` 就地写入；多条建议按顺序逐条展示。
+- 正文上方提供开关：「隐藏 AI 修改标记，只看正文」/「在正文中显示 AI 修改标记（N 条待确认）」；
+  历史版本预览与编辑模式下不显示标记。
+- 悬浮坞里的建议卡与原位视图操作同一份待确认数据，任一侧采纳/忽略另一侧同步感知（同一 API + 刷新）。
+- 章节总览页暂不内嵌（只读汇总），仅阅读视图支持——已在交接文档标注。

@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { featurePath, useWorkspace } from '../components/AppLayout'
 import { SourceCard } from '../components/SourceCard'
 import type { NoteRevision, NoteSourceRef } from '../types'
+import { NoteSuggestionsInline } from '../features/assistant/NoteSuggestionsInline'
 import { notebookPath } from '../features/notebook/navigation'
 
 export function NotesPage() {
@@ -65,6 +66,9 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
   const [pendingNoteAction, setPendingNoteAction] = useState<{ kind: 'revision'; revision: NoteRevision }>()
   const [webSources, setWebSources] = useState<import('../types').WebSource[]>([])
   const [suggestions, setSuggestions] = useState<Array<{ id: string; proposed_markdown: string; impact: string; status: string }>>([])
+  /** 待确认建议原位展示：红删绿增嵌在正文里；可一键切回纯正文视图 */
+  const [inlineSuggestionsOpen, setInlineSuggestionsOpen] = useState(true)
+  const [suggestionBusyId, setSuggestionBusyId] = useState<string>()
   const readerNoteId = useRef(noteId)
   readerNoteId.current = noteId
   const readerActive = useRef(true)
@@ -103,16 +107,19 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
     return () => { active = false }
   }, [noteId, selectedNote?.id, selectedNote?.revision_number])
 
-  async function reviewSuggestion(suggestionId: string, decision: 'confirm' | 'reject') {
+  async function reviewSuggestion(suggestionId: string, decision: 'confirm' | 'reject', finalMarkdown?: string) {
     if (!selectedNote || noteDirty || noteSaving) return
     const requestedNoteId = selectedNote.id
+    setSuggestionBusyId(suggestionId)
     try {
-      const updated = await api.reviewSuggestion(requestedNoteId, suggestionId, decision)
+      const updated = await api.reviewSuggestion(requestedNoteId, suggestionId, decision, undefined, finalMarkdown)
       if (!readerActive.current || readerNoteId.current !== requestedNoteId) return
       upsertNotes([updated])
       setSuggestions((items) => items.map((item) => item.id === suggestionId ? { ...item, status: decision === 'confirm' ? 'accepted' : 'rejected' } : item))
     } catch (cause) {
       if (readerActive.current && readerNoteId.current === requestedNoteId) setError(cause instanceof Error ? cause.message : '建议处理失败')
+    } finally {
+      if (readerActive.current && readerNoteId.current === requestedNoteId) setSuggestionBusyId(undefined)
     }
   }
 
@@ -146,6 +153,7 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
   const contentLines = storedContent.split('\n')
   const firstHeading = contentLines[0]?.trim().match(/^#\s+(.+)$/)?.[1]?.trim()
   const displayedContent = firstHeading === selectedNote?.title ? contentLines.slice(1).join('\n').trimStart() : storedContent
+  const pendingSuggestions = suggestions.filter((item) => item.status === 'pending')
 
   if (!noteId) return null
 
@@ -181,7 +189,26 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
                   </div>
                 </div>
               </>
-            ) : <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{displayedContent || '此版本没有正文内容。'}</ReactMarkdown></div>}
+            ) : !previewRevision && pendingSuggestions.length > 0 && inlineSuggestionsOpen ? (
+              <>
+                <button className="text-button note-inline-toggle" onClick={() => setInlineSuggestionsOpen(false)}>隐藏 AI 修改标记，只看正文</button>
+                <NoteSuggestionsInline
+                  content={displayedContent}
+                  suggestions={pendingSuggestions}
+                  busyId={suggestionBusyId}
+                  onReview={(suggestion, decision, finalMarkdown) => void reviewSuggestion(suggestion.id, decision, finalMarkdown)}
+                />
+              </>
+            ) : (
+              <>
+                {!previewRevision && !editingNote && pendingSuggestions.length > 0 ? (
+                  <button className="text-button note-inline-toggle" onClick={() => setInlineSuggestionsOpen(true)}>
+                    在正文中显示 AI 修改标记（{pendingSuggestions.length} 条待确认）
+                  </button>
+                ) : null}
+                <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{displayedContent || '此版本没有正文内容。'}</ReactMarkdown></div>
+              </>
+            )}
 
             {error?.includes('笔记已在其他操作中更新') && <div className="note-conflict-panel" role="alert"><strong>检测到版本冲突</strong><p>可以载入最新版本重新编辑，或保留当前草稿并自行比较。载入最新版本会替换当前编辑内容。</p><button className="secondary-button" onClick={() => void reloadCurrentNote()}>载入最新版本</button><button className="text-button" onClick={() => setError(undefined)}>保留当前草稿</button></div>}
           </article>
