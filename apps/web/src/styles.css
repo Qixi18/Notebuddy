@@ -1975,6 +1975,15 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .agent-card-reject { border: 1px solid #dcd7c6; color: #6c6552; background: #fbf9f2; }
 .agent-card-reject:hover:not(:disabled) { filter: brightness(.97); }
 .agent-card-confirm:disabled, .agent-card-reject:disabled { cursor: not-allowed; opacity: .55; }
+/* 逐块 diff 审查：红删绿增，未变行弱化；勾选框行说明该块可独立采纳/跳过 */
+.agent-diff { display: grid; gap: 1px; max-height: 260px; overflow-y: auto; border: 1px solid #e7e3d6; border-radius: 7px; background: #fffefa; }
+.agent-diff-hunk-head { display: flex; gap: 5px; align-items: center; padding: 4px 8px 3px; color: #6c6552; background: #f4f1e6; font-size: 10.5px; cursor: pointer; }
+.agent-diff-hunk-head input { accent-color: #4c7a55; }
+.agent-diff-row { padding: 2px 8px; font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.agent-diff-same { color: #9aa398; }
+.agent-diff-removed { color: #8c3d33; background: #fbe9e7; }
+.agent-diff-added { color: #2f5e3f; background: #e8f4e4; }
+.agent-card-adopted { border-color: #cfe3d2; background: #f2f8f1; }
 /* agent/回答里的 GFM 表格：窄栏可横向滚动，其余渲染容器统一描边风格 */
 .assistant-dock-answer { overflow-x: auto; }
 .markdown-preview table, .assistant-answer-content table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }

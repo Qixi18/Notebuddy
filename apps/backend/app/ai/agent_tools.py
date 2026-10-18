@@ -48,6 +48,10 @@ CHAT_MARKERS = (
     "我这边不会直接改动",
 )
 
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+_EDIT_OPS = ("append", "insert_after_heading", "replace_section", "remove_section")
+_MAX_EDITS = 8
+
 
 @dataclass
 class ToolOutcome:
@@ -121,14 +125,30 @@ def build_tool_specs(
         ))
     if editable_note:
         specs.append(_spec(
-            "propose_note_edit",
-            "对当前打开的笔记提交修改建议（pending，用户确认后才生效，不会直接改动正文）。"
-            "proposed_markdown 必须是整篇笔记的完整新版本：保留用户原有内容，只做用户要求的修改。",
+            "propose_note_edits",
+            "对当前打开的笔记提交结构化修改建议（pending，用户确认后才生效，不会直接改动正文）。"
+            "不要提交整篇重写：只提交真正需要变更的操作。anchor 填笔记中某个标题的原文（不含 # 号）。",
             {
-                "proposed_markdown": {"type": "string", "description": "整篇笔记的完整新 Markdown"},
-                "rationale": {"type": "string", "description": "一句话说明改了什么、为什么"},
+                "rationale": {"type": "string", "description": "一句话说明这批改动做什么"},
+                "edits": {
+                    "type": "array",
+                    "description": "1-8 个操作，按笔记从头到尾的顺序给出、依次执行",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "op": {
+                                "type": "string",
+                                "enum": ["append", "insert_after_heading", "replace_section", "remove_section"],
+                                "description": "append=文末追加；insert_after_heading=在 anchor 小节末尾插入；replace_section=替换 anchor 小节正文（保留标题行）；remove_section=删除 anchor 小节（含标题与子小节）",
+                            },
+                            "anchor": {"type": "string", "description": "目标小节的标题原文（append 不需要）"},
+                            "content": {"type": "string", "description": "Markdown 正文（remove_section 不需要；只能包含笔记本身，禁止对话文字）"},
+                        },
+                        "required": ["op"],
+                    },
+                },
             },
-            ["proposed_markdown", "rationale"],
+            ["rationale", "edits"],
         ))
         if scope in ("course", "global"):
             specs.append(_spec(
@@ -355,7 +375,81 @@ def _web_search(db: Session, *, course_id: str, arguments: dict[str, Any], allow
         return ToolOutcome("联网搜索失败", f"联网搜索失败（{type(exc).__name__}），请只依据课程资料回答并说明限制。")
 
 
-def _propose_note_edit(
+def _content_lines(content: str) -> list[str]:
+    return content.strip("\n").split("\n") if content.strip() else []
+
+
+def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    out: list[tuple[int, int, str]] = []
+    for index, line in enumerate(lines):
+        match = _HEADING_RE.match(line)
+        if match:
+            out.append((index, len(match.group(1)), match.group(2).strip()))
+    return out
+
+
+def _section_range(headings: list[tuple[int, int, str]], start: int, level: int, total: int) -> tuple[int, int]:
+    """小节范围 = 标题行起，到下一个同级或更高级标题前（含所有子小节）。"""
+    end = total
+    for index, heading_level, _title in headings:
+        if index > start and heading_level <= level:
+            return start, index
+    return start, end
+
+
+def _resolve_anchor(lines: list[str], anchor: str, op_index: int) -> tuple[int, int]:
+    headings = _headings(lines)
+    exact = [(index, level) for index, level, title in headings if title == anchor]
+    if len(exact) == 1:
+        return _section_range(headings, exact[0][0], exact[0][1], len(lines))
+    partial = [(index, level, title) for index, level, title in headings if anchor in title]
+    if len(partial) == 1:
+        return _section_range(headings, partial[0][0], partial[0][1], len(lines))
+    titles = [title for _index, _level, title in headings]
+    if len(partial) > 1:
+        shown = "、".join(f"『{title}』" for title, _ in [(t, None) for t in titles[:8]])
+        raise ValueError(f"第 {op_index} 个操作的标题『{anchor}』匹配到多个小节（{shown}），请改用完整标题原文")
+    hint = "、".join(f"『{title}』" for title in titles[:8]) or "（笔记当前没有任何标题）"
+    raise ValueError(f"第 {op_index} 个操作找不到标题『{anchor}』；当前笔记的标题有：{hint}")
+
+
+def _apply_note_edits(current: str, edits: list[dict[str, Any]]) -> str:
+    """把操作列表依次应用到正文工作副本；任何一步失败抛 ValueError（含中文原因）。"""
+    lines = current.splitlines()
+    for op_index, edit in enumerate(edits, start=1):
+        if not isinstance(edit, dict):
+            edit = {}
+        op = str(edit.get("op") or "")
+        if op not in _EDIT_OPS:
+            raise ValueError(f"第 {op_index} 个操作类型无效：{op or '（不是对象）'}；可用 append / insert_after_heading / replace_section / remove_section")
+        if op == "append":
+            block = _content_lines(str(edit.get("content") or ""))
+            if not block:
+                raise ValueError(f"第 {op_index} 个操作（append）content 为空")
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.extend(block)
+            continue
+        anchor = str(edit.get("anchor") or "").strip()
+        if not anchor:
+            raise ValueError(f"第 {op_index} 个操作（{op}）缺少 anchor：请填笔记里某个标题的原文（不含 # 号）")
+        start, end = _resolve_anchor(lines, anchor, op_index)
+        if op == "remove_section":
+            del lines[start:end]
+        elif op == "replace_section":
+            block = _content_lines(str(edit.get("content") or ""))
+            if not block:
+                raise ValueError(f"第 {op_index} 个操作（replace_section）content 为空")
+            lines[start + 1:end] = block
+        else:  # insert_after_heading：插入到该小节末尾（下一个同级或更高级标题之前）
+            block = _content_lines(str(edit.get("content") or ""))
+            if not block:
+                raise ValueError(f"第 {op_index} 个操作（insert_after_heading）content 为空")
+            lines[end:end] = [""] + block
+    return "\n".join(lines)
+
+
+def _propose_note_edits(
     db: Session,
     *,
     course_id: str,
@@ -373,33 +467,46 @@ def _propose_note_edit(
     note, error = _load_note(db, course_id, editable_note_id)
     if note is None:
         return ToolOutcome("读取失败", error)
-    proposed = str(arguments.get("proposed_markdown") or "").strip()[:NOTE_SUGGESTION_MAX_CHARS]
-    if len(proposed) < 1:
-        return ToolOutcome("建议内容为空", "proposed_markdown 不能为空。")
+    edits = arguments.get("edits")
+    if not isinstance(edits, list) or not 1 <= len(edits) <= _MAX_EDITS:
+        return ToolOutcome(
+            "操作列表无效",
+            f"edits 必须是 1-{_MAX_EDITS} 个操作对象的数组。不要提交整篇重写：只提交真正需要变更的操作"
+            "（append / insert_after_heading / replace_section / remove_section）。",
+        )
+    rationale = str(arguments.get("rationale") or "").strip()[:200] or "AI 学习助手提出的修改建议"
+    try:
+        final = _apply_note_edits(note.content_markdown, edits).strip()
+    except ValueError as exc:
+        return ToolOutcome("操作无法执行", f"{exc}。请修正后重新提交。")
+    if not final:
+        return ToolOutcome("结果为空", "按这批操作修改后笔记正文为空，已拒绝；请检查是否误删全部内容。")
+    if len(final) > NOTE_SUGGESTION_MAX_CHARS:
+        return ToolOutcome("超出长度上限", "修改后的笔记超过长度上限，请拆分成多次较小的修改。")
     # 确定性防线 1：对话性文字混入正文（真实事故：聊天回复被整段写进笔记并逐轮累积）
-    markers = [marker for marker in CHAT_MARKERS if marker in proposed]
+    markers = [marker for marker in CHAT_MARKERS if marker in final]
     if markers:
         return ToolOutcome(
             "建议混入对话文字",
-            f"proposed_markdown 中出现了对话性文字（{'、'.join(markers[:3])}）。笔记正文只能包含笔记本身："
-            "请重写一份干净的整篇 Markdown；改动说明和解释放在你的回答正文里，不要写进 proposed_markdown。",
+            f"修改后的正文中出现了对话性文字（{'、'.join(markers[:3])}）。操作的 content 只能包含笔记本身："
+            "改动说明和解释放在你的回答正文里，不要写进 content。",
         )
     # 确定性防线 2：完全重复的段落（疑似污染底稿被再次叠加）
-    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n", proposed) if paragraph.strip()]
+    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n", final) if paragraph.strip()]
     duplicated = {paragraph for paragraph in paragraphs if paragraphs.count(paragraph) > 1}
     if duplicated:
         return ToolOutcome(
             "建议含重复段落",
-            "proposed_markdown 里出现了完全重复的段落。请以用户当前笔记为底稿重新生成一份干净的整篇正文："
-            "每个段落只出现一次，不要把之前的建议或对话内容叠加进来。",
+            "修改后的正文里出现了完全重复的段落。请检查操作列表：每个段落只应出现一次，不要把之前的建议内容叠加进来。",
         )
-    rationale = str(arguments.get("rationale") or "").strip()[:200] or "AI 学习助手提出的修改建议"
     suggestion = create_note_suggestion(
-        db, note_id=note.id, proposed_markdown=proposed, source_ids=[], impact=rationale,
+        db, note_id=note.id, proposed_markdown=final, source_ids=[], impact=rationale,
     )
+    op_names = "、".join(str(edit.get("op")) for edit in edits if isinstance(edit, dict))
     return ToolOutcome(
-        f"提交《{note.title}》修改建议（待用户确认）",
-        f"已为笔记《{note.title}》创建修改建议（待确认状态，不会直接改动正文）。请在回答里向用户说明改动要点，由用户点「采纳」生效。",
+        f"提交《{note.title}》修改建议：{len(edits)} 项操作（待用户确认）",
+        f"已为笔记《{note.title}》创建结构化修改建议（{op_names}；待确认状态，不会直接改动正文）。"
+        "请在回答里向用户说明每项操作的意图，由用户在前端逐块审阅后采纳。",
         suggestions=[{
             "type": "note_suggestion", "id": suggestion.id, "note_id": note.id,
             "note_title": note.title, "impact": suggestion.impact,
@@ -437,7 +544,7 @@ _EXECUTORS = {
     "get_note_coverage": _get_note_coverage,
     "explain_term": _explain_term,
     "web_search": _web_search,
-    "propose_note_edit": _propose_note_edit,
+    "propose_note_edits": _propose_note_edits,
     "propose_knowledge_node": _propose_knowledge_node,
 }
 
@@ -450,7 +557,7 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "get_note_coverage": ("course_id", "arguments"),
     "explain_term": ("course_id", "arguments"),
     "web_search": ("course_id", "arguments", "allow_web"),
-    "propose_note_edit": ("course_id", "arguments", "editable_note_id"),
+    "propose_note_edits": ("course_id", "arguments", "editable_note_id"),
     "propose_knowledge_node": ("course_id", "arguments"),
 }
 

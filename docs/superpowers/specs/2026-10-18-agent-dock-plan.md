@@ -274,3 +274,38 @@ apps/web/
 ### 11.3 约束提醒
 
 所有写路径继续遵守"建议-确认 + 修订可回退 + 来源规范"；8/10/11 属于超出首期承诺的新范围，需用户明确立项后再排期。
+
+## 12. 第一梯队实施设计（2026-10-18 确认动工：结构化编辑 + 逐块 diff + 一键撤销）
+
+### 12.1 机制设计
+
+1. **结构化编辑操作**：agent 不再输出"整篇新文"，改调 `propose_note_edits({ rationale, edits[] })`，四种操作——
+   `append`（文末追加）、`insert_after_heading`（在某标题小节末尾插入）、`replace_section`（替换某小节正文，保留标题行）、`remove_section`（删除小节含标题及其子块）；`anchor` 为标题文本。
+   后端把操作**依次**应用到当前正文工作副本：锚点解析（精确标题匹配 → 唯一子串匹配 → 失败返回候选标题清单）；任一操作失败整单拒绝并回报原因。
+   产出最终全文存入现有 `NoteSuggestion.proposed_markdown`——**零数据库迁移**，既有 review 流程兼容；对话标记/重复段落守卫改为对最终全文生效。
+2. **逐块 diff 审查**：前端 `noteDiff.ts` 行级 diff（LCS，纯函数、node:test 直测）把「当前正文 vs 建议全文」分成变更块；卡片渲染红删绿增，**每块独立勾选**（默认全选）；「采纳所选项 (n/m)」把选中块拼装成 `final_markdown` 提交。
+3. **部分采纳后端支持**：`ProposalReview` 增加可选 `final_markdown`；confirm 时若提供则以其为准（与 proposed 不同则 impact 追加"部分采纳"）。**不提供时行为与旧版完全一致**（旧建议照常整文替换）。
+4. **一键撤销**：采纳成功后卡片保留「撤销本次 AI 改动」——前端用采纳前正文 + 当前修订号 PATCH 回去；期间笔记被改过则 409 提示刷新。
+
+### 12.2 文件清单
+
+```
+后端：
+  app/ai/agent_tools.py        [修改] propose_note_edits 工具（section 解析/锚点/操作执行/守卫），移除旧整文重写工具
+  app/ai/prompts.py            [修改] AGENT_SYSTEM 笔记修改规则改为操作指令说明
+  app/schemas/proposals.py     [修改] ProposalReview + final_markdown（可选）
+  app/api/v1/notes.py          [修改] review confirm 支持 final_markdown（部分采纳标注）
+  tests/test_agent_tools.py    [修改] 操作执行/锚点歧义/守卫/整流程用例
+  tests/test_agent_api.py      [修改] review final_markdown 部分采纳用例
+前端：
+  src/features/assistant/noteDiff.ts   [新建] 行级 diff + hunk 分组（纯函数）
+  src/features/assistant/AgentCards.tsx [修改] diff 红绿视图、逐块勾选、采纳所选项、采纳后撤销
+  src/api/notes.ts                     [修改] reviewSuggestion 支持最终正文
+  src/components/AssistantDock.tsx     [修改] 传入当前正文、撤销回调接线
+  src/styles.css                       [修改] diff 红绿行/勾选样式
+  tests/note-diff.test.ts              [新建] diff 纯函数用例（node:test）
+  tests/agent-dock.test.tsx            [修改] 逐块采纳与撤销交互用例
+文档：
+  docs/superpowers/specs/2026-10-18-agent-dock-plan.md [修改] 本节
+  docs/handoffs/2026-10-18-agent-dock.md               [修改] 实施记录回填
+```

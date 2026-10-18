@@ -56,7 +56,7 @@ def _build_world(db: Session) -> dict[str, str]:
     db.flush()
     db.add(RetrievalChunk(course_id=course_a.id, page_block_id=block_a.id, text="行列式是线性代数的基本工具，按对角线法则展开。"))
 
-    note_a1 = Note(course_id=course_a.id, knowledge_node_id=node_a1.id, material_id=material_a.id, title="行列式", content_markdown="# 行列式\n用户写下的正文。")
+    note_a1 = Note(course_id=course_a.id, knowledge_node_id=node_a1.id, material_id=material_a.id, title="行列式", content_markdown="# 行列式\n\n## 定义\n\n用户写下的正文。\n\n## 判定\n\n保持不变。")
     note_a2 = Note(course_id=course_a.id, knowledge_node_id=node_a2.id, material_id=material_a.id, title="矩阵", content_markdown="# 矩阵")
     note_b1 = Note(course_id=course_b.id, knowledge_node_id=node_b1.id, material_id=material_b.id, title="阅读方法", content_markdown="# 阅读")
     db.add_all([note_a1, note_a2, note_b1])
@@ -82,15 +82,15 @@ def test_tool_specs_follow_scope() -> None:
     assert "search_forest" not in names_locked
     assert "list_course_notes" not in names_locked
     assert "get_note_coverage" not in names_locked
-    assert "propose_note_edit" in names_locked
+    assert "propose_note_edits" in names_locked
 
     global_specs = build_tool_specs(scope="global", editable_note=True)
     names_global = {item["function"]["name"] for item in global_specs}
-    assert {"search_forest", "get_note_coverage", "propose_note_edit", "propose_knowledge_node", "web_search"} <= names_global
+    assert {"search_forest", "get_note_coverage", "propose_note_edits", "propose_knowledge_node", "web_search"} <= names_global
 
     read_only = build_tool_specs(scope="global", editable_note=False)
     names_read_only = {item["function"]["name"] for item in read_only}
-    assert "propose_note_edit" not in names_read_only
+    assert "propose_note_edits" not in names_read_only
     assert "propose_knowledge_node" not in names_read_only
 
 
@@ -131,46 +131,91 @@ def test_read_note_respects_locked_scope() -> None:
         assert "《矩阵》" in course_scope.summary
 
 
-def test_propose_note_edit_creates_pending_without_touching_content() -> None:
+def test_propose_note_edits_creates_pending_without_touching_content() -> None:
     for db, ids in _world():
         before = db.get(Note, ids["note_a1"]).content_markdown
         outcome = execute_tool(
-            db, course_id=ids["course_a"], name="propose_note_edit",
-            arguments={"proposed_markdown": "# 行列式\n新版全文", "rationale": "补充例子"},
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "补充例子", "edits": [{"op": "append", "content": "补充：生活化例子。"}]},
             editable_note_id=ids["note_a1"],
         )
         db.flush()
         assert outcome.suggestions and outcome.suggestions[0]["type"] == "note_suggestion"
         suggestion = db.get(NoteSuggestion, outcome.suggestions[0]["id"])
         assert suggestion is not None and suggestion.status == "pending"
+        assert "补充：生活化例子。" in suggestion.proposed_markdown
         assert db.get(Note, ids["note_a1"]).content_markdown == before, "工具绝不直接改正文"
 
 
-def test_propose_note_edit_restricts_target() -> None:
+def test_propose_note_edits_apply_deterministically() -> None:
+    """结构化操作由后端确定性拼装：replace_section 保留标题行，只换该小节正文。"""
+    for db, ids in _world():
+        outcome = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "重写定义", "edits": [{"op": "replace_section", "anchor": "定义", "content": "重写后的定义。"}]},
+            editable_note_id=ids["note_a1"],
+        )
+        db.flush()
+        suggestion = db.get(NoteSuggestion, outcome.suggestions[0]["id"])
+        proposed = suggestion.proposed_markdown
+        assert "# 行列式" in proposed and "## 判定" in proposed and "保持不变。" in proposed, "其余小节原样保留"
+        assert "重写后的定义。" in proposed and "用户写下的正文" not in proposed
+        assert proposed.count("## 定义") == 1, "标题行保留且不重复"
+
+        removed = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "删除判定", "edits": [{"op": "remove_section", "anchor": "判定"}]},
+            editable_note_id=ids["note_a1"],
+        )
+        db.flush()
+        removed_suggestion = db.get(NoteSuggestion, removed.suggestions[0]["id"])
+        assert "## 判定" not in removed_suggestion.proposed_markdown and "保持不变。" not in removed_suggestion.proposed_markdown
+        assert "## 定义" in removed_suggestion.proposed_markdown
+
+
+def test_propose_note_edits_anchor_feedback() -> None:
+    """锚点找不到/有歧义时，拒绝并给出候选标题，模型可自我纠正。"""
+    for db, ids in _world():
+        missing = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "r", "edits": [{"op": "replace_section", "anchor": "不存在的小节", "content": "x"}]},
+            editable_note_id=ids["note_a1"],
+        )
+        assert "找不到标题" in missing.payload_text and "『定义』" in missing.payload_text
+
+        ambiguous = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "r", "edits": [{"op": "replace_section", "anchor": "定", "content": "x"}]},
+            editable_note_id=ids["note_a1"],
+        )
+        assert "匹配到多个小节" in ambiguous.payload_text
+
+
+def test_propose_note_edits_restricts_target() -> None:
     for db, ids in _world():
         no_target = execute_tool(
-            db, course_id=ids["course_a"], name="propose_note_edit",
-            arguments={"proposed_markdown": "x", "rationale": "r"},
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "r", "edits": [{"op": "append", "content": "x"}]},
             editable_note_id=None,
         )
         assert "无法提交" in no_target.payload_text
 
         wrong_target = execute_tool(
-            db, course_id=ids["course_a"], name="propose_note_edit",
-            arguments={"proposed_markdown": "x", "rationale": "r", "note_id": ids["note_a2"]},
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "r", "edits": [{"op": "append", "content": "x"}], "note_id": ids["note_a2"]},
             editable_note_id=ids["note_a1"],
         )
         assert "只能对当前打开" in wrong_target.payload_text
 
 
-def test_propose_note_edit_rejects_chat_contamination() -> None:
-    """真实事故回归：agent 聊天回复（"建议已提交…点「采纳」"）被整段写进笔记正文。"""
+def test_propose_note_edits_rejects_chat_contamination() -> None:
+    """真实事故回归：agent 聊天回复（"建议已提交…点「采纳」"）混进操作 content。"""
     for db, ids in _world():
         contaminated = execute_tool(
-            db, course_id=ids["course_a"], name="propose_note_edit",
+            db, course_id=ids["course_a"], name="propose_note_edits",
             arguments={
-                "proposed_markdown": "# 行列式\n正文。\n\n撤销建议已经提交啦，你点「采纳」它才会生效哦～",
                 "rationale": "精简笔记",
+                "edits": [{"op": "append", "content": "撤销建议已经提交啦，你点「采纳」它才会生效哦～"}],
             },
             editable_note_id=ids["note_a1"],
         )
@@ -178,14 +223,17 @@ def test_propose_note_edit_rejects_chat_contamination() -> None:
         assert db.query(NoteSuggestion).filter_by(note_id=ids["note_a1"]).count() == 0
 
 
-def test_propose_note_edit_rejects_duplicated_paragraphs() -> None:
-    """真实事故回归：污染底稿被反复叠加，同一解释段落出现多遍。"""
+def test_propose_note_edits_rejects_duplicated_paragraphs() -> None:
+    """真实事故回归：同一内容被叠加两次，最终正文出现重复段落。"""
     for db, ids in _world():
         duplicated = execute_tool(
-            db, course_id=ids["course_a"], name="propose_note_edit",
+            db, course_id=ids["course_a"], name="propose_note_edits",
             arguments={
-                "proposed_markdown": "# 行列式\n\n这版删了两张表。\n\n这版删了两张表。\n\n结尾。",
                 "rationale": "精简笔记",
+                "edits": [
+                    {"op": "append", "content": "这版删了两张表。"},
+                    {"op": "append", "content": "这版删了两张表。"},
+                ],
             },
             editable_note_id=ids["note_a1"],
         )
@@ -234,7 +282,7 @@ def test_every_tool_dispatches_without_signature_errors() -> None:
             "get_note_coverage": {"material_id": ids["material_a"]},
             "explain_term": {"term": "行列式"},
             "web_search": {"query": "测试"},
-            "propose_note_edit": {"proposed_markdown": "# 行列式\n新全文", "rationale": "r"},
+            "propose_note_edits": {"rationale": "r", "edits": [{"op": "append", "content": "新段落"}]},
             "propose_knowledge_node": {"candidate_name": "x", "candidate_summary": "y", "rationale": "r"},
         }
         for name, arguments in calls.items():

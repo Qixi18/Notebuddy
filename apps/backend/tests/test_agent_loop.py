@@ -68,7 +68,7 @@ def test_run_agent_streams_steps_deltas_and_final(monkeypatch: pytest.MonkeyPatc
 def test_run_agent_collects_note_edit_suggestions(monkeypatch: pytest.MonkeyPatch) -> None:
     for db, ids in _world():
         _install_fake_client(monkeypatch, [
-            [_tool_call_event("propose_note_edit", '{"proposed_markdown": "# 行列式\\n新全文", "rationale": "补充例子"}')],
+            [_tool_call_event("propose_note_edits", '{"rationale": "补充例子", "edits": [{"op": "append", "content": "新段落"}]}')],
             [{"type": "delta", "text": "已提交修改建议，请点采纳。"}],
         ])
         events = list(agent_loop.run_agent(

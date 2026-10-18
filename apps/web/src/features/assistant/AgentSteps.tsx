@@ -13,7 +13,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_note_coverage: '检查课件覆盖',
   explain_term: '定位术语原文',
   web_search: '联网搜索',
-  propose_note_edit: '准备笔记修改建议',
+  propose_note_edits: '准备笔记修改建议',
   propose_knowledge_node: '提议知识节点',
 }
 

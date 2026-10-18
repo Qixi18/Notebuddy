@@ -77,6 +77,8 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const [writeBackNotice, setWriteBackNotice] = useState<string>()
   const [pendingSuggestions, setPendingSuggestions] = useState<PendingNoteSuggestion[]>([])
   const [pendingBusyId, setPendingBusyId] = useState<string>()
+  /** 已采纳建议 id → 采纳前正文（一键撤销用） */
+  const [adoptedContents, setAdoptedContents] = useState<Record<string, string>>({})
   const messagesRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -218,23 +220,52 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
     return () => { active = false }
   }, [selectedNote, notePath, lastAgentFinalId])
 
-  /* 建议-确认：采纳走现有 review 接口（服务端整文替换 + 修订历史），忽略只标记状态 */
-  async function reviewPending(suggestion: PendingNoteSuggestion, decision: 'confirm' | 'reject') {
+  /* 建议-确认：采纳走现有 review 接口（可携带逐块勾选后的最终正文）；忽略只标记状态。
+     采纳成功后卡片保留「撤销本次 AI 改动」，撤销 = 回写采纳前正文 */
+  async function reviewPending(suggestion: PendingNoteSuggestion, decision: 'confirm' | 'reject', finalMarkdown?: string) {
     setPendingBusyId(suggestion.id)
     setWriteBackNotice(undefined)
+    const beforeContent = selectedNote?.content_markdown ?? ''
     try {
-      await api.reviewSuggestion(suggestion.note_id, suggestion.id, decision)
-      setPendingSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
+      await api.reviewSuggestion(suggestion.note_id, suggestion.id, decision, undefined, finalMarkdown)
       if (decision === 'confirm') {
+        setAdoptedContents((current) => ({ ...current, [suggestion.id]: beforeContent }))
         await refreshCurrentNotes()
-        setWriteBackNotice(`已采纳建议，《${selectedNote?.title ?? '笔记'}》已更新，可在修订历史中回退。`)
+        const partial = finalMarkdown !== undefined && finalMarkdown !== suggestion.proposed_markdown
+        setWriteBackNotice(`已${partial ? '部分采纳' : '采纳'}建议，《${selectedNote?.title ?? '笔记'}》已更新，可在修订历史中回退。`)
       } else {
+        setPendingSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
         setWriteBackNotice('已忽略该建议。')
       }
     } catch (cause) {
       setWriteBackNotice(cause instanceof ApiError && cause.status === 409
         ? '这条建议已处理或笔记刚更新过。'
         : cause instanceof Error ? cause.message : '处理建议失败')
+    } finally {
+      setPendingBusyId(undefined)
+    }
+  }
+
+  /* 撤销本次 AI 改动：回写采纳前正文；期间笔记被改过则 409 提示刷新 */
+  async function undoAdoption(suggestion: PendingNoteSuggestion) {
+    const beforeContent = adoptedContents[suggestion.id]
+    if (!selectedNote || beforeContent === undefined) return
+    setPendingBusyId(suggestion.id)
+    setWriteBackNotice(undefined)
+    try {
+      await api.updateNote(suggestion.note_id, beforeContent, selectedNote.revision_number)
+      await refreshCurrentNotes()
+      setAdoptedContents((current) => {
+        const next = { ...current }
+        delete next[suggestion.id]
+        return next
+      })
+      setPendingSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
+      setWriteBackNotice(`已撤销本次 AI 改动，《${selectedNote.title}》恢复到采纳前内容。`)
+    } catch (cause) {
+      setWriteBackNotice(cause instanceof ApiError && cause.status === 409
+        ? '笔记刚在别处更新过，请刷新笔记后再撤销。'
+        : cause instanceof Error ? cause.message : '撤销失败')
     } finally {
       setPendingBusyId(undefined)
     }
@@ -380,8 +411,11 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
           ) : null}
           <NoteSuggestionCards
             suggestions={pendingSuggestions}
+            currentContent={selectedNote?.content_markdown ?? ''}
             busyId={pendingBusyId}
-            onReview={(suggestion, decision) => void reviewPending(suggestion, decision)}
+            adoptedContents={adoptedContents}
+            onReview={(suggestion, decision, finalMarkdown) => void reviewPending(suggestion, decision, finalMarkdown)}
+            onUndo={(suggestion) => void undoAdoption(suggestion)}
           />
 
           <div className="assistant-dock-quick">

@@ -161,12 +161,21 @@ def review_note_suggestion(
         raise HTTPException(status_code=404, detail="笔记建议不存在")
     if suggestion.status != "pending":
         raise HTTPException(status_code=409, detail="笔记建议已经处理")
+    # 逐块审查：confirm 时可携带前端拼装的最终正文（部分采纳）；不提供则沿用建议原文（旧行为不变）
+    applied = suggestion.proposed_markdown
+    partial = False
+    if payload.decision == "confirm" and payload.final_markdown is not None and payload.final_markdown.strip():
+        applied = payload.final_markdown.strip()
+        partial = applied != suggestion.proposed_markdown
     suggestion.status = "accepted" if payload.decision == "confirm" else "rejected"
     suggestion.reviewed_at = datetime.now(UTC)
-    suggestion.impact = (suggestion.impact + (f"；{payload.note}" if payload.note else "")).strip("；")
+    suffix = payload.note or ""
+    if partial:
+        suffix = f"{suffix}；部分采纳" if suffix else "部分采纳"
+    suggestion.impact = (suggestion.impact + (f"；{suffix}" if suffix else "")).strip("；")
     if payload.decision == "confirm":
         try:
-            updated = update_note_as_user(db, note, suggestion.proposed_markdown, note.revision_number)
+            updated = update_note_as_user(db, note, applied, note.revision_number)
         except NoteEditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     else:

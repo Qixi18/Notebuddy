@@ -126,6 +126,36 @@ def test_agent_endpoint_rejects_duplicate_idempotency_key(tmp_path, monkeypatch)
         app.dependency_overrides.clear()
 
 
+def test_review_suggestion_supports_final_markdown(tmp_path, monkeypatch) -> None:
+    """逐块审查：confirm 可携带前端拼装的最终正文（部分采纳）；不提供则沿用建议原文。"""
+    client, factory, ids = _client_with_db(tmp_path)
+    try:
+        with factory() as db:
+            from app.knowledge.proposals import create_note_suggestion
+
+            full = create_note_suggestion(db, note_id=ids["note"], proposed_markdown="# 整文替换版", source_ids=[], impact="整篇替换")
+            partial = create_note_suggestion(db, note_id=ids["note"], proposed_markdown="# 建议全文\n全部内容", source_ids=[], impact="定点修改")
+            db.commit()
+            full_id, partial_id = full.id, partial.id
+
+        unchanged = client.post(f"/api/v1/notes/{ids['note']}/suggestions/{full_id}/review", json={"decision": "confirm"})
+        assert unchanged.status_code == 200
+        assert unchanged.json()["content_markdown"] == "# 整文替换版"
+
+        partial_response = client.post(
+            f"/api/v1/notes/{ids['note']}/suggestions/{partial_id}/review",
+            json={"decision": "confirm", "final_markdown": "# 建议全文\n只采纳了一部分"},
+        )
+        assert partial_response.status_code == 200
+        assert partial_response.json()["content_markdown"] == "# 建议全文\n只采纳了一部分"
+        with factory() as db:
+            from app.db.models import NoteSuggestion as SuggestionModel
+
+            assert db.get(SuggestionModel, partial_id).impact.endswith("部分采纳")
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_agent_endpoint_validates_scope_and_note_ownership(tmp_path, monkeypatch) -> None:
     client, _factory, ids = _client_with_db(tmp_path)
     try:
