@@ -96,6 +96,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const messages = conversation.messages
   const lastMessage = messages[messages.length - 1]
   const lastAnswer = [...messages].reverse().find((message) => message.role === 'assistant' && message.id !== 'local-greeting')
+  const hasAsked = messages.some((message) => message.role === 'user')
   const bottomKey = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.busy}`
 
   /* 消息变化后重新定位视口：新回复很长时把它的开头对齐到顶部（读到的是正文开头），
@@ -221,14 +222,12 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
       ><i /><i /><i /></div>
 
       <header className="assistant-dock-heading">
-        <span className="assistant-dock-mark" aria-hidden="true">✦</span>
-        <div><strong>{persona.name} · 学习助手</strong><small>{conversationCourse?.name ?? '尚无可提问的课程'}</small></div>
-        <button className="assistant-dock-close" type="button" onClick={onClose} aria-label="收起答疑坞" title="收起答疑坞">✕</button>
+        <span className="assistant-dock-avatar" aria-hidden="true">
+          <TeacherCharacter compact animated status={conversation.busy ? 'thinking' : 'idle'} character={teacherPersona} />
+        </span>
+        <div><strong>{persona.name} · 伴读桌宠</strong><small>{conversationCourse?.name ?? '尚无可提问的课程'}</small></div>
+        <button className="assistant-dock-close" type="button" onClick={onClose} aria-label="收起答疑坞" title="收起答疑坞">×</button>
       </header>
-
-      {/* 侧边答疑坞展示完整立绘：不用 compact（那是 48px 头像的尺寸语义），
-          animated 让它与首页一致走连续帧雪碧图，而不是静态立绘 */}
-      <div className="assistant-dock-teacher"><TeacherCharacter animated status={conversation.busy ? 'thinking' : 'idle'} character={teacherPersona} /></div>
 
       {conversationCourseId ? (
         <>
@@ -283,13 +282,25 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 ) : null}
               </article>
             ))}
+            {!hasAsked && (
+              <div className="assistant-dock-start">
+                <p>可以先问我这些</p>
+                {QUICK_PROMPTS.map((item) => (
+                  <button key={item.label} type="button" disabled={conversation.busy} onClick={() => { setDraft(item.prompt); inputRef.current?.focus() }}>
+                    <span>{item.label}</span><span aria-hidden="true">→</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div className="assistant-dock-quick">
-            {QUICK_PROMPTS.map((item) => (
-              <button key={item.label} type="button" disabled={conversation.busy} onClick={() => { setDraft(item.prompt); inputRef.current?.focus() }}>{item.label}</button>
-            ))}
-          </div>
+          {hasAsked && (
+            <div className="assistant-dock-quick">
+              {QUICK_PROMPTS.map((item) => (
+                <button key={item.label} type="button" disabled={conversation.busy} onClick={() => { setDraft(item.prompt); inputRef.current?.focus() }}>{item.label}</button>
+              ))}
+            </div>
+          )}
 
           <form className="assistant-dock-form" onSubmit={submitQuestion}>
             <textarea ref={inputRef} aria-label="快速提问" placeholder={`问问「${conversationCourse?.name ?? '当前课程'}」…`} value={draft} onChange={(event) => setDraft(event.target.value)} rows={2} />

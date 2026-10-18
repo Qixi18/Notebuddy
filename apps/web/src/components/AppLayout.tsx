@@ -236,7 +236,16 @@ export function AppLayout() {
         onClick={() => setDockOpen(true)}
         aria-label="打开课程学习助手"
         title="打开课程学习助手"
-      ><span aria-hidden="true">✦</span></button>}
+      >
+        <span className="assistant-fab-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" focusable="false">
+            <path d="M3.5 12.2c2.8-3.8 7.3-4.8 11.5-2.4 1.1.6 2 1.5 2.6 2.6-.9.4-1.9.6-2.9.6-4 0-7.7-.3-11.2-.8Z" />
+            <path d="M17.6 13.1c1.5-1.5 3-2.1 4.4-2-.5 1.5-1.3 2.7-2.5 3.7" />
+            <circle cx="6.8" cy="11.6" r=".8" fill="currentColor" stroke="none" />
+          </svg>
+        </span>
+        <span className="assistant-fab-label" aria-hidden="true">叫桌宠来</span>
+      </button>}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {blocker.state === 'blocked' && <ConfirmDialog
         eyebrow="未保存的笔记"
