@@ -172,7 +172,11 @@ def _search_course(db: Session, *, course_id: str, arguments: dict[str, Any]) ->
 def _read_note(db: Session, *, course_id: str, scope: AgentScope, locked_note_id: str | None, arguments: dict[str, Any]) -> ToolOutcome:
     note_id = str(arguments.get("note_id") or locked_note_id or "")
     if not note_id:
-        return ToolOutcome("未指定笔记", "当前没有锁定或打开的笔记，请提供 note_id 或先让用户打开一篇笔记。")
+        return ToolOutcome(
+            "未指定笔记",
+            "当前没有锁定或打开的笔记。请告诉用户：进入「课程笔记本」页面，在目录里点开一个具体小节"
+            "（即打开笔记）后，悬浮坞就能锁定该笔记；也可以改用 search_course 检索课件内容来回答。",
+        )
     if scope == "note" and note_id != locked_note_id:
         return ToolOutcome("超出锁定范围", "当前处于「锁定当前笔记」模式，只能读取锁定的这一篇笔记。")
     note, error = _load_note(db, course_id, note_id)
@@ -330,7 +334,11 @@ def _propose_note_edit(
     arguments: dict[str, Any],
 ) -> ToolOutcome:
     if not editable_note_id:
-        return ToolOutcome("没有可编辑的笔记", "当前没有锁定或打开的笔记，无法提交修改建议；请用户先打开目标笔记。")
+        return ToolOutcome(
+            "没有可编辑的笔记",
+            "当前没有锁定或打开的笔记，无法提交修改建议。请告诉用户：进入「课程笔记本」页面，"
+            "在目录里点开一个具体小节（即打开笔记）后，再回到悬浮坞选择「锁定当前笔记」并重新提出修改要求。",
+        )
     if str(arguments.get("note_id") or editable_note_id) != editable_note_id:
         return ToolOutcome("超出可编辑范围", "只能对当前打开（或锁定）的笔记提交修改建议；其他笔记请提示用户自行打开。")
     note, error = _load_note(db, course_id, editable_note_id)

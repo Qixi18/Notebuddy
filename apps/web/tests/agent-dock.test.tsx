@@ -143,3 +143,28 @@ test('agent 完成后展示知识提议卡；笔记待确认建议可采纳', as
   fireEvent.click(screen.getByRole('button', { name: '采纳' }))
   await waitFor(() => expect(api.reviewSuggestion).toHaveBeenCalledWith('n1', 'sug-9', 'confirm'))
 })
+
+test('agent 回答中的 GFM 表格按表格渲染而不是管道文本', () => {
+  renderShell({ conversation: {
+    messages: [
+      {
+        id: 'a9', conversation_id: 'v1', role: 'assistant',
+        content: '| 法则 | 用法 |\n| --- | --- |\n| 和差法则 | 逐项求导 |\n| 乘积法则 | 展开后求导 |',
+        evidence: [], status: 'completed', created_at: '', mode: 'agent', sources: [],
+      },
+    ], busy: false, error: undefined, agentRun: null,
+    ask: async () => true, askAgent, startNewConversation: async () => {},
+  } })
+
+  expect(document.querySelector('.assistant-dock-answer table')).toBeTruthy()
+  expect(document.querySelectorAll('.assistant-dock-answer th').length).toBe(2)
+  expect(document.querySelectorAll('.assistant-dock-answer td').length).toBe(4)
+})
+
+test('未打开笔记时显示「如何打开」提示且没有锁定选项', () => {
+  renderShell({ selectedNote: undefined })
+
+  expect(screen.getByText(/点开一个具体小节/)).toBeTruthy()
+  const select = screen.getByRole('combobox', { name: '本次提问的作用范围' }) as HTMLSelectElement
+  expect(Array.from(select.options).some((option) => option.value === '__note__')).toBe(false)
+})

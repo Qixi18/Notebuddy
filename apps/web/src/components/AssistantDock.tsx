@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
+import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
@@ -316,6 +317,9 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
               <option value="__global__">🌲 全局可查（跨课程）</option>
             </select>
           </label>
+          {!canLockNote ? (
+            <p className="assistant-dock-open-hint">想让我直接读写某一篇笔记？先进入「课程笔记本」，在目录里点开一个具体小节（即“打开笔记”），这里就会出现「锁定当前笔记」选项。</p>
+          ) : null}
 
           <div className="assistant-dock-messages" aria-live="polite" ref={messagesRef}>
             {messages.map((message, index) => (
@@ -324,7 +328,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 {/* 老师回答走与答疑页同一条 Markdown 管线（remark-math + rehype-katex），
                     否则 ### / ** / 列表会以原始标记直接显示出来；自己的提问保持纯文本 */}
                 {message.role === 'assistant'
-                  ? <div className="assistant-dock-answer"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown></div>
+                  ? <div className="assistant-dock-answer"><ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown></div>
                   : <p>{message.content}</p>}
                 {/* 检索能力显性化：说清这轮是否命中了课件 */}
                 {message.role === 'assistant' && message.mode ? <span className="assistant-dock-mode">{modeLabelsShort[message.mode] ?? '课程资料检索'}</span> : null}
@@ -361,7 +365,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 {conversation.agentRun.notice ? <p className="assistant-dock-agent-notice">{conversation.agentRun.notice}</p> : null}
                 {conversation.agentRun.streamingText ? (
                   <div className="assistant-dock-answer assistant-dock-streaming">
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{conversation.agentRun.streamingText}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{conversation.agentRun.streamingText}</ReactMarkdown>
                     <span className="assistant-dock-cursor" aria-hidden="true" />
                   </div>
                 ) : null}

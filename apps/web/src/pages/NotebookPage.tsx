@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -146,7 +147,7 @@ export function NotebookPage() {
   function renderSection(section: NotebookSection) {
     const note = notes.find((n) => n.id === section.id)
     return <article id={`section-${section.id}`} className="notebook-section" data-note={section.id} data-chapter={section.material_id ?? ''} key={section.id}>
-      {selected?.id === section.id && note ? <NoteSectionReader noteId={section.id} /> : <><header><h3>{section.title}</h3><button className="text-button" onClick={() => open(section)}>定位与编辑此小节</button></header>{note ? <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{note.content_markdown}</ReactMarkdown></div> : <p role="status">{reading ? '正在读取…' : '正文暂未载入，请重试。'}</p>}</>}
+      {selected?.id === section.id && note ? <NoteSectionReader noteId={section.id} /> : <><header><h3>{section.title}</h3><button className="text-button" onClick={() => open(section)}>定位与编辑此小节</button></header>{note ? <div className="markdown-preview"><ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{note.content_markdown}</ReactMarkdown></div> : <p role="status">{reading ? '正在读取…' : '正文暂未载入，请重试。'}</p>}</>}
     </article>
   }
   return <div className="notebook-page page-enter">

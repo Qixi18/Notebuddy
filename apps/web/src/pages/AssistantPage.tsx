@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
+import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
@@ -147,7 +148,7 @@ export function AssistantPage() {
           {messages.map((message, index) => (
             <article className={`conversation-message conversation-${message.role}`} key={`${message.id}-${index}`}>
               <span className="conversation-author">{message.role === 'assistant' ? teacherPersonaMeta(teacherPersona).name : '你'}</span>
-              {message.role === 'assistant' ? <div className="assistant-answer-content"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown></div> : <p>{message.content}</p>}
+              {message.role === 'assistant' ? <div className="assistant-answer-content"><ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown></div> : <p>{message.content}</p>}
               {message.role === 'assistant' && message.status !== 'failed' && message.mode ? <span className="answer-mode-label">{modeLabels[message.mode] ?? '当前课程资料检索'}</span> : null}
               {message.role === 'assistant' && message.status !== 'failed' && message.mode && !(message.sources?.length) ? <span className="answer-no-evidence">{noEvidenceLabels[message.mode] ?? '这次回答没有找到可直接引用的课程页面。'}</span> : null}
               {message.evidence.length > 0 && <details className="answer-evidence-details"><summary>查看详细依据 · {message.evidence.length}</summary><div className="answer-evidence-list">{message.evidence.map((item) => <small key={item.id}>{item.claim_key} · {item.evidence_type} · {item.location_label ?? '来源位置'} · {item.support_level}</small>)}</div></details>}
