@@ -1993,6 +1993,8 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .note-inline-toggle { justify-self: start; margin-bottom: 6px; }
 .note-inline-suggestions .agent-diff { max-height: none; font-size: 13px; }
 .note-inline-suggestions .agent-diff-row { padding: 4px 10px; }
+/* 版本预览头部的操作区：返回当前版本 + 恢复此版本内容 */
+.revision-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 /* agent/回答里的 GFM 表格：窄栏可横向滚动，其余渲染容器统一描边风格 */
 .assistant-dock-answer { overflow-x: auto; }
 .markdown-preview table, .assistant-answer-content table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }

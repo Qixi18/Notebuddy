@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
-import { api } from '../api'
+import { api, ApiError } from '../api'
 import { EmptyState } from '../components/EmptyState'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { featurePath, useWorkspace } from '../components/AppLayout'
@@ -62,6 +62,7 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string>()
   const [previewRevision, setPreviewRevision] = useState<NoteRevision>()
+  const [restoringRevision, setRestoringRevision] = useState(false)
   const [evidenceOpen, setEvidenceOpen] = useState(false)
   const [pendingNoteAction, setPendingNoteAction] = useState<{ kind: 'revision'; revision: NoteRevision }>()
   const [webSources, setWebSources] = useState<import('../types').WebSource[]>([])
@@ -149,6 +150,28 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
     setPendingNoteAction(undefined)
   }
 
+  /* 回退：把选中历史版本的正文恢复为当前版本（生成新修订，历史本身不动） */
+  async function restoreRevision(revision: NoteRevision) {
+    if (!selectedNote || noteSaving) return
+    const requestedNoteId = selectedNote.id
+    setRestoringRevision(true)
+    try {
+      const updated = await api.updateNote(requestedNoteId, revision.content_markdown, selectedNote.revision_number)
+      if (!readerActive.current || readerNoteId.current !== requestedNoteId) return
+      upsertNotes([updated])
+      setNoteDraft(updated.content_markdown)
+      setPreviewRevision(undefined)
+    } catch (cause) {
+      if (readerActive.current && readerNoteId.current === requestedNoteId) {
+        setError(cause instanceof ApiError && cause.status === 409
+          ? '笔记已在其他操作中更新，可载入最新版本后重试。'
+          : cause instanceof Error ? cause.message : '版本恢复失败')
+      }
+    } finally {
+      if (readerActive.current && readerNoteId.current === requestedNoteId) setRestoringRevision(false)
+    }
+  }
+
   const storedContent = previewRevision?.content_markdown ?? selectedNote?.content_markdown ?? ''
   const contentLines = storedContent.split('\n')
   const firstHeading = contentLines[0]?.trim().match(/^#\s+(.+)$/)?.[1]?.trim()
@@ -176,7 +199,17 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
           <article className="note-detail-panel note-reader-document">
             <div className="note-detail-heading">
               <div><span className="eyebrow">{previewRevision ? `历史版本 · v${previewRevision.revision_number}` : selectedForRoute.content_origin === 'user' ? '用户版本' : selectedForRoute.content_origin === 'ai_web_augmented' ? '课程整理 · 含网络来源' : `${course?.name ?? '课程笔记'} · 学习笔记`}</span><h1>{selectedForRoute.title}</h1></div>
-              {previewRevision && <button className="secondary-button" onClick={() => setPreviewRevision(undefined)}>返回当前版本</button>}
+              {previewRevision && (
+                <div className="revision-preview-actions">
+                  <button className="secondary-button" onClick={() => setPreviewRevision(undefined)}>返回当前版本</button>
+                  <button
+                    className="primary-button"
+                    disabled={restoringRevision || previewRevision.revision_number === selectedForRoute.revision_number}
+                    title={previewRevision.revision_number === selectedForRoute.revision_number ? '这就是当前版本' : '把正文恢复为该版本内容（生成新修订，历史保留）'}
+                    onClick={() => void restoreRevision(previewRevision)}
+                  >{restoringRevision ? '恢复中…' : '恢复此版本内容'}</button>
+                </div>
+              )}
             </div>
             {editingNote && !previewRevision ? (
               <>
