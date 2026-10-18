@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -31,6 +32,19 @@ TOOL_RESULT_MAX_CHARS = 1600
 CHUNK_TEXT_MAX_CHARS = 400
 COVERAGE_PREVIEW_LIMIT = 8
 NOTE_SUGGESTION_MAX_CHARS = 20000
+
+# proposed_markdown 中不允许出现的对话性文字（agent 聊天口吻混入正文的典型特征）。
+# 命中即拒绝并要求模型重写；若笔记确实需要这些字样，模型换个说法即可通过。
+CHAT_MARKERS = (
+    "已经提交",
+    "待确认状态",
+    "点「采纳」",
+    "点「忽略」",
+    "这版删了什么",
+    "这版做了什么",
+    "留下了什么",
+    "我这边不会直接改动",
+)
 
 
 @dataclass
@@ -347,6 +361,23 @@ def _propose_note_edit(
     proposed = str(arguments.get("proposed_markdown") or "").strip()[:NOTE_SUGGESTION_MAX_CHARS]
     if len(proposed) < 1:
         return ToolOutcome("建议内容为空", "proposed_markdown 不能为空。")
+    # 确定性防线 1：对话性文字混入正文（真实事故：聊天回复被整段写进笔记并逐轮累积）
+    markers = [marker for marker in CHAT_MARKERS if marker in proposed]
+    if markers:
+        return ToolOutcome(
+            "建议混入对话文字",
+            f"proposed_markdown 中出现了对话性文字（{'、'.join(markers[:3])}）。笔记正文只能包含笔记本身："
+            "请重写一份干净的整篇 Markdown；改动说明和解释放在你的回答正文里，不要写进 proposed_markdown。",
+        )
+    # 确定性防线 2：完全重复的段落（疑似污染底稿被再次叠加）
+    paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n", proposed) if paragraph.strip()]
+    duplicated = {paragraph for paragraph in paragraphs if paragraphs.count(paragraph) > 1}
+    if duplicated:
+        return ToolOutcome(
+            "建议含重复段落",
+            "proposed_markdown 里出现了完全重复的段落。请以用户当前笔记为底稿重新生成一份干净的整篇正文："
+            "每个段落只出现一次，不要把之前的建议或对话内容叠加进来。",
+        )
     rationale = str(arguments.get("rationale") or "").strip()[:200] or "AI 学习助手提出的修改建议"
     suggestion = create_note_suggestion(
         db, note_id=note.id, proposed_markdown=proposed, source_ids=[], impact=rationale,

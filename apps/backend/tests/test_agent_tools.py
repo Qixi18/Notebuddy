@@ -163,6 +163,36 @@ def test_propose_note_edit_restricts_target() -> None:
         assert "只能对当前打开" in wrong_target.payload_text
 
 
+def test_propose_note_edit_rejects_chat_contamination() -> None:
+    """真实事故回归：agent 聊天回复（"建议已提交…点「采纳」"）被整段写进笔记正文。"""
+    for db, ids in _world():
+        contaminated = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edit",
+            arguments={
+                "proposed_markdown": "# 行列式\n正文。\n\n撤销建议已经提交啦，你点「采纳」它才会生效哦～",
+                "rationale": "精简笔记",
+            },
+            editable_note_id=ids["note_a1"],
+        )
+        assert "对话" in contaminated.payload_text
+        assert db.query(NoteSuggestion).filter_by(note_id=ids["note_a1"]).count() == 0
+
+
+def test_propose_note_edit_rejects_duplicated_paragraphs() -> None:
+    """真实事故回归：污染底稿被反复叠加，同一解释段落出现多遍。"""
+    for db, ids in _world():
+        duplicated = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edit",
+            arguments={
+                "proposed_markdown": "# 行列式\n\n这版删了两张表。\n\n这版删了两张表。\n\n结尾。",
+                "rationale": "精简笔记",
+            },
+            editable_note_id=ids["note_a1"],
+        )
+        assert "重复" in duplicated.payload_text
+        assert db.query(NoteSuggestion).filter_by(note_id=ids["note_a1"]).count() == 0
+
+
 def test_propose_knowledge_node_creates_pending() -> None:
     for db, ids in _world():
         outcome = execute_tool(
