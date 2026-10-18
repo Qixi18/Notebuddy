@@ -1,12 +1,5 @@
 import type { Job, Material } from '../types'
 
-const labels: Record<string, string> = {
-  pending: '等待处理',
-  processing: '正在解析课件',
-  completed: '解析完成',
-  failed: '解析未完成',
-}
-
 export function ProcessingStatus({ job, material }: { job?: Job; material?: Material }) {
   const status = job?.status ?? material?.status
   if (!status) return null

@@ -355,30 +355,6 @@ export type Feedback = {
   updated_at: string
 }
 
-export type BackupRecord = {
-  id: string
-  course_id?: string | null
-  action: string
-  path?: string | null
-  status: string
-  manifest_json: string
-  error_message?: string | null
-  created_at: string
-  completed_at?: string | null
-}
-
-export type BackupPreview = {
-  valid: boolean
-  format?: number | null
-  created_at?: string | null
-  course_count: number
-  material_count: number
-  original_count: number
-  total_bytes: number
-  conflicts: string[]
-  errors: string[]
-}
-
 export type SettingsStatus = {
   deepseek: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }
   embedding: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }

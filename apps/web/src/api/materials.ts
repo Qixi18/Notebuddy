@@ -20,7 +20,6 @@ export const materialApi = {
   },
   getJob: (jobId: string) => request<Job>(`/api/v1/jobs/${jobId}`),
   getLatestMaterialJob: (materialId: string) => request<Job>(`/api/v1/materials/${materialId}/latest-job`),
-  listCourseWebSources: (courseId: string) => request<WebSource[]>(`/api/v1/courses/${courseId}/web-sources`),
   listMaterialWebSources: (materialId: string) => request<WebSource[]>(`/api/v1/materials/${materialId}/web-sources`),
   retryMaterial: (materialId: string) => request<Job>(`/api/v1/materials/${materialId}/retry`, { method: 'POST' }),
   listPages: (materialId: string) => request<Page[]>(`/api/v1/materials/${materialId}/pages`),

@@ -20,7 +20,6 @@ export function AssistantPage() {
     selectedMaterialId,
     setSelectedMaterialId,
     pages,
-    setSelectedPageNumber,
     openMaterialSource,
     teacherPersona,
     conversation,

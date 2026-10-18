@@ -5,8 +5,4 @@ export const feedbackApi = {
   saveFeedback: (courseId: string, payload: { target_type: string; target_id: string; category: string; comment?: string }) => request<Feedback>(`/api/v1/courses/${courseId}/feedback`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   }),
-  updateFeedback: (courseId: string, feedbackId: string, payload: { status: 'open' | 'reviewing' | 'resolved' | 'rejected'; resolution?: string }) => request<Feedback>(`/api/v1/courses/${courseId}/feedback/${feedbackId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-  }),
 }

@@ -1,7 +1,6 @@
 .app-main.app-main-forest { padding: 0; max-width: none; min-width: 0; overflow: hidden; }
 .app-shell-forest { background: #f5f7ef; }
 @media (max-width: 760px) {
-  .app-shell-forest .sidebar-collapse-label { display: none; }
   .app-shell-forest .sidebar-collapse-toggle { flex: 0 0 44px; width: 44px; min-width: 44px; height: 44px; margin: 0 3px; justify-content: center; padding: 0; }
 }
 .forest-page { --forest-ink: #344632; --forest-green: #5b7850; --forest-line: #dce3d3; color: var(--forest-ink); display: flex; flex-direction: column; height: 100dvh; min-height: 620px; background: #f6f8f0; }
@@ -17,7 +16,6 @@
 .forest-header-actions button, .forest-dialog button, .forest-course-panel button { background: transparent; border: 1px solid #d7dfcb; color: #4b6442; padding: 9px 14px; border-radius: 7px; }
 .forest-page .forest-action, .forest-dialog .forest-action { background: #627f53; border: 1px solid #627f53; color: #fffef9; padding: 10px 18px; border-radius: 8px 10px 8px 6px; font-weight: 500; }
 .forest-page .forest-action:hover, .forest-dialog .forest-action:hover { background: #4f6f43; }
-.forest-pending-count { display: inline-block; margin-left: 8px; padding: 0 5px; border-radius: 4px; background: #e1e8d2; font-size: 11px; }
 .forest-surface { position: relative; flex: 1; min-height: 0; overflow: hidden; background: radial-gradient(ellipse at 45% 46%, #fcfdf6, #f2f5e9 85%); }
 .app-main.app-main-home { padding: 0; background: #f7f5ea; }
 .home-tree-page { width: 100%; height: 100dvh; min-height: 620px; display: flex; flex-direction: column; }
@@ -40,23 +38,6 @@
 .notebook-chapter-title > button { flex: 1; text-align: left; }
 .notebook-section-link.active { background: #e5eadb; color: #284b39; }
 @media (max-width: 760px) { .home-tree-page .forest-header { padding: 16px; flex-wrap: wrap; } .notebook-layout { grid-template-columns: 1fr; } .notebook-outline { max-height: 210px; overflow: auto; } .notebook-content { padding-inline: 8px; height: 65dvh; } .forest-settings-wrap { left: 12px; right: 12px; width: auto; } .notebook-header { flex-wrap: wrap; } }
-.forest-canvas { display: block; touch-action: none; cursor: grab; outline-offset: -4px; }
-.forest-canvas:active { cursor: grabbing; }
-.forest-tree-paint { pointer-events: none; }
-.forest-course-label { cursor: pointer; }
-.forest-course-label rect { transition: fill 120ms; }
-.forest-course-label:hover rect, .forest-course-label:focus rect { fill: #e9efdf; }
-.forest-course-name { font: 600 22px 'STKaiti', 'KaiTi', 'Noto Serif SC', 'Songti SC', serif; fill: #3d5236; letter-spacing: .8px; }
-.forest-course-meta { font: 12px 'Microsoft YaHei', sans-serif; fill: #7a886b; }
-.forest-tree-focused .forest-course-label rect { fill: #e7eddb; }
-.forest-tree-match .forest-course-label rect { stroke: #84a66f; stroke-width: 1.4; }
-.forest-branch-label { font: 10px 'Microsoft YaHei', sans-serif; fill: #786e55; paint-order: stroke; stroke: #f9fbf3; stroke-width: 3px; stroke-linejoin: round; }
-.forest-leaf { cursor: pointer; outline: none; }
-.forest-leaf .forest-leaf-body { transition: fill 100ms, stroke-width 100ms; }
-.forest-leaf:hover .forest-leaf-body, .forest-leaf:focus .forest-leaf-body, .forest-leaf-match .forest-leaf-body { fill: #9ab95e; stroke: #344e28; stroke-width: 2; filter: drop-shadow(0 1px 3px #a6bd92); }
-.forest-vine { cursor: pointer; opacity: .75; outline: none; }
-.forest-vine:hover, .forest-vine:focus { opacity: 1; filter: drop-shadow(0 0 2px #8b9e76); }
-.forest-semester-mark text { font: 14px 'STKaiti', 'KaiTi', serif; fill: #88967b; letter-spacing: 2px; }
 .forest-search { position: absolute; top: 22px; left: 28px; z-index: 3; width: 282px; }
 .forest-search label { display: flex; align-items: center; gap: 10px; padding: 10px 13px; background: #fdfef9ec; border: 1px solid #dce4d1; border-radius: 10px; box-shadow: 0 2px 7px #52744506; }
 .forest-search svg { width: 17px; height: 17px; stroke: #839677; stroke-width: 1.4; fill: none; flex-shrink: 0; }
@@ -75,17 +56,10 @@
 .forest-state-planned { background: #a1aea0; }
 .forest-state-learning { background: #719565; }
 .forest-state-completed { background: #326047; }
-.forest-camera-controls { position: absolute; left: 28px; bottom: 38px; display: flex; align-items: center; padding: 5px; gap: 3px; border: 1px solid #dce3d1; border-radius: 10px; background: #fdfef8ed; z-index: 3; }
-.forest-camera-controls button { width: 34px; height: 32px; padding: 0; border: 0; color: #647d55; background: transparent; border-radius: 6px; font-size: 18px; }
-.forest-camera-controls button:hover { background: #e9efdf; }
-.forest-camera-controls span { height: 20px; border-left: 1px solid #dce3d0; margin: 0 4px; }
-.forest-camera-controls output { font-size: 10px; min-width: 38px; text-align: center; color: #7d8d70; }
-.forest-camera-controls .forest-reset-camera { width: auto; font-size: 11px; padding: 0 9px; }
 .forest-minimap { position: absolute; right: 25px; bottom: 38px; z-index: 2; padding: 8px 12px 1px; border: 1px solid #dce3d1; background: #fafcf3e6; border-radius: 8px; }
 .forest-minimap > span { color: #89977a; font-size: 10px; display: block; margin: 0 0 1px; }
 .forest-minimap circle { cursor: pointer; stroke: transparent; stroke-width: 5px; }
 .forest-minimap circle:hover, .forest-minimap circle:focus { stroke: #9ab583; }
-.forest-navigation-hint { position: absolute; bottom: 8px; left: 28px; font-size: 10px; color: #a0ab93; margin: 0; pointer-events: none; }
 .forest-course-panel { position: absolute; right: 18px; top: 75px; bottom: 132px; z-index: 4; width: 314px; padding: 20px; border: 1px solid #dbe3cf; border-radius: 12px 10px 14px 10px; background: #fcfdf8f7; box-shadow: 0 8px 30px #5263400c; overflow: auto; scrollbar-width: thin; scrollbar-color: #d3dcc7 transparent; }
 .forest-course-panel > header { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
 .forest-course-panel > header small { font-size: 10px; color: #849377; }
@@ -191,14 +165,9 @@
 .forest-task-status h3 { font: 500 23px 'STKaiti', 'KaiTi', serif; }
 .forest-task-status p { font-size: 12px; line-height: 1.8; }
 .forest-loading-seed { font-size: 40px; color: #91a977; }
-.home-forest-entry { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; border: 1px solid #dce5cd; border-radius: 10px; padding: 14px 18px; margin: 22px 0 0; background: #f5f8ed; color: #647e53; cursor: pointer; }
-.home-forest-entry > span:first-child { font-size: 32px; color: #91a874; }
-.home-forest-entry strong { display: block; font: 600 18px 'STKaiti', 'KaiTi', serif; margin-bottom: 4px; }
-.home-forest-entry small { font-size: 11px; color: #93a280; }
-.home-forest-entry > span:last-child { margin-left: auto; font-size: 20px; }
 .notebook-forest-return { display: block; font-size: 12px; margin-top: 9px; color: #6e885b; }
 .materials-forest-start { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #f1f6e8; color: #71865d; padding: 10px 15px; border: 1px solid #dbe6cc; border-radius: 7px; margin-bottom: 16px; font-size: 12px; }
 .materials-forest-start button { border: 0; background: #6c8758; border-radius: 5px; padding: 6px 10px; color: #fff; cursor: pointer; }
 @media (max-width: 1000px) { .forest-header { padding: 21px 24px; } .forest-heading h1 { font-size: 25px; } .forest-legend { top: 76px; left: 32px; right: auto; } .forest-course-panel { width: 286px; } }
-@media (max-width: 760px) { .forest-header { align-items: flex-start; padding: 19px 18px; gap: 12px; } .forest-heading svg { display: none; } .forest-heading h1 { font-size: 24px; } .forest-heading p { font-size: 10px; } .forest-header-actions { gap: 7px; flex-direction: column-reverse; align-items: flex-end; } .forest-header-actions button { padding: 7px 11px; font-size: 10px; } .forest-search { left: 17px; top: 16px; width: min(282px,calc(100% - 35px)); } .forest-legend { left: 21px; top: 70px; } .forest-course-panel { right: 12px; left: 12px; width: auto; top: auto; bottom: 120px; max-height: 45%; padding: 16px; } .forest-course-panel > header h2 { font-size: 21px; } .forest-minimap { right: 12px; bottom: 38px; padding: 5px 8px 0; } .forest-minimap svg { width: 130px; } .forest-minimap > span { font-size: 8px; } .forest-camera-controls { left: 12px; bottom: 38px; } .forest-camera-controls .forest-reset-camera { display: none; } .forest-camera-controls button { width: 27px; } .forest-navigation-hint { left: 13px; font-size: 8px; } .forest-dialog-backdrop { padding: 12px; } .forest-dialog { padding: 20px 17px; max-height: calc(100dvh - 24px); } .forest-relation-toolbar { flex-wrap: wrap; } .forest-relation-toolbar > div { flex-wrap: wrap; gap: 4px; } .forest-relation-list { grid-template-columns: 1fr; } .forest-import-confirm { flex-direction: column; align-items: stretch; gap: 5px; } .forest-form-pair { gap: 10px; } }
+@media (max-width: 760px) { .forest-header { align-items: flex-start; padding: 19px 18px; gap: 12px; } .forest-heading svg { display: none; } .forest-heading h1 { font-size: 24px; } .forest-heading p { font-size: 10px; } .forest-header-actions { gap: 7px; flex-direction: column-reverse; align-items: flex-end; } .forest-header-actions button { padding: 7px 11px; font-size: 10px; } .forest-search { left: 17px; top: 16px; width: min(282px,calc(100% - 35px)); } .forest-legend { left: 21px; top: 70px; } .forest-course-panel { right: 12px; left: 12px; width: auto; top: auto; bottom: 120px; max-height: 45%; padding: 16px; } .forest-course-panel > header h2 { font-size: 21px; } .forest-minimap { right: 12px; bottom: 38px; padding: 5px 8px 0; } .forest-minimap svg { width: 130px; } .forest-minimap > span { font-size: 8px; } .forest-dialog-backdrop { padding: 12px; } .forest-dialog { padding: 20px 17px; max-height: calc(100dvh - 24px); } .forest-relation-toolbar { flex-wrap: wrap; } .forest-relation-toolbar > div { flex-wrap: wrap; gap: 4px; } .forest-relation-list { grid-template-columns: 1fr; } .forest-import-confirm { flex-direction: column; align-items: stretch; gap: 5px; } .forest-form-pair { gap: 10px; } }
 @media (prefers-reduced-motion: reduce) { .forest-page *, .forest-dialog * { transition: none !important; animation: none !important; } }
