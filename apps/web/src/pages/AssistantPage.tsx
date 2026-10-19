@@ -1,15 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import ReactMarkdown from 'react-markdown'
-import rehypeKatex from 'rehype-katex'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { featurePath, useWorkspace } from '../components/AppLayout'
-import { SourceCard } from '../components/SourceCard'
 import { TeacherCharacter, type TeacherStatus } from '../components/TeacherCharacter'
 import { teacherPersonaMeta } from '../features/persona/personas'
 import { modeLabels, noEvidenceLabels } from '../features/assistant/answerMeta'
+import { AssistantMessageMarkdown, AssistantMessageSource } from '../features/assistant/AssistantMessageContent'
 import { api } from '../api'
 
 function PetMark() {
@@ -290,7 +286,7 @@ export function AssistantPage() {
                       {message.mode && <em>{modeLabels[message.mode] ?? '当前课程资料检索'}</em>}
                     </header>
                     <div className="pet-answer">
-                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown>
+                      <AssistantMessageMarkdown content={message.content} />
                     </div>
                     {message.status !== 'failed' && message.mode && !(message.sources?.length) && (
                       <span className="pet-no-evidence">{noEvidenceLabels[message.mode] ?? '这次回答没有找到可直接引用的课程页面。'}</span>
@@ -306,28 +302,15 @@ export function AssistantPage() {
                     {message.sources?.length ? (
                       <div className="pet-sources">
                         <span>回答依据 · 课程课件与网络补充分开标注</span>
-                        {message.sources.map((source) => (
-                          source.source_type === 'web' && source.url
-                            ? <a className="source-card web-source-card" key={source.url} href={source.url} target="_blank" rel="noreferrer">
-                              <span className="source-card-icon">↗</span>
-                              <span className="source-card-body">
-                                <small className="source-card-meta">网络补充 · {source.site_name} · {source.published_at ? `发布于 ${source.published_at}` : ''} · 检索于 {source.retrieved_at ? new Date(source.retrieved_at).toLocaleDateString('zh-CN') : '刚刚'}</small>
-                                <strong>{source.title}</strong>
-                                <small>{source.snippet}</small>
-                              </span>
-                            </a>
-                            : source.material_id && source.page_number
-                              ? <SourceCard
-                                key={`${source.material_id}-${source.page_number}`}
-                                title={source.lecture_title ?? '课程资料'}
-                                pageNumber={source.page_number}
-                                quote={source.snippet}
-                                onOpen={() => {
-                                  openMaterialSource(source.material_id!, source.page_number ?? undefined)
-                                  if (courseId) navigate(featurePath(courseId, 'materials'))
-                                }}
-                              />
-                              : null
+                        {message.sources.map((source, sourceIndex) => (
+                          <AssistantMessageSource
+                            key={`${source.source_ref_id ?? source.url ?? source.material_id}-${sourceIndex}`}
+                            source={source}
+                            onOpen={source.material_id && source.page_number ? () => {
+                              openMaterialSource(source.material_id!, source.page_number ?? undefined)
+                              if (courseId) navigate(featurePath(courseId, 'materials'))
+                            } : undefined}
+                          />
                         ))}
                       </div>
                     ) : null}

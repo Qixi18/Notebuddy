@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.deepseek import DeepSeekClient, DeepSeekError
@@ -13,23 +12,22 @@ from app.ai.evidence import claim_payload, extract_claims
 from app.ai.personas import DEFAULT_PERSONA_ID, resolve_persona
 from app.ai.prompts import build_answer_messages, build_general_messages, render_history
 from app.core.config import settings
-from app.db.models import Material, WebSource
+from app.db.models import Material
 from app.retrieval.rerank import rerank
-from app.retrieval.service import RetrievedChunk, build_context, retrieve
+from app.retrieval.service import build_context, retrieve
 from app.services.provider_audit import (
     begin_call,
     estimate_token_cost,
     finish_call,
     provider_status_from_error,
 )
-from app.web_search.policy import (
-    SearchPolicy,
-    cache_search,
-    cached_search,
-    can_search,
-    record_search,
+from app.web_search.service import (
+    availability,
+    record_daily_limit,
+    search_policy,
+    search_with_sources,
 )
-from app.web_search.source_review import review_results
+from app.web_search.tavily import WebSearchError
 
 
 def run_answer(
@@ -54,76 +52,27 @@ def run_answer(
     )
     web_status = "unavailable"
     web_results: list[dict] = []
-    policy = SearchPolicy(allow=allow_web, max_results=4, daily_limit=30, timeout_seconds=settings.web_search_timeout_seconds)
-    allowed, reason = can_search(policy)
-    from app.web_search.tavily import WebSearchError
-    from app.web_search.tavily import configured as web_search_configured
-    from app.web_search.tavily import search as web_search
+    policy = search_policy(allow=allow_web)
+    available, reason = availability(policy)
     needs_web = not chunks or not any(chunk.direct_support for chunk in chunks)
-    if allowed and web_search_configured() and needs_web:
-        audit = None
+    if available and needs_web:
         try:
             scope = f" {selected_material.lecture_title}" if selected_material else ""
             search_query = f"{course_name}{scope} {question}"
-            cached_results = cached_search(search_query, max_age_seconds=policy.cache_seconds)
-            if cached_results is not None:
-                web_results = cached_results
-            else:
-                audit, started = begin_call(
-                    db,
-                    provider="tavily",
-                    operation="search",
-                    course_id=course_id,
-                    model="tavily-basic",
-                    request_units=1,
-                    metadata={"max_results": policy.max_results, "query_length": len(search_query)},
-                )
-                record_search()
-                web_results = [item for item in web_search(search_query, max_results=policy.max_results)]
-                web_results = review_results(web_results)["results"]
-                cache_search(search_query, web_results)
-                finish_call(db, audit, started, status="success", response_units=len(web_results))
+            web_results = search_with_sources(
+                db, course_id=course_id, query=search_query, policy=policy,
+                material_id=material_id, source_query=question,
+            )
             web_status = "completed" if web_results else "no_results"
-            for item in web_results:
-                if db.scalar(select(WebSource.id).where(WebSource.course_id == course_id, WebSource.url == item["url"])) is None:
-                    db.add(WebSource(
-                        course_id=course_id,
-                        material_id=material_id,
-                        search_query=question[:1000],
-                        title=item["title"],
-                        url=item["url"],
-                        site_name=item["site_name"],
-                        snippet=item["snippet"],
-                        score=item.get("score"),
-                        published_at=item.get("published_at"),
-                    ))
-            db.flush()
-        except WebSearchError as exc:
-            if audit is not None:
-                finish_call(
-                    db,
-                    audit,
-                    started,
-                    status=provider_status_from_error(exc),
-                    error_type=type(exc).__name__,
-                )
+        except WebSearchError:
             web_status = "failed"
     elif not allow_web:
         web_status = "disabled_by_request"
     elif reason == "daily_limit":
         web_status = "daily_limit"
-        if needs_web and web_search_configured():
-            audit, started = begin_call(
-                db,
-                provider="tavily",
-                operation="search",
-                course_id=course_id,
-                model="tavily-basic",
-                request_units=0,
-                metadata={"reason": reason},
-            )
-            finish_call(db, audit, started, status="rate_limited")
-    elif needs_web and not web_search_configured():
+        if needs_web:
+            record_daily_limit(db, course_id=course_id, reason=reason)
+    elif needs_web and reason == "unconfigured":
         web_status = "unavailable"
 
     if not chunks and not web_results:
@@ -271,17 +220,3 @@ def run_answer(
             "discipline": teaching_context.discipline,
             "teacher_persona": persona.id,
             "model_version": "keyword-or-hybrid-fallback"}
-
-
-def source_payload(chunk: RetrievedChunk) -> dict:
-    return {
-        "source_type": "course_material",
-        "material_id": chunk.material_id,
-        "source_ref_id": chunk.source_ref_id,
-        "lecture_title": chunk.lecture_title,
-        "page_number": chunk.page_number,
-        "location_label": chunk.location_label,
-        "snippet": chunk.text[:240],
-        "support_level": "direct" if chunk.direct_support else "related",
-        "score_source": chunk.score_source,
-    }

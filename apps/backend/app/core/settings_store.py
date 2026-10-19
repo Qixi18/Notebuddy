@@ -4,9 +4,9 @@
 
 1. 只允许写入 `EDITABLE_KEYS` 白名单内的键，其余配置（数据目录、数据库地址等）
    永远不可通过 API 修改。
-2. API Key 属于写敏感项：默认禁止写入，必须同时满足
-   `NOTEBOOK_ALLOW_SECRET_WRITE=true` 且请求携带正确的 `X-Notebook-Settings-Token`
-   （对应 `NOTEBOOK_SETTINGS_TOKEN`）才允许。未配置 token 时一律拒绝。
+2. 本地单用户默认允许通过设置面板写入 API Key；显式设置
+   `NOTEBOOK_ALLOW_SECRET_WRITE=false` 可关闭。若配置了 `NOTEBOOK_SETTINGS_TOKEN`，
+   写入必须携带匹配的 `X-Notebook-Settings-Token`。共享部署须另行配置访问控制。
 3. 写入采用「先备份、后原子替换」：`.env` 会先复制一份到 `data/backups/`，
    再通过临时文件 `os.replace` 原子落盘，失败不会破坏原文件。
 4. 回传给前端的状态只包含布尔与区间值，**绝不返回任何密钥明文**。
@@ -73,8 +73,7 @@ def skip_key_verification() -> bool:
 def allow_secret_write() -> bool:
     """本地单用户场景默认允许密钥写入，显式设置为 0/false/no/off 才关闭。
 
-    远端共享/加固场景可在 .env 中设置 NOTEBOOK_ALLOW_SECRET_WRITE=false，
-    并配置 NOTEBOOK_SETTINGS_TOKEN，此时写入仍需口令。
+    远端共享场景应显式关闭密钥写入，或在独立访问控制之后启用并配置口令。
     """
     value = os.getenv("NOTEBOOK_ALLOW_SECRET_WRITE", "true").strip().lower()
     return value not in {"0", "false", "no", "off"}

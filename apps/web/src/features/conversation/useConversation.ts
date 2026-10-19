@@ -91,10 +91,12 @@ export function useConversation(
   const [agentRun, setAgentRun] = useState<AgentRunState | null>(null)
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
+  const historyRequestRef = useRef(0)
 
   /* 切换课程：重建会话上下文。空课程建立首个会话，保证后续提问总有落点 */
   useEffect(() => {
     let active = true
+    const request = ++historyRequestRef.current
     setConversations([])
     setConversationId(undefined)
     setHistory([])
@@ -108,15 +110,15 @@ export function useConversation(
     }
     void api.listConversations(courseId).then(async (items) => {
       const next = items.length > 0 ? items : [await api.createConversation(courseId)]
-      if (!active) return
+      if (!active || historyRequestRef.current !== request) return
       setConversations(next)
       setConversationId(next[0].id)
       const loaded = await api.listConversationMessages(next[0].id)
-      if (!active) return
+      if (!active || historyRequestRef.current !== request) return
       setHistory(loaded)
       setReady(true)
     }).catch((cause: unknown) => {
-      if (!active) return
+      if (!active || historyRequestRef.current !== request) return
       setError(cause instanceof Error ? cause.message : '会话读取失败')
       setReady(true)
     })
@@ -124,15 +126,24 @@ export function useConversation(
   }, [courseId])
 
   const selectConversation = useCallback(async (id: string) => {
+    const request = ++historyRequestRef.current
+    const requestCourseId = courseRef.current
     setConversationId(id)
+    setHistory([])
     setBusy(true)
     setError(undefined)
     try {
-      setHistory(await api.listConversationMessages(id))
+      const loaded = await api.listConversationMessages(id)
+      if (historyRequestRef.current === request && courseRef.current === requestCourseId) setHistory(loaded)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '会话读取失败')
+      if (historyRequestRef.current === request && courseRef.current === requestCourseId) {
+        setError(cause instanceof Error ? cause.message : '会话读取失败')
+      }
     } finally {
-      setBusy(false)
+      if (historyRequestRef.current === request && courseRef.current === requestCourseId) {
+        setBusy(false)
+        setReady(true)
+      }
     }
   }, [])
 
@@ -147,6 +158,7 @@ export function useConversation(
     try {
       const created = await api.createConversation(requestCourseId)
       if (courseRef.current !== requestCourseId) return
+      historyRequestRef.current += 1
       setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)])
       setConversationId(created.id)
       setHistory([])
@@ -237,8 +249,10 @@ export function useConversation(
     setBusy(true)
     setError(undefined)
     setAgentRun({ steps: [], streamingText: '' })
+    let targetId = ''
+    const historyRequest = historyRequestRef.current
     try {
-      const targetId = await ensureConversation()
+      targetId = await ensureConversation() ?? ''
       if (!targetId || courseRef.current !== requestCourseId) return false
       const askedAt = Date.now()
       setHistory((current) => [...current, {
@@ -267,9 +281,9 @@ export function useConversation(
         onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
         onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
         onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
-        onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId) setError(event.message) },
+        onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {
-          if (courseRef.current !== requestCourseId) return
+          if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
           setAgentRun((current) => current ? { ...current, final } : current)
           setHistory((current) => [...current, {
             id: final.message_id ?? `local-agent-${askedAt}`,
@@ -287,10 +301,23 @@ export function useConversation(
           }])
         },
       })
+      if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
+        try {
+          const loaded = await api.listConversationMessages(targetId)
+          if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
+        } catch { /* Keep the final event's local message until history can be loaded. */ }
+      }
       return true
     } catch (cause) {
-      if (courseRef.current === requestCourseId) {
+      if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
         setError(cause instanceof Error ? cause.message : '智能问答请求失败')
+        setAgentRun(null)
+        if (targetId) {
+          try {
+            const loaded = await api.listConversationMessages(targetId)
+            if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
+          } catch { /* Keep the visible error when history cannot be loaded. */ }
+        }
       }
       return false
     } finally {

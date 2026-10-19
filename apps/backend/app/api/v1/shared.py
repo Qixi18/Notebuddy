@@ -3,7 +3,15 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.models import Course, Material, Note
+from app.db.models import Conversation, Course, Material, Note
+from app.services.conversations import ConversationUnavailable, load_conversation
+
+
+def ensure_conversation(db: Session, conversation_id: str) -> Conversation:
+    try:
+        return load_conversation(db, conversation_id)
+    except ConversationUnavailable as exc:
+        raise HTTPException(status_code=404, detail=exc.detail) from exc
 
 
 def ensure_course(db: Session, course_id: str) -> Course:

@@ -23,6 +23,8 @@ from app.forest.jobs import (
 from app.workers.material_worker import process_material
 
 STOP = False
+_material_jobs_since_forest = 0
+FOREST_CHECK_INTERVAL = 3
 
 
 def _stop(*_: object) -> None:
@@ -72,13 +74,23 @@ def claim_next_job() -> str | None:
 
 
 def run_once() -> bool:
+    global _material_jobs_since_forest
+    # A steady material queue must not indefinitely delay forest work.
+    if _material_jobs_since_forest >= FOREST_CHECK_INTERVAL:
+        forest_job_id = claim_next_forest_job()
+        if forest_job_id is not None:
+            _material_jobs_since_forest = 0
+            process_forest_job(forest_job_id)
+            return True
     job_id = claim_next_job()
     if job_id is None:
         forest_job_id = claim_next_forest_job()
         if forest_job_id is None:
             return False
+        _material_jobs_since_forest = 0
         process_forest_job(forest_job_id)
         return True
+    _material_jobs_since_forest += 1
     process_material(job_id)
     return True
 
