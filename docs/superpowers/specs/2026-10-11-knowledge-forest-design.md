@@ -35,4 +35,4 @@ CrossCourseRelation：id UUID PK；source_course_id/target_course_id Course FK c
 ## 验收
 Ruff/pytest/npm test/npm build +真实浏览器。独立隔离数据库，迁移重复运行/旧库/并发修订/删除恢复/备份恢复；导入预览确认/错误重试/两阶段自动任务/版本与来源防伪；60规划课3门各200小节性能记录。真实培养方案、连续3讲、10编辑保护、30来源抽查、真实AI另列证据，未做不能宣称通过。
 
-执行：在独立工作树开发，任务分支 feature/knowledge-forest，初始基线5693415，已按用户要求同步main3ab07b7。保留D:/Desktop/NoteBuddy全部未提交文件。用户授权推送任务分支并创建main目标PR；没有授权直接合并main。提交者mawenzhe33，邮箱297929623+mawenzhe33@users.noreply.github.com。根AGENTS.md唯一维护规则；agent.md导航本次设计、交接与计划。不要输出或更改.env、密钥或真实课件内容。
+执行：在独立工作树开发，任务分支 feature/knowledge-forest，初始基线5693415，已按用户要求同步main3ab07b7。保留原目录全部未提交文件。用户授权推送任务分支并创建main目标PR；没有授权直接合并main。仓库公共协作规则见根目录 `agent.md`。不要输出或更改.env、密钥或真实课件内容。

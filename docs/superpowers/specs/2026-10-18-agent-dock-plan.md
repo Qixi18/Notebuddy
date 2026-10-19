@@ -153,7 +153,7 @@ apps/web/tests/
 | 4 | `agent.ts` + `askAgent` | `apps/web/tests/agent-sse.test.ts`；`npm test` |
 | 5 | Dock UI + 两组件 + 样式 + answerMeta | `npm test` + `npm run build` |
 | 6 | 手动端到端（`./scripts/dev.ps1` + worker + 合成课程） | 清单：流式/步骤/范围三档切换（锁定当前笔记/整门课程/全局可查）/"改笔记→采纳→笔记更新且修订可回退"/跨课程搜索/删 key 自动回退/答疑页不受影响 |
-| 7 | 交接文档（`docs/handoffs/2026-10-18-agent-dock.md`）+ 提交 + PR（目标 main） | 核对提交身份（mawenzhe33），仅含本任务文件 |
+| 7 | 交接文档（`docs/handoffs/2026-10-18-agent-dock.md`）+ 提交 + PR（目标 main） | 仅提交本任务文件，核对提交身份与授权账号一致 |
 
 ## 8. 风险与约束
 
