@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.orchestrator import run_answer
-from app.api.v1.shared import ensure_course
+from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
 from app.db.models import (
     Conversation,
@@ -23,7 +23,7 @@ from app.schemas.api import (
     MessageEvidenceRead,
 )
 from app.services.assistant_sources import sources_from_evidence
-from app.services.conversations import load_conversation, persist_assistant_message
+from app.services.conversations import persist_assistant_message
 
 router = APIRouter()
 
@@ -105,7 +105,7 @@ def list_conversations(course_id: str, db: Session = Depends(get_db)) -> list[Co
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[ConversationMessageRead])
 def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[ConversationMessageRead]:
-    load_conversation(db, conversation_id)
+    ensure_conversation(db, conversation_id)
     messages = list(db.scalars(
         select(ConversationMessage).where(ConversationMessage.conversation_id == conversation_id)
         .options(
@@ -123,7 +123,7 @@ def send_message(
     payload: ConversationMessageCreate,
     db: Session = Depends(get_db),
 ) -> ConversationMessageRead:
-    conversation = load_conversation(db, conversation_id)
+    conversation = ensure_conversation(db, conversation_id)
     if payload.idempotency_key:
         existing = db.scalar(select(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,

@@ -44,3 +44,26 @@ def test_provider_failure_records_failed_audit(monkeypatch) -> None:
         )
 
     assert finish.call_args.kwargs["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("policy", "configured", "expected"),
+    [
+        (SearchPolicy(allow=False), True, "disabled_by_request"),
+        (SearchPolicy(daily_limit=0), True, "daily_limit"),
+        (SearchPolicy(), False, "unconfigured"),
+        (SearchPolicy(), True, "allowed"),
+    ],
+)
+def test_shared_availability_reports_policy_and_configuration(monkeypatch, policy, configured, expected) -> None:
+    monkeypatch.setattr(service, "configured", lambda: configured)
+    available, reason = service.availability(policy)
+    assert (available, reason) == (expected == "allowed", expected)
+
+
+def test_daily_limit_audit_requires_configured_provider(monkeypatch) -> None:
+    begin = Mock()
+    monkeypatch.setattr(service, "configured", lambda: False)
+    monkeypatch.setattr(service, "begin_call", begin)
+    service.record_daily_limit(Mock(), course_id="course-1", reason="daily_limit")
+    begin.assert_not_called()

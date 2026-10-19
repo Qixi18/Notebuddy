@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.ai.agent_loop import run_agent
 from app.ai.evidence import claim_payload, extract_claims
 from app.ai.orchestrator import run_answer
-from app.api.v1.shared import ensure_course
+from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
 from app.db.models import (
     ConversationMessage,
@@ -34,18 +35,14 @@ from app.db.models import (
     Note,
 )
 from app.schemas.api import AgentMessageCreate
-from app.services.assistant_sources import sources_from_results
-from app.services.conversations import load_conversation, persist_assistant_message
+from app.services.assistant_sources import sources_from_evidence
+from app.services.conversations import persist_assistant_message
 
 router = APIRouter()
 
 
 def _sse(event: dict[str, Any]) -> str:
-    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-
-def _fallback_sources(result: dict[str, Any]) -> list[dict]:
-    return sources_from_results(result.get("chunks") or [], result.get("web_results") or [])
+    return f"data: {json.dumps(jsonable_encoder(event), ensure_ascii=False)}\n\n"
 
 
 @router.post("/conversations/{conversation_id}/agent-messages")
@@ -54,7 +51,7 @@ def send_agent_message(
     payload: AgentMessageCreate,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    conversation = load_conversation(db, conversation_id)
+    conversation = ensure_conversation(db, conversation_id)
     course = ensure_course(db, conversation.course_id)
 
     if payload.idempotency_key:
@@ -146,7 +143,7 @@ def send_agent_message(
                 "answer": final_event["answer"],
                 "mode": "agent",
                 "model_version": final_event.get("model_version"),
-                "sources": sources_from_results(chunks, web_results),
+                "sources": sources_from_evidence(db, assistant),
                 "suggestions": final_event.get("suggestions") or [],
                 "message_id": assistant.id,
             })
@@ -181,7 +178,7 @@ def send_agent_message(
                 "answer": result["answer"],
                 "mode": result.get("mode") or "deepseek-rag",
                 "model_version": result.get("model_version"),
-                "sources": _fallback_sources(result),
+                "sources": sources_from_evidence(db, assistant),
                 "suggestions": [],
                 "message_id": assistant.id,
                 "fallback": True,

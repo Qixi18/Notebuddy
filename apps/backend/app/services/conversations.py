@@ -4,19 +4,28 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.api.v1.shared import ensure_course
 from app.db.models import (
     Conversation,
     ConversationMessage,
+    Course,
+    Material,
+    MaterialPage,
     MessageEvidence,
     PageBlock,
     SourceRef,
     WebSource,
 )
+
+
+class ConversationUnavailable(Exception):
+    """A conversation or its course is unavailable to the caller."""
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(detail)
 
 
 def load_conversation(db: Session, conversation_id: str) -> Conversation:
@@ -33,8 +42,10 @@ def load_conversation(db: Session, conversation_id: str) -> Conversation:
         )
     )
     if conversation is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    ensure_course(db, conversation.course_id)
+        raise ConversationUnavailable("会话不存在")
+    course = db.get(Course, conversation.course_id)
+    if course is None or course.deleted_at is not None:
+        raise ConversationUnavailable("课程不存在")
     return conversation
 
 
@@ -63,15 +74,29 @@ def persist_assistant_message(
             if not isinstance(chunk_index, int) or not 0 <= chunk_index < len(chunks):
                 continue
             chunk = chunks[chunk_index]
-            source_ref = db.get(SourceRef, chunk.source_ref_id) if chunk.source_ref_id else None
-            if source_ref is None and chunk.page_block_id:
-                source_ref = db.scalar(select(SourceRef).where(
-                    SourceRef.page_block_id == chunk.page_block_id,
-                    SourceRef.status == "active",
-                ))
+            source_ref = None
+            for criterion in (
+                (SourceRef.id == chunk.source_ref_id) if chunk.source_ref_id else None,
+                (SourceRef.page_block_id == chunk.page_block_id) if chunk.page_block_id else None,
+            ):
+                if criterion is None:
+                    continue
+                source_ref = db.scalar(
+                    select(SourceRef)
+                    .join(PageBlock).join(MaterialPage).join(Material)
+                    .where(
+                        SourceRef.status == "active",
+                        Material.course_id == conversation.course_id,
+                        Material.deleted_at.is_(None), criterion,
+                    )
+                )
+                if source_ref is not None:
+                    break
+            if source_ref is None:
+                continue
             db.add(MessageEvidence(
                 message_id=assistant.id,
-                source_ref_id=source_ref.id if source_ref else None,
+                source_ref_id=source_ref.id,
                 claim_key=claim_key,
                 evidence_type=str(claim.get("evidence_type") or (
                     "course_direct" if chunk.direct_support else "course_related"
@@ -95,8 +120,7 @@ def persist_assistant_message(
         if not linked_source:
             db.add(MessageEvidence(
                 message_id=assistant.id, claim_key=claim_key,
-                evidence_type=str(claim.get("evidence_type") or "general_explanation"),
-                support_level=str(claim.get("support_level") or "unverified"),
+                evidence_type="general_explanation", support_level="unverified",
             ))
     conversation.updated_at = datetime.now(UTC)
     db.commit()

@@ -88,6 +88,8 @@ def availability(policy: SearchPolicy) -> tuple[bool, str]:
 
 
 def record_daily_limit(db: Session, *, course_id: str, reason: str) -> None:
+    if not configured():
+        return
     audit, started = begin_call(
         db, provider="tavily", operation="search", course_id=course_id,
         model="tavily-basic", request_units=0, metadata={"reason": reason},

@@ -41,7 +41,7 @@ export async function streamAgentMessage(
   payload: AgentQuestionPayload,
   handlers: AgentStreamHandlers,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<Extract<AgentEvent, { type: 'final' }>> {
   const response = await fetch(`/api/v1/conversations/${conversationId}/agent-messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,13 +63,22 @@ export async function streamAgentMessage(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let finalEvent: Extract<AgentEvent, { type: 'final' }> | undefined
+  let errorMessage: string | undefined
+  const handle = (event: AgentEvent) => {
+    dispatchEvent(event, handlers)
+    if (event.type === 'final') finalEvent = event
+    if (event.type === 'error') errorMessage = event.message
+  }
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const parsed = parseAgentStream(buffer)
     buffer = parsed.rest
-    for (const event of parsed.events) dispatchEvent(event, handlers)
+    for (const event of parsed.events) handle(event)
   }
-  for (const event of parseAgentRemainder(buffer + decoder.decode())) dispatchEvent(event, handlers)
+  for (const event of parseAgentRemainder(buffer + decoder.decode())) handle(event)
+  if (!finalEvent) throw new ApiError(errorMessage ?? '智能问答连接中断，未收到最终回答', response.status)
+  return finalEvent
 }

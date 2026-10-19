@@ -21,10 +21,13 @@ from app.services.provider_audit import (
     finish_call,
     provider_status_from_error,
 )
-from app.web_search.policy import can_search
-from app.web_search.service import record_daily_limit, search_policy, search_with_sources
+from app.web_search.service import (
+    availability,
+    record_daily_limit,
+    search_policy,
+    search_with_sources,
+)
 from app.web_search.tavily import WebSearchError
-from app.web_search.tavily import configured as web_search_configured
 
 
 def run_answer(
@@ -50,9 +53,9 @@ def run_answer(
     web_status = "unavailable"
     web_results: list[dict] = []
     policy = search_policy(allow=allow_web)
-    allowed, reason = can_search(policy)
+    available, reason = availability(policy)
     needs_web = not chunks or not any(chunk.direct_support for chunk in chunks)
-    if allowed and web_search_configured() and needs_web:
+    if available and needs_web:
         try:
             scope = f" {selected_material.lecture_title}" if selected_material else ""
             search_query = f"{course_name}{scope} {question}"
@@ -67,9 +70,9 @@ def run_answer(
         web_status = "disabled_by_request"
     elif reason == "daily_limit":
         web_status = "daily_limit"
-        if needs_web and web_search_configured():
+        if needs_web:
             record_daily_limit(db, course_id=course_id, reason=reason)
-    elif needs_web and not web_search_configured():
+    elif needs_web and reason == "unconfigured":
         web_status = "unavailable"
 
     if not chunks and not web_results:
