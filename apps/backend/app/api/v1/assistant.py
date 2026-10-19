@@ -3,11 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.ai.orchestrator import run_answer, source_payload
+from app.ai.orchestrator import run_answer
 from app.api.v1.shared import ensure_course
 from app.db.database import get_db
 from app.db.models import Material
-from app.schemas.api import AssistantClaim, AssistantRequest, AssistantResponse, AssistantSource
+from app.schemas.api import AssistantClaim, AssistantRequest, AssistantResponse
+from app.services.assistant_sources import sources_from_results
 
 router = APIRouter()
 
@@ -43,14 +44,7 @@ def ask_assistant(
         learning_goal=payload.learning_goal,
         teacher_persona=payload.teacher_persona,
     )
-    sources = [AssistantSource(**source_payload(chunk)) for chunk in result["chunks"]]
-    sources.extend(
-        AssistantSource(
-            source_type="web", title=item["title"], url=item["url"], site_name=item["site_name"],
-            snippet=item["snippet"], published_at=item.get("published_at"),
-            support_level="web_supplement",
-        ) for item in result["web_results"]
-    )
+    sources = sources_from_results(result["chunks"], result["web_results"])
     claims = []
     for claim in result.get("claims", []):
         source_indexes = list(claim.get("chunk_indexes", []))

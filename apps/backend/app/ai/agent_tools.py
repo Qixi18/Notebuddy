@@ -11,62 +11,30 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any
 
-from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from app.db.models import Course, Material, Note, WebSource
-from app.forest.service import visible_note_predicate
-from app.knowledge.proposals import create_knowledge_proposal, create_note_suggestion
-from app.retrieval.rerank import rerank
-from app.retrieval.service import RetrievedChunk, retrieve
-from app.services.coverage import material_coverage
-
-AgentScope = Literal["note", "course", "global"]
-
-# 回填给模型的单工具结果上限；检索片段另外按条截断
-TOOL_RESULT_MAX_CHARS = 1600
-CHUNK_TEXT_MAX_CHARS = 400
-COVERAGE_PREVIEW_LIMIT = 8
-NOTE_SUGGESTION_MAX_CHARS = 20000
-# 笔记清单每条都带 36 位 note_id，默认截断会让大课程只看到一半，单独放宽
-LIST_RESULT_MAX_CHARS = 6000
-
-# proposed_markdown 中不允许出现的对话性文字（agent 聊天口吻混入正文的典型特征）。
-# 命中即拒绝并要求模型重写；若笔记确实需要这些字样，模型换个说法即可通过。
-CHAT_MARKERS = (
-    "已经提交",
-    "待确认状态",
-    "点「采纳」",
-    "点「忽略」",
-    "这版删了什么",
-    "这版做了什么",
-    "留下了什么",
-    "我这边不会直接改动",
+from app.ai.agent_read_tools import (
+    _explain_term,
+    _get_note_coverage,
+    _list_course_notes,
+    _read_note,
+    _search_course,
+    _search_forest,
+    load_note,
+    truncate,
 )
+from app.ai.agent_tool_types import AgentScope, ToolOutcome
+from app.ai.note_edits import apply_note_edits
+from app.knowledge.proposals import create_knowledge_proposal, create_note_suggestion
 
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
-_EDIT_OPS = ("append", "insert_after_heading", "replace_section", "remove_section")
+NOTE_SUGGESTION_MAX_CHARS = 20000
 _MAX_EDITS = 8
-
-
-@dataclass
-class ToolOutcome:
-    """一次工具执行的结果。
-
-    ``payload_text`` 回填给模型（tool 角色消息）；``summary`` 供前端执行时间线展示；
-    ``chunks``/``web_results`` 供收尾时按现有 evidence 机制落库；
-    ``suggestions`` 是本工具创建的待确认项（前端据此渲染动作卡片）。
-    """
-
-    summary: str
-    payload_text: str
-    chunks: list[RetrievedChunk] = field(default_factory=list)
-    web_results: list[dict] = field(default_factory=list)
-    suggestions: list[dict] = field(default_factory=list)
+CHAT_MARKERS = (
+    "已经提交", "待确认状态", "点「采纳」", "点「忽略」",
+    "这版删了什么", "这版做了什么", "留下了什么", "我这边不会直接改动",
+)
 
 
 def _spec(name: str, description: str, properties: dict, required: list[str]) -> dict:
@@ -165,288 +133,31 @@ def build_tool_specs(
     return specs
 
 
-def _truncate(text: str, limit: int = TOOL_RESULT_MAX_CHARS) -> str:
-    if len(text) <= limit:
-        return text
-    return f"{text[:limit]}\n（内容过长，已截断）"
-
-
-def _load_note(db: Session, course_id: str, note_id: str) -> tuple[Note | None, str]:
-    note = db.get(Note, note_id)
-    if note is None:
-        return None, "笔记不存在"
-    if note.course_id != course_id:
-        return None, "该笔记不属于当前课程，已拒绝读取"
-    return note, ""
-
-
-def _format_chunk(index: int, chunk: RetrievedChunk) -> str:
-    location = chunk.location_label or f"第 {chunk.page_number} 页"
-    return f"[片段{index} | 课程资料：{chunk.lecture_title} | {location}]\n{chunk.text[:CHUNK_TEXT_MAX_CHARS]}"
-
-
-def _search_course(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
-    query = str(arguments.get("query") or "").strip()[:200]
-    if not query:
-        return ToolOutcome("检索关键词为空", "请提供非空 query。")
-    material_id = arguments.get("material_id")
-    if material_id:
-        material = db.get(Material, str(material_id))
-        if material is None or material.course_id != course_id or material.deleted_at is not None:
-            return ToolOutcome("课件不属于当前课程", "指定的 material_id 不属于当前课程，已拒绝检索。")
-    chunks = rerank(query, retrieve(db, course_id=course_id, question=query, material_id=material_id, limit=4))
-    if not chunks:
-        return ToolOutcome(f"检索「{query}」无命中", "课程课件中没有检索到相关片段；如需继续请换关键词，或改用 web_search 说明是联网补充。")
-    body = "\n\n".join(_format_chunk(index + 1, chunk) for index, chunk in enumerate(chunks))
-    return ToolOutcome(
-        f"检索「{query}」命中 {len(chunks)} 条课件片段",
-        _truncate(f"共 {len(chunks)} 条片段（按相关性排序）：\n\n{body}"),
-        chunks=chunks,
-    )
-
-
-def _read_note(db: Session, *, course_id: str, scope: AgentScope, locked_note_id: str | None, arguments: dict[str, Any]) -> ToolOutcome:
-    note_id = str(arguments.get("note_id") or locked_note_id or "")
-    if not note_id:
-        return ToolOutcome(
-            "未指定笔记",
-            "当前没有锁定或打开的笔记。请告诉用户：进入「课程笔记本」页面，在目录里点开一个具体小节"
-            "（即打开笔记）后，悬浮坞就能锁定该笔记；也可以改用 search_course 检索课件内容来回答。",
-        )
-    if scope == "note" and note_id != locked_note_id:
-        return ToolOutcome("超出锁定范围", "当前处于「锁定当前笔记」模式，只能读取锁定的这一篇笔记。")
-    note, error = _load_note(db, course_id, note_id)
-    if note is None:
-        return ToolOutcome("读取失败", error)
-    location = f"（{note.section_key}）" if note.section_key else ""
-    body = f"笔记《{note.title}》{location} 修订号 {note.revision_number}：\n\n{note.content_markdown}"
-    return ToolOutcome(f"阅读笔记《{note.title}》", _truncate(body))
-
-
-def _list_course_notes(db: Session, *, course_id: str) -> ToolOutcome:
-    rows = db.execute(
-        select(Note.id, Note.title, Material.lecture_title)
-        .outerjoin(Material, Note.material_id == Material.id)
-        .where(Note.course_id == course_id)
-        .order_by(Note.title)
-    ).all()
-    if not rows:
-        return ToolOutcome("课程暂无笔记", "这门课还没有任何笔记。")
-    # 每条带 36 位 note_id（模型后续 read_note 要用），大课程很容易超过默认截断，
-    # 这里单独放宽到 6000 并在截断时说明还有多少条未列出
-    lines = [f"- {note_id} 《{title}》{f'（{lecture}）' if lecture else ''}" for note_id, title, lecture in rows]
-    body = "\n".join(lines)
-    if len(body) > LIST_RESULT_MAX_CHARS:
-        kept = 0
-        used = 0
-        for line in lines:
-            used += len(line) + 1
-            if used > LIST_RESULT_MAX_CHARS:
-                break
-            kept += 1
-        body = "\n".join(lines[:kept]) + f"\n（课程笔记共 {len(rows)} 条，已列出前 {kept} 条；需要其余部分请按关键词让我再查）"
-        return ToolOutcome(f"列出课程笔记前 {kept}/{len(rows)} 条", body)
-    return ToolOutcome(f"列出课程笔记 {len(rows)} 条", body)
-
-
-def _search_forest(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
-    term = str(arguments.get("query") or "").strip()[:200]
-    if not term:
-        return ToolOutcome("搜索词为空", "请提供非空 query。")
-    rows = db.execute(
-        select(Course.id.label("course_id"), Course.name.label("course_name"), Note.id.label("note_id"), Note.title, Note.material_id, Note.notebook_id)
-        .join(Note, Note.course_id == Course.id)
-        .where(
-            Course.deleted_at.is_(None),
-            visible_note_predicate(),
-            or_(
-                Note.title.icontains(term, autoescape=True),
-                Course.name.icontains(term, autoescape=True),
-            ),
-        )
-        .order_by(Course.name, Note.title, Note.id)
-        .limit(12)
-    ).all()
-    if not rows:
-        return ToolOutcome(f"跨课程搜索「{term}」无命中", "所有课程中都没有匹配的笔记或课程名。")
-    lines = [
-        f"- [{course_name}{'·当前课程' if row_course_id == course_id else ''}] 《{title}》(note_id={note_id})"
-        for row_course_id, course_name, note_id, title, _material, _book in rows
-    ]
-    return ToolOutcome(f"跨课程搜索「{term}」命中 {len(rows)} 条", _truncate("\n".join(lines)))
-
-
-def _get_note_coverage(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
-    material_id = str(arguments.get("material_id") or "")
-    material = db.get(Material, material_id) if material_id else None
-    if material is None or material.course_id != course_id or material.deleted_at is not None:
-        return ToolOutcome("课件不属于当前课程", "指定的 material_id 不属于当前课程。")
-    coverage = material_coverage(db, material_id)
-    summary = f"覆盖：{coverage['cited_locations']}/{coverage['total_locations']} 处已收录"
-    review_pages = [item for item in coverage["locations"] if item["status"] != "cited"]
-    preview = "\n".join(
-        f"- {item['location_label']}：待核对{f'（{item['warning']}）' if item.get('warning') else ''}"
-        for item in review_pages[:COVERAGE_PREVIEW_LIMIT]
-    )
-    more = f"\n（其余 {len(review_pages) - COVERAGE_PREVIEW_LIMIT} 处略）" if len(review_pages) > COVERAGE_PREVIEW_LIMIT else ""
-    payload = (
-        f"课件《{material.lecture_title}》覆盖情况：共 {coverage['total_locations']} 处，"
-        f"已收录 {coverage['cited_locations']} 处，待核对 {coverage['review_locations']} 处。\n"
-        "「已收录」指该位置有笔记来源映射，不代表整页信息全部覆盖。\n"
-        f"{preview}{more}" if review_pages else "全部位置均已有笔记引用。"
-    )
-    return ToolOutcome(summary, _truncate(payload))
-
-
-def _explain_term(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
-    term = str(arguments.get("term") or "").strip()[:200]
-    if not term:
-        return ToolOutcome("术语为空", "请提供非空 term。")
-    from app.api.v1.terms import explain_term
-    from app.schemas.terms import TermExplanationRequest
-
-    response = explain_term(course_id, TermExplanationRequest(term=term), db)
-    if not response.sources:
-        return ToolOutcome(f"课件未出现「{term}」", f"课程课件原文中没有出现「{term}」，请勿编造出处。")
-    lines = [f"「{term}」在课程原文中的出处："]
-    lines.extend(
-        f"- [{source.lecture_title} | 第 {source.page_number} 页] {source.snippet[:300]}"
-        for source in response.sources
-    )
-    return ToolOutcome(f"定位术语「{term}」的课件原文", _truncate("\n".join(lines)))
-
-
 def _web_search(db: Session, *, course_id: str, arguments: dict[str, Any], allow_web: bool = True) -> ToolOutcome:
-    from app.web_search.policy import (
-        SearchPolicy,
-        cache_search,
-        cached_search,
-        can_search,
-        record_search,
-    )
-    from app.web_search.source_review import review_results
+    from app.web_search.service import availability, search_policy, search_with_sources
     from app.web_search.tavily import WebSearchError
-    from app.web_search.tavily import configured as web_search_configured
-    from app.web_search.tavily import search as web_search
 
     query = str(arguments.get("query") or "").strip()[:200]
     if not query:
         return ToolOutcome("搜索词为空", "请提供非空 query。")
-    policy = SearchPolicy(allow=allow_web, max_results=4, daily_limit=30, timeout_seconds=settings.web_search_timeout_seconds)
-    allowed, reason = can_search(policy)
-    if not allowed or not web_search_configured():
+    policy = search_policy(allow=allow_web)
+    available, reason = availability(policy)
+    if not available:
         detail = f"联网搜索当前不可用（{reason or '未配置'}）。请只依据课程资料回答，并向用户说明该限制。"
         return ToolOutcome("联网补充不可用", detail)
-    audit = None
-    from app.services.provider_audit import begin_call, finish_call, provider_status_from_error
-
     try:
-        cached = cached_search(query, max_age_seconds=policy.cache_seconds)
-        if cached is not None:
-            results = cached
-        else:
-            audit, started = begin_call(
-                db, provider="tavily", operation="search", course_id=course_id,
-                model="tavily-basic", request_units=1, metadata={"query_length": len(query), "origin": "agent_tool"},
-            )
-            record_search()
-            results = [item for item in web_search(query, max_results=policy.max_results)]
-            results = review_results(results)["results"]
-            cache_search(query, results)
-            finish_call(db, audit, started, status="success", response_units=len(results))
-        for item in results:
-            if db.scalar(select(WebSource.id).where(WebSource.course_id == course_id, WebSource.url == item["url"])) is None:
-                db.add(WebSource(
-                    course_id=course_id, material_id=None, search_query=query[:1000],
-                    title=item["title"], url=item["url"], site_name=item["site_name"],
-                    snippet=item["snippet"], score=item.get("score"), published_at=item.get("published_at"),
-                ))
-        db.flush()
+        results = search_with_sources(
+            db, course_id=course_id, query=query, policy=policy, origin="agent_tool",
+        )
         if not results:
             return ToolOutcome("联网搜索无结果", "联网搜索没有返回可用结果。")
         body = "\n\n".join(
             f"[网络来源 {index + 1} | {item['title']} | {item['url']}]\n{item['snippet'][:300]}"
             for index, item in enumerate(results)
         )
-        return ToolOutcome(f"联网搜索「{query}」得到 {len(results)} 条", _truncate(body), web_results=results)
+        return ToolOutcome(f"联网搜索「{query}」得到 {len(results)} 条", truncate(body), web_results=results)
     except WebSearchError as exc:
-        if audit is not None:
-            finish_call(db, audit, started, status=provider_status_from_error(exc), error_type=type(exc).__name__)
         return ToolOutcome("联网搜索失败", f"联网搜索失败（{type(exc).__name__}），请只依据课程资料回答并说明限制。")
-
-
-def _content_lines(content: str) -> list[str]:
-    return content.strip("\n").split("\n") if content.strip() else []
-
-
-def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
-    out: list[tuple[int, int, str]] = []
-    for index, line in enumerate(lines):
-        match = _HEADING_RE.match(line)
-        if match:
-            out.append((index, len(match.group(1)), match.group(2).strip()))
-    return out
-
-
-def _section_range(headings: list[tuple[int, int, str]], start: int, level: int, total: int) -> tuple[int, int]:
-    """小节范围 = 标题行起，到下一个同级或更高级标题前（含所有子小节）。"""
-    end = total
-    for index, heading_level, _title in headings:
-        if index > start and heading_level <= level:
-            return start, index
-    return start, end
-
-
-def _resolve_anchor(lines: list[str], anchor: str, op_index: int) -> tuple[int, int]:
-    headings = _headings(lines)
-    exact = [(index, level) for index, level, title in headings if title == anchor]
-    if len(exact) == 1:
-        return _section_range(headings, exact[0][0], exact[0][1], len(lines))
-    partial = [(index, level, title) for index, level, title in headings if anchor in title]
-    if len(partial) == 1:
-        return _section_range(headings, partial[0][0], partial[0][1], len(lines))
-    titles = [title for _index, _level, title in headings]
-    if len(partial) > 1:
-        shown = "、".join(f"『{title}』" for title, _ in [(t, None) for t in titles[:8]])
-        raise ValueError(f"第 {op_index} 个操作的标题『{anchor}』匹配到多个小节（{shown}），请改用完整标题原文")
-    hint = "、".join(f"『{title}』" for title in titles[:8]) or "（笔记当前没有任何标题）"
-    raise ValueError(f"第 {op_index} 个操作找不到标题『{anchor}』；当前笔记的标题有：{hint}")
-
-
-def _apply_note_edits(current: str, edits: list[dict[str, Any]]) -> str:
-    """把操作列表依次应用到正文工作副本；任何一步失败抛 ValueError（含中文原因）。"""
-    lines = current.splitlines()
-    for op_index, edit in enumerate(edits, start=1):
-        if not isinstance(edit, dict):
-            edit = {}
-        op = str(edit.get("op") or "")
-        if op not in _EDIT_OPS:
-            raise ValueError(f"第 {op_index} 个操作类型无效：{op or '（不是对象）'}；可用 append / insert_after_heading / replace_section / remove_section")
-        if op == "append":
-            block = _content_lines(str(edit.get("content") or ""))
-            if not block:
-                raise ValueError(f"第 {op_index} 个操作（append）content 为空")
-            if lines and lines[-1].strip():
-                lines.append("")
-            lines.extend(block)
-            continue
-        anchor = str(edit.get("anchor") or "").strip()
-        if not anchor:
-            raise ValueError(f"第 {op_index} 个操作（{op}）缺少 anchor：请填笔记里某个标题的原文（不含 # 号）")
-        start, end = _resolve_anchor(lines, anchor, op_index)
-        if op == "remove_section":
-            del lines[start:end]
-        elif op == "replace_section":
-            block = _content_lines(str(edit.get("content") or ""))
-            if not block:
-                raise ValueError(f"第 {op_index} 个操作（replace_section）content 为空")
-            lines[start + 1:end] = block
-        else:  # insert_after_heading：插入到该小节末尾（下一个同级或更高级标题之前）
-            block = _content_lines(str(edit.get("content") or ""))
-            if not block:
-                raise ValueError(f"第 {op_index} 个操作（insert_after_heading）content 为空")
-            lines[end:end] = [""] + block
-    return "\n".join(lines)
 
 
 def _propose_note_edits(
@@ -464,7 +175,7 @@ def _propose_note_edits(
         )
     if str(arguments.get("note_id") or editable_note_id) != editable_note_id:
         return ToolOutcome("超出可编辑范围", "只能对当前打开（或锁定）的笔记提交修改建议；其他笔记请提示用户自行打开。")
-    note, error = _load_note(db, course_id, editable_note_id)
+    note, error = load_note(db, course_id, editable_note_id)
     if note is None:
         return ToolOutcome("读取失败", error)
     edits = arguments.get("edits")
@@ -476,7 +187,7 @@ def _propose_note_edits(
         )
     rationale = str(arguments.get("rationale") or "").strip()[:200] or "AI 学习助手提出的修改建议"
     try:
-        final = _apply_note_edits(note.content_markdown, edits).strip()
+        final = apply_note_edits(note.content_markdown, edits).strip()
     except ValueError as exc:
         return ToolOutcome("操作无法执行", f"{exc}。请修正后重新提交。")
     if not final:

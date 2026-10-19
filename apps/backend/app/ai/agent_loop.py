@@ -53,7 +53,7 @@ def _arg_summary(name: str, arguments: dict[str, Any]) -> str:
         return f"定位术语「{str(arguments.get('term') or '')[:20]}」"
     if name == "web_search":
         return f"联网搜索「{str(arguments.get('query') or '')[:30]}」"
-    if name == "propose_note_edit":
+    if name == "propose_note_edits":
         return f"准备笔记修改建议：{str(arguments.get('rationale') or '')[:40]}"
     if name == "propose_knowledge_node":
         return f"提议知识节点「{str(arguments.get('candidate_name') or '')[:20]}」"

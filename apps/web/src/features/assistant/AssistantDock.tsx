@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import ReactMarkdown from 'react-markdown'
-import rehypeKatex from 'rehype-katex'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
 import { featurePath, useWorkspace } from '../../components/AppLayout'
-import { SourceCard } from '../../components/SourceCard'
 import { TeacherCharacter } from '../../components/TeacherCharacter'
 import { ApiError, api } from '../../api'
 import type { AgentScope } from '../../api/agent'
@@ -14,6 +9,7 @@ import type { Material } from '../../types'
 import { teacherPersonaMeta } from '../persona/personas'
 import { modeLabelsShort } from './answerMeta'
 import { AgentSteps } from './AgentSteps'
+import { AssistantMessageMarkdown, AssistantMessageSource } from './AssistantMessageContent'
 import { KnowledgeProposalCards, NoteSuggestionCards, type PendingNoteSuggestion } from './AgentCards'
 
 import {
@@ -360,31 +356,23 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 {/* 老师回答走与答疑页同一条 Markdown 管线（remark-math + rehype-katex），
                     否则 ### / ** / 列表会以原始标记直接显示出来；自己的提问保持纯文本 */}
                 {message.role === 'assistant'
-                  ? <div className="assistant-dock-answer"><ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown></div>
+                  ? <div className="assistant-dock-answer"><AssistantMessageMarkdown content={message.content} /></div>
                   : <p>{message.content}</p>}
                 {/* 检索能力显性化：说清这轮是否命中了课件 */}
                 {message.role === 'assistant' && message.mode ? <span className="assistant-dock-mode">{modeLabelsShort[message.mode] ?? '课程资料检索'}</span> : null}
                 {message.role === 'assistant' && message.sources?.length ? (
                   <div className="assistant-dock-sources">
                     <small>回答依据 · {message.sources.length} 条</small>
-                    {message.sources.map((source, sourceIndex) => source.source_type === 'web' && source.url
-                      ? <a className="source-card web-source-card" key={source.url} href={source.url} target="_blank" rel="noreferrer">
-                        <span className="source-card-icon" aria-hidden="true">↗</span>
-                        <span className="source-card-body"><span className="source-card-meta">网络补充 · {source.site_name}</span><strong>{source.title}</strong><small>{source.snippet}</small></span>
-                      </a>
-                      : source.material_id && source.page_number
-                        ? <SourceCard
-                          key={`${source.material_id}-${source.page_number}-${sourceIndex}`}
-                          title={source.lecture_title ?? '课程资料'}
-                          pageNumber={source.page_number}
-                          locationLabel={source.location_label}
-                          quote={source.snippet}
-                          onOpen={sourcesOpenable ? () => {
-                            openMaterialSource(source.material_id!, source.page_number ?? undefined)
-                            if (courseId) navigate(featurePath(courseId, 'materials'))
-                          } : undefined}
-                        />
-                        : null)}
+                    {message.sources.map((source, sourceIndex) => (
+                      <AssistantMessageSource
+                        key={`${source.source_ref_id ?? source.url ?? source.material_id}-${sourceIndex}`}
+                        source={source}
+                        onOpen={sourcesOpenable && source.material_id && source.page_number ? () => {
+                          openMaterialSource(source.material_id!, source.page_number ?? undefined)
+                          if (courseId) navigate(featurePath(courseId, 'materials'))
+                        } : undefined}
+                      />
+                    ))}
                   </div>
                 ) : null}
               </article>
@@ -408,7 +396,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 {conversation.agentRun.notice ? <p className="assistant-dock-agent-notice">{conversation.agentRun.notice}</p> : null}
                 {conversation.agentRun.streamingText ? (
                   <div className="assistant-dock-answer assistant-dock-streaming">
-                    <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{conversation.agentRun.streamingText}</ReactMarkdown>
+                    <AssistantMessageMarkdown content={conversation.agentRun.streamingText} />
                     <span className="assistant-dock-cursor" aria-hidden="true" />
                   </div>
                 ) : null}

@@ -20,6 +20,16 @@
 - 外部模型：`app/ai/deepseek.py` 只读取环境变量中的 API 配置；模型失败时回退到本地规则，不暴露密钥。
 - Markdown 数学排版：后端提示词约束 LaTeX，前端使用 `remark-math` + `rehype-katex` 渲染。
 
+## 会话、来源与搜索边界
+
+- `app/services/conversations.py` 负责两种会话入口共用的消息与证据事务，以及会话加载；传统问答和 Agent SSE 分别保留自身的生成与传输逻辑。
+- `app/services/assistant_sources.py` 负责将实时检索结果及已保存证据转换为来源卡片结构。`app/services/terms.py` 提供术语原文查询，HTTP 路由与 Agent 工具共用。
+- `app/web_search/service.py` 复用既有 `app/web_search` 策略，集中执行缓存、供应商审计、结果审核和课程内网络来源保存。传统问答与 Agent 工具各自决定搜索词和回答策略。
+- Agent 工具的只读查询在 `app/ai/agent_read_tools.py`，笔记小节编辑算法在 `app/ai/note_edits.py`；`agent_tools.py` 保留工具定义、分发及建议生成入口。
+- 前端答疑页与答疑坞共用消息 Markdown 和来源卡片组件，同时保留各自布局；设置业务状态由独立 Hook 管理。
+- `app/db/models.py` 保留 ORM 兼容导出，森林相关表定义已移至 `app/db/forest_models.py`；表名、关系与迁移历史不因此改变。
+- 本地执行器连续处理三个资料任务后检查森林任务，避免持续的资料队列使森林任务一直得不到领取。
+
 ## 阶段一运行与数据边界
 
 API 只登记待处理资料任务；`app.workers.runner` 是同仓库的本地单实例任务执行器，不提供第二套 HTTP API。`scripts/dev.ps1` 先迁移数据库，再启动执行器、API 与 Vite。执行器用 OS 文件锁避免并行处理，进程重启后把上次中断的处理中任务明确标为可重试失败。上传时使用临时文件、PPTX 容器检查、原子落盘和哈希；相同课程的重复文件默认提示，允许显式作为新讲次导入。
@@ -138,7 +148,7 @@ Course
 `apps/web` 左下角齿轮打开设置抽屉，数据来自 `GET /api/v1/settings`（只返回布尔与长度提示，**永不回传密钥明文**）。写入走 `PATCH /api/v1/settings`，实现在 `app/core/settings_store.py`，约束如下：
 
 1. **白名单**：仅 `DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`、`DEEPSEEK_TIMEOUT_SECONDS`、`EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`NOTEBOOK_MAX_UPLOAD_MB` 可直接写入；`NOTEBOOK_DATA_DIR`、`allowed_extensions` 等结构项永不可改。非白名单键在 Pydantic 层就以 `extra="forbid"` 拒绝。
-2. **密钥双闸门**：`DEEPSEEK_API_KEY` / `EMBEDDING_API_KEY` 默认禁止写入，必须同时满足 `NOTEBOOK_ALLOW_SECRET_WRITE=true` 且请求头 `X-Notebook-Settings-Token` 与 `NOTEBOOK_SETTINGS_TOKEN` 匹配（`secrets.compare_digest` 常量时间比较）。未配置 token 时一律拒绝。
+2. **本地密钥写入**：本地单用户模式默认允许从设置面板写入 `DEEPSEEK_API_KEY` / `EMBEDDING_API_KEY`；`NOTEBOOK_ALLOW_SECRET_WRITE=false` 可显式关闭。若配置了 `NOTEBOOK_SETTINGS_TOKEN`，请求头 `X-Notebook-Settings-Token` 必须匹配（`secrets.compare_digest` 常量时间比较）；未配置 token 时，本地模式允许写入。远端共享部署必须另外设置访问控制，并显式决定是否禁用密钥写入；口令校验不能代替整个 API 的身份认证。
 3. **写入前置校验**：写入新的 DeepSeek Key 前，先调用服务端 `/models` 探活。401/403 直接以 **422 拒绝写入**，**绝不覆盖仍然可用的旧密钥**；网络不可达时降级为 warning 并放行（可设 `NOTEBOOK_SKIP_KEY_VERIFY=true` 完全跳过）。
 4. **注入防护**：拒绝含换行符的值（防止向 `.env` 注入额外键）、拒绝 `VITE_` 前缀（防止密钥被前端打包）、模型名仅允许字母数字连字符、URL 必须 `http(s)://`、数值有区间约束。
 5. **可回滚且不破坏原文件**：写盘采用"原地改写托管键 + 保留全部注释与未托管键"的策略，而不是整体重写；写入前备份 `.env` 到 `data/backups/env-<时间戳>.bak`，仅保留最近 20 份（备份含明文，避免无限堆积），再用临时文件 `os.replace` 原子替换。
