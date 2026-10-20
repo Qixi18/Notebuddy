@@ -53,6 +53,8 @@ export type WorkspaceContextValue = {
   busy: boolean
   noteSaving: boolean
   noteDirty: boolean
+  documentDirty: boolean
+  setDocumentDirty: (dirty: boolean) => void
   reloadNote: () => Promise<void>
   error?: string
   setError: (message: string | undefined) => void
@@ -103,7 +105,7 @@ export function featurePath(courseId: string, feature: Feature): string {
 }
 
 export function AppLayout() {
-  const { courseId, courses, error, setError, noteDirty, setEditingNote } = useWorkspace()
+  const { courseId, courses, error, setError, noteDirty, documentDirty, setDocumentDirty, setEditingNote } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const isHome = location.pathname === '/'
@@ -120,14 +122,14 @@ export function AppLayout() {
      其余页面（含首页、知识森林）全局常驻 */
   const dockSupported = !isAssistantPage
   const showAssistantDock = dockSupported && dockOpen
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => shouldBlockNoteNavigation(noteDirty, currentLocation, nextLocation))
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => shouldBlockNoteNavigation(noteDirty || documentDirty, currentLocation, nextLocation))
 
   useEffect(() => {
-    if (!noteDirty) return
+    if (!noteDirty && !documentDirty) return
     const warnBeforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-  }, [noteDirty])
+  }, [noteDirty, documentDirty])
 
   useEffect(() => {
     localStorage.setItem('notebuddy.sidebar-collapsed', String(sidebarCollapsed))
@@ -250,11 +252,11 @@ export function AppLayout() {
       {blocker.state === 'blocked' && <ConfirmDialog
         eyebrow="未保存的笔记"
         title="离开正在编辑的笔记？"
-        description="当前修改尚未保存。离开此页面会丢弃这份草稿，已保存的笔记正文不会改变。"
+        description={documentDirty ? '正文修改尚未保存。离开此页面会丢弃未保存的内容。' : '当前修改尚未保存。离开此页面会丢弃这份草稿，已保存的笔记正文不会改变。'}
         confirmLabel="放弃草稿并离开"
         cancelLabel="继续编辑"
         tone="danger"
-        onConfirm={() => { setEditingNote(false); blocker.proceed() }}
+        onConfirm={() => { setEditingNote(false); setDocumentDirty(false); blocker.proceed() }}
         onCancel={() => blocker.reset()}
       />}
     </div>

@@ -8,7 +8,6 @@ import { AssistantPage } from './pages/AssistantPage'
 import { CourseOverviewPage } from './pages/CourseOverviewPage'
 import { CourseLibraryPage } from './pages/CourseLibraryPage'
 import { HomePage } from './pages/HomePage'
-import { NotesLibraryPage } from './pages/NotesLibraryPage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { NotesPage } from './pages/NotesPage'
 import { NotebookPage } from './pages/NotebookPage'
@@ -39,10 +38,10 @@ function App() {
           <Route path="/recycle" element={<RecycleBinPage />} />
           <Route path="/forest" element={<Suspense fallback={<p role="status">正在打开知识森林…</p>}><ForestPage /></Suspense>} />
           <Route path="/courses/:courseId" element={<CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard>} />
-          <Route path="/notes" element={<NotesLibraryPage />} />
-          <Route path="/courses/:courseId/notebook" element={<CourseRouteGuard><NotebookPage /></CourseRouteGuard>} />
+          <Route path="/notes" element={<Navigate to="/courses" replace />} />
+          <Route path="/courses/:courseId/notebook" element={<Navigate to="/courses" replace />} />
           <Route path="/courses/:courseId/notebooks/:notebookId" element={<CourseRouteGuard><NotebookPage /></CourseRouteGuard>} />
-          <Route path="/courses/:courseId/notes" element={<Navigate to="/notes" replace />} />
+          <Route path="/courses/:courseId/notes" element={<Navigate to="/courses" replace />} />
           <Route path="/courses/:courseId/notes/:noteId" element={<CourseRouteGuard><NotesPage /></CourseRouteGuard>} />
           <Route path="/courses/:courseId/materials" element={<CourseRouteGuard><MaterialsPage /></CourseRouteGuard>} />
           <Route path="/courses/:courseId/assistant" element={<CourseRouteGuard><AssistantPage /></CourseRouteGuard>} />

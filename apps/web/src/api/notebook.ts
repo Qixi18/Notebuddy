@@ -1,4 +1,4 @@
-import type { Note, Notebook, NotebookRead, NotebookSummary, NotebookReadingPosition, ReadingPositionUpdate } from '../types'
+import type { Note, Notebook, NotebookDocument, NotebookDocumentBlock, NotebookRead, NotebookSummary } from '../types'
 import { request } from './http'
 
 export const notebookApi = {
@@ -8,12 +8,12 @@ export const notebookApi = {
   }),
   getNotebookById: (courseId: string, notebookId: string) => request<NotebookRead>(`/api/v1/courses/${courseId}/notebooks/${notebookId}`),
   getNotebookChapter: (courseId: string, notebookId: string, materialId: string) => request<{ material_id: string; sections: Note[] }>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/chapters/${materialId}`),
-  reorderNotebookChapters: (courseId: string, notebookId: string, materialIds: string[], expectedRevision: number) => request<NotebookRead>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/order`, {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ material_ids: materialIds, expected_order_revision: expectedRevision }),
+  renameNotebook: (courseId: string, notebookId: string, title: string) => request<NotebookRead>(`/api/v1/courses/${courseId}/notebooks/${notebookId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
   }),
-  getReadingPosition: (courseId: string, notebookId: string) => request<NotebookReadingPosition | null>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/reading-position`),
-  saveReadingPosition: (courseId: string, notebookId: string, position: ReadingPositionUpdate) => request<NotebookReadingPosition>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/reading-position`, {
-    method: 'PUT', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(position),
+  getNotebookDocument: (courseId: string, notebookId: string) => request<NotebookDocument>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/document`),
+  saveNotebookDocument: (courseId: string, notebookId: string, blocks: NotebookDocumentBlock[], expectedRevision: number) => request<NotebookDocument>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/document`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blocks, expected_revision: expectedRevision }),
   }),
   visitCourse: (courseId: string) => request<{ last_opened_at: string }>(`/api/v1/courses/${courseId}/visit`, { method: 'POST' }),
   getNotebook: (courseId: string) => request<Notebook>(`/api/v1/courses/${courseId}/notebook`),

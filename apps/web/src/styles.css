@@ -37,7 +37,6 @@ a { color: inherit; text-decoration: none; }
 .home-forest-entry strong { display: block; font: 600 18px 'STKaiti', 'KaiTi', serif; margin-bottom: 4px; }
 .home-forest-entry small { font-size: 11px; color: #93a280; }
 .home-forest-entry > span:last-child { margin-left: auto; font-size: 20px; }
-.notebook-forest-return { display: block; font-size: 12px; margin-top: 9px; color: #6e885b; }
 .materials-forest-start { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #f1f6e8; color: #71865d; padding: 10px 15px; border: 1px solid #dbe6cc; border-radius: 7px; margin-bottom: 16px; font-size: 12px; }
 .materials-forest-start button { border: 0; background: #6c8758; border-radius: 5px; padding: 6px 10px; color: #fff; cursor: pointer; }
 .app-sidebar { position: sticky; top: 0; display: flex; height: 100vh; min-height: 560px; flex-direction: column; border-right: 1px solid var(--line); padding: 25px 17px 18px; background: white; }
@@ -1299,49 +1298,6 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .assistant-dock-empty { margin-top: auto; margin-bottom: auto; color: #7f897d; font-size: 13px; line-height: 1.7; }
 .assistant-dock-empty .text-button { display: inline-flex; margin-top: 10px; }
 
-/* The notes index is a searchable library; each note is opened as a separate reader. */
-.notes-library { width: min(100%,1320px); margin: 0 auto; padding: 18px 0 38px; }
-.notes-library-heading { margin: 11px 0 22px; }
-.notes-library-heading h1 { color: #27382c; font-family: "KaiTi","STKaiti","Microsoft YaHei",serif; font-size: clamp(28px,3vw,39px); font-weight: 700; letter-spacing: -.035em; }
-.notes-library-heading p { margin-top: 7px; color: #81877d; font-size: 12px; }
-.notes-library-filters { display: grid; grid-template-columns: minmax(200px,1.5fr) minmax(155px,.85fr) minmax(155px,.85fr); gap: 12px; margin-bottom: 24px; }
-.notes-library-search, .notes-library-select { display: flex; min-width: 0; min-height: 46px; align-items: center; gap: 11px; border: 1px solid #dedfd7; border-radius: 11px; padding: 0 14px; color: #606d62; background: #fffefa; }
-.notes-library-search > span, .notes-library-select > span { flex: none; font-size: 18px; }
-.notes-library-search input, .notes-library-select select { width: 100%; min-width: 0; border: 0; outline: 0; color: #3d4a3f; background: transparent; font-size: 13px; }
-.notes-library-search input::placeholder { color: #92998e; }
-.notes-library-select select { height: 44px; }
-.notes-bookshelf { display: grid; grid-template-columns: repeat(auto-fill,minmax(190px,1fr)); gap: 20px; align-items: stretch; }
-.note-book, .book-create-tile { position: relative; display: flex; min-width: 0; min-height: 250px; overflow: hidden; border: 1px solid #e8e6dc; border-radius: 13px; padding: 0; text-align: left; background: #fffefa; box-shadow: 0 5px 12px rgba(47,66,48,.045); transition: transform .16s ease, box-shadow .16s ease; }
-.note-book { isolation: isolate; }
-.note-book:hover, .book-create-tile:hover { transform: translateY(-3px); box-shadow: 0 11px 22px rgba(47,66,48,.09); }
-.note-book-0 { background: linear-gradient(145deg,#fffefa,#f7f4ea); }
-.note-book-1 { background: linear-gradient(145deg,#fffefa,#f7f1e9); }
-.note-book-2 { background: linear-gradient(145deg,#f9fcfd,#eff5f4); }
-.note-book-spine { position: absolute; inset: 0 auto 0 0; z-index: -1; width: 15px; background: #8faa8d; }
-.note-book-1 .note-book-spine { background: #b7a7c1; }
-.note-book-2 .note-book-spine { background: #97b8bb; }
-.note-book-menu { position: absolute; top: 12px; right: 12px; color: #889084; font-size: 19px; letter-spacing: 2px; }
-.note-book-content { display: flex; min-width: 0; flex: 1; flex-direction: column; padding: 46px 20px 18px 32px; }
-.note-book-content strong { display: -webkit-box; overflow: hidden; min-height: 48px; color: #24382b; font-family: "Noto Serif SC","Songti SC",serif; font-size: 17px; font-weight: 600; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.note-book-rule { width: 100%; height: 1px; margin: 20px 0 11px; background: #dcded4; }
-.note-book-course { overflow: hidden; margin-top: auto; color: #657260; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.note-book-content small { overflow: hidden; margin-top: 7px; color: #909589; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.note-book-motif { position: absolute; right: 20px; bottom: 9px; color: #8fa68c; font-size: 22px; opacity: .75; }
-.note-book-1 .note-book-motif { color: #a895b0; }
-.note-book-2 .note-book-motif { color: #83a5a5; }
-.book-create-tile { flex-direction: column; align-items: center; justify-content: center; border: 1px dashed #b9cfb6; color: #496c4d; background: #f4f7f0; box-shadow: none; }
-.book-create-tile > span { font-size: 50px; font-weight: 300; line-height: 1; }
-.book-create-tile strong { margin-top: 7px; font-family: "Noto Serif SC","Songti SC",serif; font-size: 17px; }
-.book-create-tile small { margin-top: 8px; color: #84927e; font-size: 10px; }
-.notes-library-count { margin-top: 15px; color: #878e82; font-size: 11px; }
-.notes-library-state { padding: 32px 0; color: #7c887b; font-size: 13px; }
-.notes-library-error { border: 1px solid #ead0c5; border-radius: 10px; margin: 0 0 14px; padding: 11px 13px; color: #8b4e42; background: #fff8f4; font-size: 12px; }
-.notes-library-empty { display: grid; justify-items: center; padding: 70px 20px; color: #697668; text-align: center; }
-.notes-library-empty > span { color: #759176; font-size: 32px; }
-.notes-library-empty strong { margin-top: 12px; font-family: "Noto Serif SC","Songti SC",serif; font-size: 16px; }
-.notes-library-empty p { max-width: 360px; margin-top: 8px; color: #898f84; font-size: 12px; line-height: 1.7; }
-.notes-library-empty-action { border: 1px solid #dce5d7; border-radius: 9px; margin-top: 16px; padding: 9px 14px; color: #456a49; background: #f7f8f3; font-size: 11px; }
-
 /* A note opens into a calm reading surface with upload, citations and history nearby. */
 .note-detail-page { width: min(100%,1320px); margin: 0 auto; }
 .note-reader-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 2px 0 14px; }
@@ -1510,8 +1466,6 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
   .app-shell-with-assistant { grid-template-columns: 210px minmax(0,1fr) var(--dock-w, 300px); }
   .app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0,1fr) var(--dock-w, 300px); }
   .assistant-dock { padding-inline: 12px; }
-  .notes-bookshelf { grid-template-columns: repeat(auto-fill,minmax(170px,1fr)); gap: 14px; }
-  .note-book, .book-create-tile { min-height: 225px; }
 }
 @media (max-width: 920px) {
   .app-shell-with-assistant, .app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 210px minmax(0,1fr); }
@@ -1533,11 +1487,6 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
   .app-shell-sidebar-collapsed .sidebar-link > span:last-child,
   .app-shell-sidebar-collapsed .sidebar-footer { display: none; }
   .app-shell-sidebar-collapsed .sidebar-link { min-width: 34px; }
-  .notes-library { padding-top: 0; }
-  .notes-library-heading { margin-top: 5px; }
-  .notes-library-filters { grid-template-columns: minmax(0,1fr) minmax(135px,1fr); gap: 8px; }
-  .notes-library-search { grid-column: 1/-1; }
-  .notes-bookshelf { grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); }
   .note-reader-workspace { grid-template-columns: minmax(0,1fr); }
   .note-reader-workspace > .note-evidence-sidebar { position: static; display: none; max-height: none; border: 0; padding: 0; }
   .note-reader-workspace > .note-evidence-sidebar.note-evidence-sidebar-open { display: flex; }
@@ -1547,12 +1496,6 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
   .course-latest-material { align-items: flex-start; flex-direction: column; }
 }
 @media (max-width: 460px) {
-  .notes-library-filters { grid-template-columns: minmax(0,1fr); }
-  .notes-library-search { grid-column: auto; }
-  .notes-bookshelf { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
-  .note-book, .book-create-tile { min-height: 200px; }
-  .note-book-content { padding: 42px 11px 16px 23px; }
-  .note-book-content strong { font-size: 14px; }
   .note-reader-header { flex-direction: column; }
   .note-reader-document .note-detail-heading { flex-direction: column; }
   .course-entry-row { gap: 10px; }

@@ -66,8 +66,6 @@ h3,
 .page-heading-block h1,
 .course-library-heading h1,
 .course-workspace-heading h1,
-.notes-library-heading h1,
-.notebook-header h1,
 .note-detail-heading h1 {
   font-family: var(--nb-serif);
   color: var(--nb-ink);
@@ -213,23 +211,20 @@ select:focus-visible {
 
 .page-heading-block,
 .course-library-heading,
-.course-workspace-heading,
-.notes-library-heading {
+.course-workspace-heading {
   align-items: flex-end;
 }
 
 .page-heading-block h1,
 .course-library-heading h1,
-.course-workspace-heading h1,
-.notes-library-heading h1 {
+.course-workspace-heading h1 {
   font-size: clamp(28px, 3vw, 38px);
   letter-spacing: -0.035em;
 }
 
 .page-heading-block p,
 .course-library-heading p,
-.course-workspace-heading p,
-.notes-library-heading p {
+.course-workspace-heading p {
   color: var(--nb-muted);
   font-size: 11.5px;
   line-height: 1.75;
@@ -674,91 +669,10 @@ textarea::placeholder {
   color: var(--nb-muted);
 }
 
-/* ---------------------------------------------------------- notebook pages */
+/* ---------------------------------------------------------- note pages */
 
-.notebook-page,
-.note-detail-page,
-.notes-library {
+.note-detail-page {
   background: var(--nb-white);
-}
-
-.notebook-page {
-  width: min(100%, 1440px);
-  margin: 0 auto;
-  padding: 28px clamp(20px, 3vw, 42px) 54px;
-}
-
-.notebook-header {
-  border-bottom: 1px solid var(--nb-line);
-  padding-bottom: 16px;
-}
-
-.notebook-header h1 {
-  font-size: clamp(28px, 2.8vw, 36px);
-  letter-spacing: -0.035em;
-}
-
-.notebook-header p {
-  color: var(--nb-muted);
-  font-size: 10.5px;
-}
-
-.notebook-layout {
-  grid-template-columns: 250px minmax(0, 1fr);
-  gap: 34px;
-}
-
-.notebook-outline {
-  border-right: 1px solid var(--nb-line);
-  padding-right: 22px;
-}
-
-.notebook-outline h2 {
-  color: var(--nb-ink);
-  font-family: var(--nb-serif);
-  font-size: 15px;
-}
-
-.notebook-chapter-title > button {
-  color: var(--nb-ink);
-  font-size: 11.5px;
-  font-weight: 500;
-}
-
-.notebook-section-link {
-  border-radius: 6px;
-  color: var(--nb-muted);
-  font-size: 10.5px;
-}
-
-.notebook-section-link:hover,
-.notebook-section-link.active {
-  color: var(--nb-forest);
-  background: var(--nb-mist);
-}
-
-.notebook-content {
-  max-width: 780px;
-  padding: 4px 8px 35vh;
-}
-
-.notebook-chapter-document h2 {
-  border-bottom: 1px solid var(--nb-line);
-  padding-bottom: 10px;
-  font-family: var(--nb-serif);
-  font-size: 24px;
-  font-weight: 600;
-}
-
-.notebook-section {
-  border-bottom: 1px solid var(--nb-line);
-  padding-bottom: 26px;
-}
-
-.notebook-section h3 {
-  font-family: var(--nb-serif);
-  font-size: 19px;
-  font-weight: 600;
 }
 
 .markdown-preview {
@@ -784,11 +698,6 @@ textarea::placeholder {
   padding: 2px 0 2px 18px;
   color: var(--nb-ink);
   background: none;
-}
-
-.notebook-forest-return {
-  color: var(--nb-forest);
-  font-size: 10.5px;
 }
 
 .note-detail-page {
@@ -851,11 +760,7 @@ textarea::placeholder {
 .assistant-question-form,
 .course-library-card,
 .course-library-empty,
-.course-entry-row,
-.notes-library-search,
-.notes-library-select,
-.note-book,
-.book-create-tile {
+.course-entry-row {
   border-color: var(--nb-line);
   background: var(--nb-white);
 }
@@ -965,18 +870,6 @@ textarea::placeholder {
   background: var(--nb-mist);
 }
 
-.notes-library-search,
-.notes-library-select {
-  border-color: var(--nb-line);
-  background: var(--nb-white);
-}
-
-.note-book,
-.book-create-tile {
-  border-color: var(--nb-line);
-  background: var(--nb-white);
-}
-
 /* --------------------------------------------------------------- assistant */
 
 .assistant-page .page-heading-block h1 {
@@ -1007,9 +900,7 @@ body .knowledge-relation-panel,
 body .assistant-workspace,
 body .assistant-context-bar,
 body .assistant-question-form,
-body .course-library-card,
-body .note-book,
-body .book-create-tile {
+body .course-library-card {
   background: var(--nb-white);
 }
 
@@ -1105,10 +996,6 @@ body .materials-forest-start {
     padding-inline: 24px;
   }
 
-  .notebook-layout {
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 24px;
-  }
 }
 
 @media (max-width: 900px) {
@@ -1138,16 +1025,7 @@ body .materials-forest-start {
     padding: 22px 20px 16px;
   }
 
-  .notebook-layout {
-    display: block;
-  }
 
-  .notebook-outline {
-    border-right: 0;
-    border-bottom: 1px solid var(--nb-line);
-    margin-bottom: 24px;
-    padding: 0 0 18px;
-  }
 
   .note-reader-workspace {
     display: block;
@@ -1176,7 +1054,4 @@ body .materials-forest-start {
     min-height: 62dvh;
   }
 
-  .notebook-page {
-    padding-inline: 14px;
-  }
 }

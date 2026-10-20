@@ -35,6 +35,25 @@ def test_books_isolate_same_named_notes_and_legacy_default(setup):
     assert client.get(f"/api/v1/courses/{foreign.course_id}/notebooks/{second['id']}").status_code == 404
 
 
+def test_notebook_document_is_scoped_and_rejects_stale_or_invalid_edits(setup):
+    client, _, course, _, _, _, foreign = setup
+    first = create_book(client, course, "第一本")
+    second = create_book(client, course, "第二本")
+    url = f"/api/v1/courses/{course.id}/notebooks/{first['id']}/document"
+    assert client.get(url).json()["blocks"] == []
+    blocks = [{"id": "heading-1", "type": "h1", "text": "极限与连续"},
+              {"id": "body-1", "type": "p", "text": "用户可编辑的正文"}]
+    saved = client.put(url, json={"blocks": blocks, "expected_revision": 0})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["revision"] == 1
+    assert client.get(url).json()["blocks"] == blocks
+    assert client.get(f"/api/v1/courses/{course.id}/notebooks/{second['id']}/document").json()["blocks"] == []
+    assert client.get(f"/api/v1/courses/{foreign.course_id}/notebooks/{first['id']}/document").status_code == 404
+    assert client.put(url, json={"blocks": [], "expected_revision": 0}).status_code == 409
+    assert client.put(url, json={"blocks": [blocks[0], blocks[0]], "expected_revision": 1}).status_code == 422
+    assert client.get(url).json()["blocks"] == blocks
+
+
 def test_reading_position_ownership_revision_and_visit(setup):
     client, _, course, materials, notes, _, _ = setup
     root = f"/api/v1/courses/{course.id}"

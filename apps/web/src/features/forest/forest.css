@@ -27,17 +27,8 @@
 .forest-settings-wrap .forest-course-panel { position: static; width: auto; max-height: none; border: 0; padding: 0; }
 .forest-course-map { display: flex; flex-wrap: wrap; max-width: 300px; max-height: 240px; overflow: auto; gap: 4px; }
 .forest-course-map button { padding: 7px; min-height: 44px; }
-.notebook-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; }
-.notebook-outline { display: flex; flex-direction: column; gap: 14px; }
-.notebook-content { height: max(440px, calc(100dvh - 230px)); overflow: auto; scroll-behavior: auto; padding: 12px 24px 35vh; }
-.notebook-section { margin-bottom: 26px; }
-.notebook-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
 .notebook-modes { display: flex; gap: 8px; flex-wrap: wrap; }
-.notebook-section-link { display: block; width: 100%; padding: 9px; text-align: left; }
-.notebook-chapter-title { display: flex; justify-content: space-between; gap: 8px; }
-.notebook-chapter-title > button { flex: 1; text-align: left; }
-.notebook-section-link.active { background: #e5eadb; color: #284b39; }
-@media (max-width: 760px) { .home-tree-page .forest-header { padding: 16px; flex-wrap: wrap; } .notebook-layout { grid-template-columns: 1fr; } .notebook-outline { max-height: 210px; overflow: auto; } .notebook-content { padding-inline: 8px; height: 65dvh; } .forest-settings-wrap { left: 12px; right: 12px; width: auto; } .notebook-header { flex-wrap: wrap; } }
+@media (max-width: 760px) { .home-tree-page .forest-header { padding: 16px; flex-wrap: wrap; } .forest-settings-wrap { left: 12px; right: 12px; width: auto; } }
 .forest-search { position: absolute; top: 22px; left: 28px; z-index: 3; width: 282px; }
 .forest-search label { display: flex; align-items: center; gap: 10px; padding: 10px 13px; background: #fdfef9ec; border: 1px solid #dce4d1; border-radius: 10px; box-shadow: 0 2px 7px #52744506; }
 .forest-search svg { width: 17px; height: 17px; stroke: #839677; stroke-width: 1.4; fill: none; flex-shrink: 0; }
@@ -165,7 +156,6 @@
 .forest-task-status h3 { font: 500 23px 'STKaiti', 'KaiTi', serif; }
 .forest-task-status p { font-size: 12px; line-height: 1.8; }
 .forest-loading-seed { font-size: 40px; color: #91a977; }
-.notebook-forest-return { display: block; font-size: 12px; margin-top: 9px; color: #6e885b; }
 .materials-forest-start { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #f1f6e8; color: #71865d; padding: 10px 15px; border: 1px solid #dbe6cc; border-radius: 7px; margin-bottom: 16px; font-size: 12px; }
 .materials-forest-start button { border: 0; background: #6c8758; border-radius: 5px; padding: 6px 10px; color: #fff; cursor: pointer; }
 @media (max-width: 1000px) { .forest-header { padding: 21px 24px; } .forest-heading h1 { font-size: 25px; } .forest-legend { top: 76px; left: 32px; right: auto; } .forest-course-panel { width: 286px; } }

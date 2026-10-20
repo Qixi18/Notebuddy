@@ -101,6 +101,8 @@ class Notebook(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     display_order: Mapped[int] = mapped_column(default=0, server_default="0")
     order_revision: Mapped[int] = mapped_column(default=0, server_default="0")
+    document_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    document_revision: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     is_default: Mapped[bool] = mapped_column(default=False, server_default="0")
     tree_slot: Mapped[int] = mapped_column(nullable=False)
     next_note_slot: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)

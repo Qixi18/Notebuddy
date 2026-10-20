@@ -48,6 +48,25 @@ class NotebookTitleUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+class DocumentBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=64)
+    type: Literal["h1", "h2", "p", "bullet"]
+    text: str = Field(max_length=20000)
+
+
+class NotebookDocumentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    blocks: list[DocumentBlock] = Field(max_length=3000)
+    expected_revision: int = Field(ge=0)
+
+
+class NotebookDocumentRead(BaseModel):
+    blocks: list[DocumentBlock]
+    revision: int
+    updated_at: datetime
+
+
 class NotebookRead(BaseModel):
     id: str
     course_id: str

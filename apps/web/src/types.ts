@@ -213,6 +213,8 @@ export type NotebookSummary = {
   display_order: number; order_revision: number; is_default: boolean
   created_at: string; updated_at: string
 }
+export type NotebookDocumentBlock = { id: string; type: 'h1' | 'h2' | 'p' | 'bullet'; text: string }
+export type NotebookDocument = { blocks: NotebookDocumentBlock[]; revision: number; updated_at: string }
 export type CourseTree = { course_id: string; notebooks: NotebookRead[] }
 export type NotebookReadingPosition = {
   notebook_id: string; chapter_id: string | null; note_id: string | null

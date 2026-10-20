@@ -3,7 +3,6 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
-import { NotebookPage } from '../src/pages/NotebookPage'
 import { HomePage } from '../src/pages/HomePage'
 
 vi.mock('../src/api', () => ({ api: {
@@ -34,13 +33,6 @@ beforeEach(() => {
   vi.mocked(api.createNotebook).mockResolvedValue({ ...second, id: 'new-book', title: '新本' } as never)
 })
 afterEach(cleanup)
-test('explicit book opens its own content and upload keeps the exact target book', async () => {
-  mount('/courses/c/notebooks/b2?chapter=m2&section=n2', <NotebookPage />)
-  await screen.findByRole('heading', { name: '第二本', level: 1 })
-  expect(await screen.findByText('正文 n2')).toBeTruthy()
-  fireEvent.click(screen.getByRole('link', { name: '上传下一讲' }))
-  expect(screen.getByLabelText('位置').textContent).toBe('/courses/c/materials?notebook=b2')
-})
 test('home root creates a named book then navigates to upload that book', async () => {
   mount('/', <HomePage />)
   fireEvent.click(await screen.findByRole('button', { name: '课程菜单：课程' }))

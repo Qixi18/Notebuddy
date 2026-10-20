@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +11,8 @@ from app.db.models import Course, Material, Note, Notebook, NotebookReadingPosit
 from app.notes.notebook import default_notebook, list_course_notebooks, notebook_outline
 from app.schemas.notebook import (
     ChapterContentRead,
+    NotebookDocumentRead,
+    NotebookDocumentUpdate,
     NotebookOrderUpdate,
     NotebookRead,
     NotebookSummary,
@@ -66,6 +70,34 @@ def rename_notebook(course_id: str, notebook_id: str, payload: NotebookTitleUpda
     book.title = payload.title.strip()
     db.commit()
     return notebook_outline(db, db.get(Course, course_id), book)
+
+
+@router.get("/courses/{course_id}/notebooks/{notebook_id}/document", response_model=NotebookDocumentRead)
+def get_notebook_document(course_id: str, notebook_id: str, db: Session = Depends(get_db)):
+    book = ensure_notebook(db, course_id, notebook_id)
+    return {"blocks": json.loads(book.document_json), "revision": book.document_revision,
+            "updated_at": book.updated_at}
+
+
+@router.put("/courses/{course_id}/notebooks/{notebook_id}/document", response_model=NotebookDocumentRead)
+def put_notebook_document(course_id: str, notebook_id: str, payload: NotebookDocumentUpdate,
+                          db: Session = Depends(get_db)):
+    ensure_notebook(db, course_id, notebook_id)
+    if len({block.id for block in payload.blocks}) != len(payload.blocks):
+        raise HTTPException(422, "正文块编号不能重复")
+    if sum(len(block.text) for block in payload.blocks) > 500_000:
+        raise HTTPException(422, "笔记正文过长")
+    now = utc_now()
+    result = db.execute(update(Notebook).where(
+        Notebook.id == notebook_id, Notebook.course_id == course_id,
+        Notebook.document_revision == payload.expected_revision,
+    ).values(document_json=json.dumps([block.model_dump() for block in payload.blocks], ensure_ascii=False),
+             document_revision=Notebook.document_revision + 1, updated_at=now))
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "笔记已在别处更新，请先刷新后再保存")
+    db.commit()
+    return {"blocks": payload.blocks, "revision": payload.expected_revision + 1, "updated_at": now}
 
 
 def chapter_content(db: Session, course_id: str, book: Notebook, material_id: str):

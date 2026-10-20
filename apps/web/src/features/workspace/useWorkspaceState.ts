@@ -42,6 +42,7 @@ export function useWorkspaceState() {
   const [job, setJob] = useState<Job>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [documentDirty, setDocumentDirty] = useState(false)
 
   const [teacherPersona, setTeacherPersona] = useTeacherCharacter()
 
@@ -282,6 +283,8 @@ export function useWorkspaceState() {
     busy: busy || conversation.busy,
     noteSaving,
     noteDirty,
+    documentDirty,
+    setDocumentDirty,
     reloadNote,
     error,
     setError,
@@ -294,7 +297,7 @@ export function useWorkspaceState() {
     refreshCourses,
     refreshCurrentMaterials: () => courseId ? refreshMaterials(courseId) : Promise.resolve(),
     refreshCurrentNotes: () => courseId ? refreshNotes(courseId) : Promise.resolve(),
-  }), [courses, courseId, conversationCourseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, teacherPersona, conversation, busy, noteSaving, noteDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
+  }), [courses, courseId, conversationCourseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, teacherPersona, conversation, busy, noteSaving, noteDirty, documentDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
 
   return workspace
 }

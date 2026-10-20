@@ -165,7 +165,7 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
   return (
     <div className="note-detail-page page-enter">
       <header className="note-reader-header">
-        <button className="note-back-button" type="button" onClick={() => navigate('/notes')}><span aria-hidden="true">←</span>返回书架</button>
+        <button className="note-back-button" type="button" onClick={() => navigate('/courses')}><span aria-hidden="true">←</span>返回课程</button>
         <div className="note-reader-actions">
           <Link className="secondary-button link-button" to={featurePath(routeCourseId, 'materials')}>＋ 上传课程资料</Link>
           {selectedForRoute && !editingNote && !previewRevision && <button className="secondary-button" onClick={() => setEditingNote(true)}>编辑笔记</button>}
@@ -173,7 +173,7 @@ export function NoteSectionReader({ noteId }: { noteId: string }) {
       </header>
 
       {courseContentLoading ? <div className="page-loading" role="status">正在读取笔记…</div> : !selectedForRoute ? (
-        <EmptyState icon="▤" title="没有找到这条笔记" description="它可能已被移除，或链接属于其他课程。" action={<Link className="secondary-button link-button" to="/notes">返回笔记书架</Link>} />
+        <EmptyState icon="▤" title="没有找到这条笔记" description="它可能已被移除，或链接属于其他课程。" action={<Link className="secondary-button link-button" to="/courses">返回课程</Link>} />
       ) : (
         <section className="note-reader-workspace">
           <article className="note-detail-panel note-reader-document">
