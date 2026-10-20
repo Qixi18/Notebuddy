@@ -1,5 +1,7 @@
 # 本地运行与备份操作
 
+本地数据库、原文件、派生目录及浏览器视图状态的归属见 [后端调用与业务数据存储契约](backend-data-contract.md)。
+
 ## 启动
 
 从仓库根目录执行 `./scripts/dev.ps1`。脚本会先检查 8000/5173 端口、迁移 SQLite，再启动 API、任务执行器和 Vite；服务只监听本机地址，退出时会清理启动的子进程。手动运行时必须同时启动 `uv run python -m app.workers.runner`。

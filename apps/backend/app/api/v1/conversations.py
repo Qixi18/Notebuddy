@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -142,13 +144,13 @@ def send_message(
     selected = db.get(Material, payload.material_id) if payload.material_id else None
     if payload.material_id and (selected is None or selected.course_id != conversation.course_id or selected.deleted_at is not None):
         raise HTTPException(status_code=404, detail="所选资料不属于当前课程")
+    history = [(message.role, message.content) for message in conversation.messages]
     user = ConversationMessage(
         conversation_id=conversation_id, role="user", content=payload.question.strip(),
         learning_goal=payload.learning_goal, status="completed", idempotency_key=payload.idempotency_key,
     )
     db.add(user)
-    db.flush()
-    history = [(message.role, message.content) for message in conversation.messages if message.id != user.id]
+    db.commit()
     course = ensure_course(db, conversation.course_id)
     try:
         result = run_answer(
@@ -182,6 +184,7 @@ def send_message(
             learning_goal=payload.learning_goal, status="failed", failure_type=type(exc).__name__,
         )
         db.add(failed)
+        conversation.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(failed)
         return _message_read(db, failed)

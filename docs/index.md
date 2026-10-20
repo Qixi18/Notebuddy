@@ -5,6 +5,7 @@
 - [项目运行与功能概览](../README.md)
 - [代码架构](architecture.md)
 - [接口](api.md)、[解析](parsing.md)、[知识整合](knowledge-integration.md)
+- [后端调用与业务数据存储契约](backend-data-contract.md)：并行开发共用的调用链、数据归属与本地存储路径
 - [数据迁移](migrations.md)、[运维](operations.md)、[安全](security.md)
 - [验收矩阵](acceptance.md)、[证据约束](evidence.md)、[RAG 评估](rag-evaluation.md)
 - [文件结构目标方案](../拟定规范文件结构.md)

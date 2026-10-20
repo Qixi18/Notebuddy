@@ -75,6 +75,8 @@ def test_both_transports_persist_web_evidence_and_replay_sources(tmp_path, monke
         assert "https://example.org/source" in streamed.text
         assert replay.status_code == 200, replay.text
         assistants = [item for item in replay.json() if item["role"] == "assistant"]
+        users = [item for item in replay.json() if item["role"] == "user"]
+        assert [item["content"] for item in users] == ["第一问", "第二问"]
         assert len(assistants) == 2
         assert all(item["evidence"][0]["evidence_type"] == "web_supplement" for item in assistants)
         assert all(item["sources"][0]["url"] == "https://example.org/source" for item in assistants)

@@ -1,5 +1,7 @@
 # API 契约
 
+三条并行开发线的调用顺序、共享约束和业务数据存储位置见 [后端调用与业务数据存储契约](backend-data-contract.md)。本页记录各接口的详细行为。
+
 ## 多笔记本与续读（2026-10-15）
 
 以下地址均使用 `/api/v1` 前缀。每个本、章节、笔记读写同时校验课程与笔记本归属，越界返回 404。
@@ -59,6 +61,7 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 |---|---|---|
 | 持久会话 | `POST/GET /courses/{course_id}/conversations` | 会话只属于一个课程，切换课程不会带入旧历史 |
 | 会话消息 | `GET /conversations/{id}/messages`、`POST /conversations/{id}/messages` | 保存有限历史窗口、学习目标、失败状态和证据映射；`idempotency_key` 防止重复消息 |
+| Agent 流式会话 | `POST /conversations/{id}/agent-messages` | SSE 返回步骤、增量和最终回答；用户提问、最终回答或失败状态写入同一会话历史，中间流事件不作为消息保存 |
 | 知识提案 | `GET /courses/{course_id}/knowledge-proposals`、`POST /knowledge-proposals/{id}/review` | 相似但名称不同的跨讲候选进入待确认状态，确认后写入变更记录 |
 | 知识变更 | `GET /courses/{course_id}/knowledge-changes` | 查看新增、深化、来源补充和审核理由 |
 | 笔记建议 | `GET/POST /notes/{id}/suggestions`、`POST /notes/{id}/suggestions/{suggestion_id}/review` | AI 只写建议；用户确认后才生成用户版本 |
@@ -66,6 +69,8 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 | 术语说明 | `POST /courses/{course_id}/terms/explain` | 返回原文、常见译法、学科语境和出处不确定性；未配置可核验服务时保守返回，不伪造词源 |
 
 答疑先检索课程内部资料；只有没有直接命中且策略允许时才调用联网搜索。回答来源按课件、网络补充、直接支持/相关支持分别标记。
+
+独立的 `POST /courses/{course_id}/assistant` 是单次答疑，不写入会话历史。连续追问与刷新后恢复使用上述会话端点；数据库位置、失败记录和两种传输的共享规则见 [后端调用与业务数据存储契约](backend-data-contract.md)。
 
 ## 阶段四备份接口
 
