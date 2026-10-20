@@ -30,11 +30,19 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
   expect(container.querySelector('.kt-branch-growth')).toBeNull()
   const leafPosition = container.querySelector('[data-note-id="old-note"] [data-leaf-paint]')!.getAttribute('transform')
   const oldSpine = container.querySelector('.kt-branch[data-notebook-id="old-book"] .kt-book-action path')!.getAttribute('d')
-  fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
-  await waitFor(() => expect(screen.getByLabelText('知识树缩放').textContent).toBe('100%'))
+  // The SVG updates immediately; the rounded percentage follows on the next frame.
+  if (mode === 'forest') {
+    const zoomBefore = Number(container.querySelector('.kt-canvas > g')!.getAttribute('transform')!.match(/scale\(([^)]+)\)/)![1]) * 100
+    fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
+    await waitFor(() => {
+    const zoomAfter = Number.parseInt(screen.getByLabelText('知识树缩放').textContent!)
+    expect(zoomAfter).toBeGreaterThan(zoomBefore)
+    expect(Math.abs(zoomAfter - zoomBefore * 1.2)).toBeLessThanOrEqual(1)
+    })
+  } else expect(screen.queryByRole('button', { name: '放大知识树' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '课程菜单：课程' }))
   // Root focus may bring the root into view before its menu opens.
-  const camera = container.querySelector('.kt-canvas > g')!.getAttribute('transform')
+  const camera = container.querySelector('.kt-canvas > g')?.getAttribute('transform')
   fireEvent.click(screen.getByRole('button', { name: '新建笔记本' }))
   fireEvent.change(screen.getByLabelText('笔记本名称'), { target: { value: added.title } })
   fireEvent.click(screen.getByRole('button', { name: '创建并上传' }))
@@ -45,11 +53,13 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
   fireEvent.click(screen.getByRole('button', { name: '浏览器返回' }))
   await screen.findByRole('button', { name: '续读笔记本：新增笔记本' })
   const growth = container.querySelectorAll('.kt-branch-growth')
-  expect(growth).toHaveLength(1)
-  expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe(added.id)
+  if (mode === 'forest') {
+    expect(growth).toHaveLength(1)
+    expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe(added.id)
+  }
   expect(container.querySelector('[data-note-id="old-note"] [data-leaf-paint]')!.getAttribute('transform')).toBe(leafPosition)
   expect(container.querySelector('.kt-branch[data-notebook-id="old-book"] .kt-book-action path')!.getAttribute('d')).toBe(oldSpine)
-  expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(camera)
+  expect(container.querySelector('.kt-canvas > g')?.getAttribute('transform')).toBe(camera)
 })
 test.each(['home', 'forest'])('%s grows a real generated Note in the same scene and stops polling when its pending material completes', async mode => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
@@ -62,8 +72,8 @@ test.each(['home', 'forest'])('%s grows a real generated Note in the same scene 
   const { container } = render(<MemoryRouter initialEntries={[mode === 'home' ? '/' : '/forest']}><WorkspaceProvider value={{ courses: [course], coursesLoading: false, refreshCourses: vi.fn() } as unknown as WorkspaceContextValue}>{mode === 'home' ? <HomePage /> : <ForestPage />}</WorkspaceProvider></MemoryRouter>)
   await screen.findByRole('button', { name: '续读笔记本：笔记本' })
   expect(container.querySelector('[data-note-id="real-generated-note"]')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
-  const camera = container.querySelector('.kt-canvas > g')!.getAttribute('transform')
+  if (mode === 'forest') fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
+  const camera = container.querySelector('.kt-canvas > g')?.getAttribute('transform')
   const scene = container.querySelector('.knowledge-tree-scene')
   generated = true // The persistent material job has now committed the real directory.
   await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
@@ -71,7 +81,7 @@ test.each(['home', 'forest'])('%s grows a real generated Note in the same scene 
   expect(leaf.closest('[data-note-id]')?.getAttribute('data-note-id')).toBe('real-generated-note')
   expect(leaf.closest('[data-notebook-id]')?.getAttribute('data-notebook-id')).toBe('book')
   expect(container.querySelector('.knowledge-tree-scene')).toBe(scene)
-  expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(camera)
+  expect(container.querySelector('.kt-canvas > g')?.getAttribute('transform')).toBe(camera)
   const finishedCalls = vi.mocked(api.getCourseTree).mock.calls.length
   await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
   await waitFor(() => expect(vi.mocked(api.getCourseTree).mock.calls.length).toBe(finishedCalls))
@@ -90,14 +100,14 @@ test.each(['home', 'forest'])('%s receives automatic vines after background comp
   const { container } = render(<MemoryRouter initialEntries={[mode === 'home' ? '/' : '/forest']}><WorkspaceProvider value={{ courses, coursesLoading: false, refreshCourses: vi.fn() } as unknown as WorkspaceContextValue}>{mode === 'home' ? <HomePage /> : <ForestPage />}</WorkspaceProvider></MemoryRouter>)
   await screen.findByRole('button', { name: '续读笔记本：a' })
   await waitFor(() => expect(api.getLatestForestJob).toHaveBeenCalledWith('a'))
-  fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
+  if (mode === 'forest') fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
   const scene = container.querySelector('.knowledge-tree-scene')
-  const camera = container.querySelector('.kt-canvas > g')!.getAttribute('transform')
+  const camera = container.querySelector('.kt-canvas > g')?.getAttribute('transform')
   completed = true
   await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
-  await screen.findByRole('button', { name: /查看a与b的模型推断关联/ })
+  await screen.findByRole('button', { name: mode === 'home' ? '查看知识关联 ↗' : /查看a与b的模型推断关联/ })
   expect(container.querySelector('.knowledge-tree-scene')).toBe(scene)
-  expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(camera)
+  expect(container.querySelector('.kt-canvas > g')?.getAttribute('transform')).toBe(camera)
   const finished = vi.mocked(api.getForestJob).mock.calls.length
   await act(async () => { await vi.advanceTimersByTimeAsync(6000) })
   expect(vi.mocked(api.getForestJob).mock.calls.length).toBe(finished)

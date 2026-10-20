@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useWorkspace, type Feature } from '../components/AppLayout'
 import { CourseGate } from '../components/CourseGate'
-import { KnowledgeTreeScene, type KnowledgeTreeView } from '../features/tree/KnowledgeTreeScene'
+import { HomeCourseGarden } from '../features/home/HomeCourseGarden'
 import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 import { ForestRelationsPanel } from '../features/forest/ForestRelationsPanel'
 import { useAutomaticVines } from '../features/forest/useAutomaticVines'
@@ -12,6 +12,7 @@ import type { ForestCourse } from '../features/forest/types'
 import { notebookPath } from '../features/notebook/navigation'
 import { selectHomeCourses } from '../features/workspace/recentCourses'
 import { readSceneSnapshot, saveSceneSnapshot } from '../features/tree/snapshot'
+import { HomeSearch } from '../features/home/HomeSearch'
 import '../features/forest/forest.css'
 
 export function HomePage() {
@@ -28,8 +29,10 @@ function HomeScene() {
   const entry = state?.restoreSceneEntry ?? location.key
   const restored = useRef(readSceneSnapshot(`home:${entry}`)).current
   const chosen = useRef<string[] | undefined>(restored?.courseIds)
-  const view = useRef<KnowledgeTreeView | undefined>(restored?.view)
   const [forestCourses, setForestCourses] = useState<ForestCourse[]>([])
+  const [forestLoading, setForestLoading] = useState(true)
+  const [forestError, setForestError] = useState<string>()
+  const [forestReload, setForestReload] = useState(0)
   const [root, setRoot] = useState<string>()
   const [createOpen, setCreateOpen] = useState(Boolean(state?.openCreateCourse))
   const [requestedFeature, setRequestedFeature] = useState(state?.pendingFeature)
@@ -39,39 +42,18 @@ function HomeScene() {
   const directories = useTreeDirectories()
   const vines = useAutomaticVines(directories.watchKey, directories.settledVersion, directories.refresh)
   const [relationsOpen, setRelationsOpen] = useState(false)
-  const [selectedRelation, setSelectedRelation] = useState<string>()
 
   useEffect(() => {
     let active = true
-    void api.getForest().then(result => { if (active) setForestCourses(result.courses) }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '课程树读取失败') })
+    setForestLoading(true); setForestError(undefined)
+    void api.getForest().then(result => { if (active) setForestCourses(result.courses) }).catch((cause: unknown) => { if (active) setForestError(cause instanceof Error ? cause.message : '课程树读取失败') }).finally(() => { if (active) setForestLoading(false) })
     return () => { active = false }
-  }, [courses])
+  }, [courses, forestReload])
 
   if (!chosen.current && !coursesLoading) chosen.current = selectHomeCourses(courses).map(course => course.id)
   const visible = (chosen.current ?? []).flatMap(id => forestCourses.filter(course => course.course_id === id))
-  const primaryCourseId = visible[0]?.course_id ?? courses[0]?.id
-  const primaryCourseName = visible[0]?.name ?? courses.find(course => course.id === primaryCourseId)?.name ?? '课程'
-  const primaryTree = directories.trees.find(tree => tree.course_id === primaryCourseId)
-  const primaryBook = primaryTree?.notebooks[0]
-  const primaryChapter = primaryBook?.chapters[0]
-  const primarySection = primaryChapter?.sections[0]
-  const chapterIndex = primaryBook && primaryChapter ? primaryBook.chapters.findIndex(chapter => chapter.id === primaryChapter.id) : -1
-  const progress = chapterIndex >= 0 && primaryBook ? Math.round(((chapterIndex + 1) / Math.max(primaryBook.chapters.length, 1)) * 100) : 0
-  const continueHref = primaryCourseId
-    ? primaryBook
-      ? notebookPath(primaryCourseId, primarySection, undefined, primaryBook.id)
-      : `/courses/${primaryCourseId}`
-    : '/courses'
-  const materialsHref = primaryCourseId ? `/courses/${primaryCourseId}/materials` : '/courses'
-  const assistantHref = primaryCourseId ? `/courses/${primaryCourseId}/assistant` : '/courses'
-  const recentNotes = directories.trees.flatMap(tree =>
-    tree.notebooks.flatMap(book =>
-      book.chapters.flatMap(chapter =>
-        chapter.sections.map(section => ({ tree, book, chapter, section })),
-      ),
-    ),
-  ).slice(0, 2)
-  const saveView = (next: KnowledgeTreeView) => { view.current = next; saveSceneSnapshot(`home:${entry}`, { view: next, courseIds: chosen.current ?? [] }) }
+  const chosenKey = (chosen.current ?? []).join('|')
+  useEffect(() => { saveSceneSnapshot(`home:${entry}`, { courseIds: chosenKey ? chosenKey.split('|') : [] }) }, [entry, chosenKey])
   const returnState = { sceneReturn: '/', sceneEntry: entry }
 
   async function create(event: FormEvent) {
@@ -83,62 +65,33 @@ function HomeScene() {
     finally { setCreating(false) }
   }
 
-  return <div className="home-tree-page home-desk-page">
-    <aside className="home-desk">
-      <div className="home-desk-greeting">
-        <span className="eyebrow">SUNDAY · 18 OCT</span>
-        <h1>晚上好，<br /><em>同学。</em></h1>
-        <p>今天适合把最近一讲读完。</p>
-      </div>
-
-      <Link className="home-continue-card" to={continueHref}>
-        <span className="home-continue-top"><span>继续阅读</span><span className="home-continue-pct">{progress ? `${progress}%` : '开始'}</span></span>
-        <strong>{primaryCourseName}</strong>
-        <span className="home-continue-meta">{primaryBook?.title ?? '还没有笔记本'}{primaryChapter ? ` · ${primaryChapter.title}` : ''}</span>
-        <span className="home-progress"><i style={{ width: `${progress || 4}%` }} /></span>
-        <small>{primarySection ? '从上次停下的位置继续' : primaryCourseId ? '从第一讲开始整理' : '先创建一门课程'}</small>
-        <span className="home-continue-cta">继续读 →</span>
-      </Link>
-
-      <section className="home-tasks" aria-label="今天的三件事">
-        <span className="eyebrow">今天的三件事</span>
-        <Link to={continueHref}><b>01</b><span>读完最近一讲<small>{primaryCourseName} · 约 12 分钟</small></span><i>→</i></Link>
-        <Link to={materialsHref}><b>02</b><span>核对来源与覆盖<small>把待核对的页面过一遍</small></span><i>→</i></Link>
-        <Link to={assistantHref}><b>03</b><span>问 AI 一个卡住的问题<small>基于当前课程与笔记</small></span><i>→</i></Link>
-      </section>
-
-      <section className="home-recent" aria-label="最近笔记">
-        <span className="eyebrow">最近笔记</span>
-        {recentNotes.length ? recentNotes.map(item => <Link className="home-recent-row" key={item.section.id} to={notebookPath(item.tree.course_id, item.section, undefined, item.book.id)}>
-          <span><strong>{item.section.title}</strong><small>{item.book.title} · {item.chapter.title}</small></span>
-          <i>→</i>
-        </Link>) : <p className="home-recent-empty">上传第一讲后，最近笔记会出现在这里。</p>}
-      </section>
-    </aside>
-
+  return <div className="home-tree-page home-garden-page">
     <div className="home-canvas">
-      <header className="forest-header">
-        <div><h1>你的森林</h1><p>{visible.length} 门课程 · 本学期 · 按最近阅读排序</p></div>
-        <div className="forest-header-actions"><Link to="/forest">走进知识森林</Link><button onClick={() => setCreateOpen(true)}>新建课程</button></div>
+      <header className="home-garden-header">
+        <div><span className="home-garden-eyebrow">我的学习花园</span><h1>让知识慢慢生长</h1><p>回到熟悉的课程，从一片叶子继续今天的学习。</p></div>
+        <div className="home-garden-actions"><Link to="/forest">走进知识森林<span aria-hidden="true"> ↗</span></Link><button onClick={() => setCreateOpen(true)}><span aria-hidden="true">＋ </span>新建课程</button></div>
       </header>
+      <div className="home-garden-toolbar">
+        <HomeSearch courses={courses} onCourse={id => navigate(`/forest?course=${encodeURIComponent(id)}`)} onNote={note => navigate(note.notebook_id ? notebookPath(note.course_id, { id: note.note_id, material_id: note.material_id }, undefined, note.notebook_id) : `/courses/${note.course_id}/notes/${note.note_id}`, { state: returnState })} />
+        <span className="home-view-caption">随窗口自适应 <span aria-hidden="true">·</span> 点击枝叶继续阅读</span>
+        {vines.relations.some(relation => relation.status === 'confirmed' && !relation.stale) && <button className="home-relations-link" onClick={() => setRelationsOpen(true)}>查看知识关联 ↗</button>}
+      </div>
       <div className="home-tree-surface">
-        <KnowledgeTreeScene key={entry} mode="home" courses={visible} trees={directories.trees} initialView={restored?.view} relations={vines.relations} selectedRelationId={selectedRelation} pinnedNoteIds={vines.relations.filter(relation => relation.status === 'confirmed' && !relation.stale && chosen.current?.includes(relation.source_course_id) && chosen.current?.includes(relation.target_course_id)).slice(0, 6).flatMap(relation => [relation.source_note_id, relation.target_note_id])} onViewChange={saveView} onVisibleCourseIdsChange={directories.watch}
+        <HomeCourseGarden key={entry} courses={visible} trees={directories.trees} onVisibleCourseIdsChange={directories.watch}
           onRoot={setRoot} onNotebook={(courseId, notebookId) => navigate(notebookPath(courseId, undefined, undefined, notebookId), { state: returnState })}
-          onNote={(courseId, notebookId, section) => navigate(notebookPath(courseId, section, undefined, notebookId), { state: returnState })} onRelation={() => setRelationsOpen(true)} />
-        {coursesLoading && <p className="forest-scene-message" role="status">正在读取课程…</p>}
+          onNote={(courseId, notebookId, section) => navigate(notebookPath(courseId, section, undefined, notebookId), { state: returnState })} />
+        {(coursesLoading || forestLoading) && <p className="forest-scene-message" role="status">正在读取课程…</p>}
         {!coursesLoading && !courses.length && <div className="forest-scene-empty"><h2>从一门课程开始</h2><p>创建课程，然后从树根新建笔记本并上传第一讲。</p><button onClick={() => setCreateOpen(true)}>创建课程</button></div>}
       </div>
+      <footer className="home-garden-footer" aria-label="知识树操作说明"><span><i aria-hidden="true">＋</i><b>根部</b> 添加资料</span><span><i aria-hidden="true">⌁</i><b>主枝</b> 继续阅读</span><span><i aria-hidden="true">❧</i><b>叶子</b> 打开笔记</span><small>鼠标停在叶子上预览知识点，点击进入正文</small></footer>
+      {forestError && <p role="alert">{forestError}<button onClick={() => setForestReload(value => value + 1)}>重新读取课程树</button></p>}
       {vines.error && <p role="alert">{vines.error}<button onClick={() => void vines.refresh()}>重试关联</button></p>}
       {Object.values(vines.jobs).filter(job => job.status === 'failed').map(job => <p role="status" key={job.id}>{job.error_message}<button onClick={() => void api.retryForestJob(job.id).then(next => { const id = Object.keys(vines.jobs).find(id => vines.jobs[id].id === job.id); if (id) vines.track(id, next) }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '重试失败'))}>重试关联任务</button></p>)}
       {(error || Object.keys(directories.errors).length > 0) && <p role="alert">{error ?? '部分课程目录读取失败。'}<button onClick={() => directories.load(Object.keys(directories.errors))}>重试目录</button></p>}
     </div>
 
     {relationsOpen && <ForestRelationsPanel relations={vines.relations} courses={forestCourses} onLocate={relation => {
-      if (!chosen.current?.includes(relation.source_course_id) || !chosen.current?.includes(relation.target_course_id)) {
-        navigate(`/forest?relation=${encodeURIComponent(relation.id)}`)
-        return
-      }
-      setSelectedRelation(relation.id); directories.load([relation.source_course_id, relation.target_course_id]); setRelationsOpen(false)
+      navigate(`/forest?relation=${encodeURIComponent(relation.id)}`)
     }} onChange={() => { void vines.refresh(); void directories.refresh() }} onClose={() => setRelationsOpen(false)} />}
     {root && <NotebookRootMenu courseId={root} courseName={courses.find(course => course.id === root)?.name ?? '课程'} onClose={() => setRoot(undefined)} returnState={returnState} />}
     {requestedFeature && <CourseGate feature={requestedFeature} onClose={() => setRequestedFeature(undefined)} />}

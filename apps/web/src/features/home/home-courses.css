@@ -1,0 +1,59 @@
+/* Open, fixed-size home grove. Only the full forest owns pan and zoom. */
+.home-tree-page.home-garden-page { height: auto; min-height: 100dvh; background: transparent; }
+.home-garden-page .home-canvas { min-width: 0; background: transparent; }
+.home-garden-header { padding-top: 38px; padding-bottom: 28px; }
+.home-garden-page .home-tree-surface { display: block; flex: 1; min-height: 0; padding-top: 22px; }
+.home-garden-toolbar { display: flex; align-items: center; gap: 20px; min-height: 60px; border-block: 1px solid #d9dcc9; position: relative; z-index: 4; }
+.home-relations-link { min-height: 44px; border: 0; background: transparent; color: #4e6648; font-size: 11px; }
+.home-relations-link:hover { text-decoration: underline; text-underline-offset: 4px; }
+.home-course-garden { width: 100%; min-width: 0; }
+.home-garden-section-head { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 12px; }
+.home-garden-section-head .eyebrow { font-size: 10px; color: #6e7d59; letter-spacing: 2px; }
+.home-garden-section-head h2 { margin-top: 4px; font: 500 23px var(--nb-serif); letter-spacing: .8px; }
+.home-course-pagination { display: flex; align-items: center; gap: 8px; }
+.home-course-pagination > span { margin-right: 8px; color: #68745c; font-size: 11px; }
+.home-course-pagination button { display: grid; place-items: center; width: 38px; min-height: 38px; border: 1px solid #ccd2bc; border-radius: 50%; color: #284b39; background: transparent; }
+.home-course-pagination button:hover:not(:disabled) { background: #e6ead7; }
+.home-course-grid { display: grid; grid-template-columns: repeat(var(--home-columns, 2), minmax(0, 1fr)); gap: 30px; align-items: end; }
+.home-course-card { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 0; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.home-course-card:hover { transform: none; border-color: transparent; box-shadow: none; background: transparent; }
+.home-course-tree { display: block; flex: none; width: 100%; height: clamp(390px, 53dvh, 610px); margin: 0; overflow: visible; touch-action: pan-y; }
+.home-course-card.kt-tree-planned [data-leaf-paint] image { opacity: .88; filter: saturate(.72); }
+.home-course-tree .kt-action:focus-visible { outline: none; }
+.home-course-tree .kt-book-action:focus-visible > path, .home-course-tree .kt-book-action:hover > path { stroke: #99a77c33; }
+.home-tree-leaf:hover image, .home-tree-leaf:focus-visible image { filter: drop-shadow(0 0 4px #668347); }
+.home-tree-leaf:focus-visible ellipse { stroke: #7c925e; stroke-width: 2; }
+.home-course-card-header { text-align: center; min-height: 90px; padding-top: 10px; }
+.home-course-card-header h2 { max-width: 100%; margin: 10px auto 8px; min-height: 30px; font: 500 clamp(19px, 1.6vw, 25px)/1.4 var(--nb-serif); letter-spacing: .5px; overflow-wrap: anywhere; }
+.home-garden-page .home-course-card-header p { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 7px; color: #68745c; font-size: 11px; }
+.home-course-state { display: inline-flex; align-items: center; gap: 6px; color: #647453; font-size: 10px; letter-spacing: .5px; }
+.home-course-state i { display: inline-block; width: 6px; height: 8px; border-radius: 7px 0 7px 0; background: #7e9a65; transform: rotate(-25deg); }
+.home-course-state-planned i { background: #9aa893; }
+.home-course-state-completed i { background: #305c3f; }
+.home-course-controls { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; margin-top: 4px; }
+.home-book-picker { display: block; min-width: 0; max-width: 60%; }
+.app-shell-garden .home-book-picker select { width: 100%; min-width: 0; min-height: 38px; padding: 5px 24px 5px 4px; border: 0; border-bottom: 1px solid #cbd2bb; border-radius: 0; font-size: 12px; text-overflow: ellipsis; background-color: transparent; }
+.home-directory-more { min-height: 40px; flex: none; padding: 7px 0; border: 0; color: #355b3b; background: transparent; font-size: 11px; }
+.home-directory-more:hover { text-decoration: underline; text-underline-offset: 4px; }
+.home-course-empty { color: #6b785e; font-size: 11px; text-align: center; line-height: 1.9; }
+.home-course-root { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 42px; padding: 8px 4px; border: 0; background: transparent; color: #647453; font-size: 11px; }
+.home-course-root > span { font-size: 16px; }
+.home-course-root:hover { color: #284b39; text-decoration: underline; text-underline-offset: 4px; }
+.home-leaf-preview { position: fixed; z-index: 40; width: min(280px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; transform: translateX(-50%); padding: 16px 18px 14px; border: 1px solid #c9d1b5; border-radius: 8px; color: #284b39; background: #fdfbf2; box-shadow: 0 10px 28px #284b391c; }
+.home-leaf-preview > small { display: block; margin-bottom: 8px; color: #68775a; font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; }
+.home-leaf-preview > small span { padding-inline: 3px; }
+.home-leaf-preview > strong { display: block; font: 500 19px/1.5 var(--nb-serif); overflow-wrap: anywhere; }
+.home-leaf-preview p { margin: 9px 0 12px; font-size: 12px; line-height: 1.85; color: #4e6449; overflow-wrap: anywhere; }
+.home-leaf-preview-hint { display: block; border-top: 1px solid #e0e3d0; padding-top: 8px; font-size: 10px; color: #71815d; }
+.home-garden-footer { margin-top: 18px; }
+.app-shell-garden .home-search-field input { min-width: 0; border: 0; border-radius: 0; background: transparent; }
+@container home-garden (max-width: 800px) { .home-view-caption { display: none; } .home-relations-link { margin-left: auto; } .home-course-grid { gap: 20px; } }
+@media (max-width: 600px) {
+  .home-garden-page .home-canvas { padding-inline: 18px; }
+  .home-garden-toolbar { flex-wrap: wrap; gap: 0; padding-block: 5px; }
+  .home-search { width: 100%; min-width: 0; }
+  .home-search-field kbd { display: none; }
+  .home-relations-link { min-height: 32px; margin-left: 0; }
+  .home-course-card-header h2 { font-size: 23px; }
+  .home-course-tree { height: 390px; }
+}

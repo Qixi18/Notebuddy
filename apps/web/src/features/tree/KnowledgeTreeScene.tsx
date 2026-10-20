@@ -13,7 +13,7 @@ import './knowledge-tree.css'
 
 export type { KnowledgeTreeSceneProps, KnowledgeTreeView } from './sceneTypes'
 
-export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialView, onViewChange, focusCourseId, onFocusCourse, search = '', pinnedNoteIds = [], relations = [], selectedRelationId, onVisibleCourseIdsChange, onRoot, onNotebook, onNote, onRelation, className = '' }: KnowledgeTreeSceneProps) {
+export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialView, onViewChange, focusCourseId, onFocusCourse, search = '', pinnedNoteIds = [], relations = [], selectedRelationId, onVisibleCourseIdsChange, onRoot, onNotebook, onNote, onRelation, className = '', toolbar }: KnowledgeTreeSceneProps) {
   const host = useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = useState({ width: initialView?.viewport.width ?? 1100, height: initialView?.viewport.height ?? 760, ready: false })
   const slots = useRef<Record<string, SavedSlot>>(initialView?.slots ?? {})
@@ -140,14 +140,18 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
         const controls = projectNotebookControls(items, initialFrame.k)
         const labels = placeLeafLabels(items, initialFrame.k, controls)
         const rectangles = [...labels.map(label => label.rect), ...[...controls.values()].flatMap(control => [control.title, control.directory])]
-        return [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...rectangles.flatMap(rect => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
+        // Home frames the real canopy, which may have only one or two books.
+        // Reserve the full course card below the roots before lazy data arrives.
+        const crown = mode === 'home' ? Math.min(-490, ...branches.map(branch => branch.anchor.y - 175), ...items.flatMap(item => item.leaves.map(leaf => leaf.y - 95))) : -735
+        const bottom = mode === 'home' ? ((branchMap.get(tree.course.course_id)?.length ?? 0) > 6 ? 184 : 85) : 65
+        return [{ x: tree.x - 310, y: tree.y + crown }, { x: tree.x + 310, y: tree.y + bottom }, ...rectangles.flatMap(rect => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
       })
       const frame = points.length ? fitPoints(points, viewport.width, viewport.height, 30) : initialFrame
       camera.move(frame)
       firstCamera.current = frame
       if (directoriesReady) contentFramed.current = true
     }
-  }, [viewport, camera.move, courses.length, positions, branchMap, treeMap])
+  }, [viewport, camera.move, courses.length, positions, branchMap, treeMap, mode])
   const callback = useRef(onViewChange)
   callback.current = onViewChange
   const rememberView = () => {
@@ -167,12 +171,13 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     const controls = projectNotebookControls(items, zoom)
     const labels = placeLeafLabels(items, zoom, controls)
     const rectangles = [...labels.map(label => label.rect), ...[...controls.values()].flatMap(control => [control.title, control.directory])]
-    const points = [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + 65 }, ...branches.slice(0, 6).flatMap(branch => branch.leaves.slice(0, 6).map(leaf => ({ x: tree.x + leaf.x, y: tree.y + leaf.y - 65 }))), ...rectangles.flatMap(rect => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
+    const bottom = mode === 'home' ? (branches.length > 6 ? 184 : 85) : 65
+    const points = [{ x: tree.x - 310, y: tree.y - 735 }, { x: tree.x + 310, y: tree.y + bottom }, ...branches.slice(0, 6).flatMap(branch => branch.leaves.slice(0, 6).map(leaf => ({ x: tree.x + leaf.x, y: tree.y + leaf.y - 65 }))), ...rectangles.flatMap(rect => [{ x: tree.x + rect.x, y: tree.y + rect.y }, { x: tree.x + rect.x + rect.width, y: tree.y + rect.y + rect.height }])]
     const framed = fitPoints(points, viewport.width, viewport.height, 30)
     // Course overview controls promise to enter an operable detail view. On a
     // short canvas preserve the root and let the user pan the upper canopy.
     camera.move(framed.k >= .5 ? framed : { k: .75, x: viewport.width / 2 - tree.x * .75, y: viewport.height * .82 - tree.y * .75 })
-  }, [branchMap, camera.move, viewport.width, viewport.height])
+  }, [branchMap, camera.move, viewport.width, viewport.height, mode])
   const previousFocus = useRef(initialView?.focusedCourseId)
   useEffect(() => {
     if (!focusCourseId) previousFocus.current = undefined
@@ -210,9 +215,8 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   const allBooks = (courseId: string) => treeMap.get(courseId)?.notebooks ?? []
   const openContents = (courseId: string, courseName: string, notebookId?: string) => setSelection({ courseId, courseName, books: allBooks(courseId), notebookId, trigger: document.activeElement })
   const pointVisible = (point: Point) => point.x * camera.cameraRef.current.k + camera.cameraRef.current.x > 48 && point.x * camera.cameraRef.current.k + camera.cameraRef.current.x < viewport.width - 48 && point.y * camera.cameraRef.current.k + camera.cameraRef.current.y > 72 && point.y * camera.cameraRef.current.k + camera.cameraRef.current.y < viewport.height - 48
-  const fit = () => camera.move(fitPoints(positions.flatMap(tree => [{ x: tree.x - 280, y: tree.y - 735 }, { x: tree.x + 280, y: tree.y + 80 }]), viewport.width, viewport.height, 30))
-  return <div ref={host} className={`knowledge-tree-scene ${className}`} data-scene-mode={mode}>
-    <div className="kt-camera-controls" role="group" aria-label="知识树画布控制">
+  const fit = () => camera.move(fitPoints(positions.flatMap(tree => [{ x: tree.x - 280, y: tree.y - 735 }, { x: tree.x + 280, y: tree.y + (mode === 'home' ? ((branchMap.get(tree.course.course_id)?.length ?? 0) > 6 ? 184 : 85) : 80) }]), viewport.width, viewport.height, 30))
+  const controls = <div className="kt-camera-controls" role="group" aria-label="知识树画布控制">
       <button aria-label="向左浏览课程" onClick={() => camera.pan(BOTANICAL_SPACING * camera.camera.k)}>‹</button>
       <button aria-label="缩小知识树" onClick={() => camera.scale(1 / 1.2)}>−</button>
       <output aria-label="知识树缩放">{Math.round(camera.camera.k * 100)}%</output>
@@ -220,6 +224,8 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
       <button aria-label="适应全部课程" onClick={fit}>适应</button>
       <button aria-label="向右浏览课程" onClick={() => camera.pan(-BOTANICAL_SPACING * camera.camera.k)}>›</button>
     </div>
+  const scene = <div ref={host} className={`knowledge-tree-scene ${className}`} data-scene-mode={mode}>
+    {!toolbar && controls}
     <svg ref={camera.svgRef} width="100%" height="100%" className="kt-canvas" aria-label="课程知识树，拖动画布或使用方向键浏览" tabIndex={0}
       onMouseDownCapture={event => { drag.current = { x: event.clientX, y: event.clientY, moved: false } }}
       onMouseMoveCapture={event => { if (drag.current && Math.hypot(event.clientX - drag.current.x, event.clientY - drag.current.y) > 6) drag.current.moved = true }}
@@ -236,7 +242,7 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
       }}>
       <g ref={camera.sceneRef}>
         <TreeVines relations={relations} endpoints={endpoints} zoom={camera.camera.k} selectedId={selectedRelationId} onRelation={relation => { rememberView(); onRelation(relation) }} />
-        {visible.map(tree => <WatercolorTree key={tree.course.course_id} tree={tree} branches={branchMap.get(tree.course.course_id) ?? []} zoom={camera.camera.k} pins={pins} growingNotes={growingNotes} growingBooks={growingBooks} search={search} expandedBookId={selection?.notebookId}
+        {visible.map(tree => <WatercolorTree key={tree.course.course_id} tree={tree} garden={mode === 'home'} branches={branchMap.get(tree.course.course_id) ?? []} zoom={camera.camera.k} pins={pins} growingNotes={growingNotes} growingBooks={growingBooks} search={search} expandedBookId={selection?.notebookId}
           onRoot={() => { rememberView(); onRoot(tree.course.course_id) }} onNotebook={book => { rememberView(); onNotebook(tree.course.course_id, book.id) }} onNote={(book, section) => { rememberView(); onNote(tree.course.course_id, book.id, section) }}
           onExpand={book => openContents(tree.course.course_id, tree.course.name, book.id)} onExpandBooks={() => openContents(tree.course.course_id, tree.course.name)}
           onFocus={() => { onFocusCourse?.(tree.course.course_id); if (!pointVisible({ x: tree.x, y: tree.y })) focusTree(tree) }}
@@ -250,4 +256,5 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     <p className="kt-hint">根部创建或扩充 · 枝干继续阅读 · 叶片打开知识点</p>
     {selection && <TreeContents selection={{ ...selection, books: allBooks(selection.courseId) }} onClose={closeContents} onNotebook={(courseId, notebookId) => { rememberView(); onNotebook(courseId, notebookId) }} onNote={(courseId, notebookId, section) => { rememberView(); onNote(courseId, notebookId, section) }} onReveal={(_courseId, noteId) => setRevealed(noteId)} />}
   </div>
+  return toolbar ? <div className="kt-workspace"><div className="kt-toolbar">{toolbar}{controls}</div>{scene}</div> : scene
 }

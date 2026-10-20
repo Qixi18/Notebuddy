@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { CourseTree, SectionRead } from '../../types'
 import type { Camera, CrossCourseRelation, ForestCourse } from '../forest/types'
 import type { SavedSlot } from './layout'
@@ -29,4 +30,5 @@ export type KnowledgeTreeSceneProps = {
   onNote: (courseId: string, notebookId: string, section: SectionRead) => void
   onRelation: (relation: CrossCourseRelation) => void
   className?: string
+  toolbar?: ReactNode
 }

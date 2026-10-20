@@ -9,7 +9,7 @@ import { NotebookPage } from '../src/pages/NotebookPage'
 vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getCourseTree: vi.fn(), getNotebookById: vi.fn(), getReadingPosition: vi.fn().mockResolvedValue(null), getNotebookChapter: vi.fn().mockResolvedValue({ sections: [] }), saveReadingPosition: vi.fn().mockResolvedValue({ revision: 1 }) } }))
 vi.mock('../src/features/notes/NoteSectionReader', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
 afterEach(() => { cleanup(); vi.restoreAllMocks(); sessionStorage.clear() })
-test('home leaf to another chapter retains return to the original home collection and camera', async () => {
+test('home leaf to another chapter retains return to the original fixed home collection', async () => {
   const section = { id: 'n1', notebook_id: 'book', material_id: 'm1', tree_slot: 0, title: '知识点' }
   const next = { ...section, id: 'n2', material_id: 'm2', tree_slot: 1, title: '下一讲知识点' }
   const book = { id: 'book', course_id: 'c0', title: '课程本', tree_slot: 0, order_revision: 0, chapters: [{ id: 'm1', title: '第一讲', sections: [section] }, { id: 'm2', title: '第二讲', sections: [next] }], historical_sections: [], removed_chapters: [] }
@@ -24,16 +24,16 @@ test('home leaf to another chapter retains return to the original home collectio
   }
   const { container } = render(<MemoryRouter><Fixture /></MemoryRouter>)
   await screen.findByRole('button', { name: '打开知识点：知识点' })
-  fireEvent.click(screen.getByRole('button', { name: '放大知识树' }))
+  expect(screen.queryByRole('button', { name: '放大知识树' })).toBeNull()
+  const saved = container.querySelector('.home-course-tree')!.getAttribute('viewBox')
   fireEvent.click(screen.getByRole('button', { name: '打开知识点：知识点' }))
-  const saved = JSON.parse(sessionStorage.getItem('notebuddy.scene.home:default')!).view.camera
   await screen.findByText('正文 n1')
   fireEvent.click(screen.getByRole('button', { name: '访问第四课' }))
   fireEvent.click(screen.getByRole('button', { name: '2. 第二讲' }))
   await screen.findByText('正文 n2')
   fireEvent.click(screen.getByRole('link', { name: /返回课程树/ }))
   await screen.findByRole('button', { name: '打开知识点：知识点' })
-  await waitFor(() => expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(`translate(${saved.x},${saved.y}) scale(${saved.k})`))
+  await waitFor(() => expect(container.querySelector('.home-course-tree')!.getAttribute('viewBox')).toBe(saved))
   expect(container.querySelector('[data-course-id="c3"]')).toBeNull()
   expect(container.querySelector('[data-course-id="c2"]')).toBeTruthy()
 })
