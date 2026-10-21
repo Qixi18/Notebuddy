@@ -1,0 +1,167 @@
+/* ============================================================================
+ * NoteBuddy · 候选设计 Token（提案，未接入生产）
+ * ----------------------------------------------------------------------------
+ * 配套文档：docs/design/ui-system-plan.md
+ * 接入方式：在 redesign.css 的 :root 之后引入本文件，或把 :root 段合并进去。
+ *
+ * 命名约定
+ *   --nb-ink-*      文字（前景）
+ *   --nb-line-*     轮廓线（装饰 / UI 边界 / 强边界 三档）
+ *   --nb-surface-*  表面（底色）
+ *   --nb-forest-*   主色阶 50→900
+ *   --nb-space-*    8px 基线间距
+ *   --nb-fs-*       字号刻度
+ *   --nb-lh-*       行高
+ *   --nb-ease-*     缓动
+ *   --nb-dur-*      时长
+ * ========================================================================== */
+
+:root {
+  /* ---------------------------------------------------------------- 文字 --
+   * 对比度为 WCAG 2.2 实测值（括号内为 on #ffffff）
+   * ink     14.87:1  正文
+   * muted    4.69:1  次要文字（原 #6f7b6f 仅 4.43:1，差 0.07 不达标）
+   * subtle   3.20:1  仅用于大字号或纯装饰文字
+   */
+  --nb-ink: #1f2a22;          /* 14.87:1 */
+  --nb-ink-muted: #6b776b;    /*  4.69:1  ← 原 #6f7b6f 4.43:1 */
+  --nb-ink-subtle: #8a948a;   /*  3.20:1  仅装饰 */
+  --nb-ink-inverse: #ffffff;
+
+  /* -------------------------------------------------------------- 轮廓线 --
+   * SC 1.4.11 非文字对比度：可交互组件边界需 ≥3:1
+   * decorative  纯装饰（分栏线、卡片分隔），不承载状态信息 → 可低对比
+   * ui          组件边界（输入框、按钮、可点击卡片）→ ≥3:1
+   * strong      焦点环 / 选中态边框 → ≥4.5:1
+   */
+  --nb-line-decorative: #e5e7e2;  /* 1.25:1  仅装饰 */
+  --nb-line-ui: #8a948a;           /* 3.14:1  组件边界 */
+  --nb-line-ui-strong: #7f8a7f;    /* 3.59:1 */
+  --nb-line-strong: #6b746b;       /* 4.84:1  焦点环 / 选中 */
+
+  /* -------------------------------------------------------------- 表面底色 */
+  --nb-surface: #ffffff;
+  --nb-surface-mist: #f5f7f3;
+  --nb-surface-rail: #e6eee0;      /* 左栏绿底 */
+  --nb-surface-sunken: #fbfbf6;
+  --nb-surface-overlay: #ffffff;
+
+  /* ------------------------------------------------------------ 主色阶 */
+  --nb-forest-50: #eef4ef;
+  --nb-forest-100: #dce9de;
+  --nb-forest-200: #bcd3c1;
+  --nb-forest-300: #93b79c;
+  --nb-forest-400: #6b9a78;        /* 3.22:1  最小可用的"图形色" */
+  --nb-forest-500: #4d8159;        /* 4.57:1 */
+  --nb-forest-600: #2f5d45;        /* 7.57:1  品牌主色 */
+  --nb-forest-700: #244c38;        /* 9.70:1  悬停/按压 */
+  --nb-forest-800: #1b3b2b;
+  --nb-forest-900: #13291e;
+
+  /* -------------------------------------------------------------- 语义色 */
+  --nb-success: #4f7d5d;           /* 4.85:1 */
+  --nb-warning: #a87828;           /* 3.52:1 */
+  --nb-danger: #a95d4c;            /* 4.31:1 */
+  --nb-info: #3d6a86;              /* 5.61:1 */
+
+  /* ------------------------------------------------------------ 字体族 --
+   * 三族必须分离。当前 --nb-serif / --nb-sans / --nb-mono 是同一个栈，
+   * 且首选的 Inter 未被加载（无 @font-face、无外链、系统未安装）→ 实际全落到雅黑。
+   * 建议自托管 woff2，见文档 §3.1。
+   */
+  --nb-font-sans: "Inter var", "Inter", "Source Han Sans SC", "Noto Sans SC",
+                  "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --nb-font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC",
+                   "SimSun", Georgia, serif;
+  --nb-font-mono: "JetBrains Mono", "Cascadia Mono", Consolas,
+                  "SFMono-Regular", monospace;
+
+  /* ------------------------------------------------------------ 字号刻度 --
+   * 从当前 45 档收敛为 7 档（8–11px 的 669 处使用全部并入 12px）
+   */
+  --nb-fs-12: 0.75rem;    /* 12px  辅助文字、时间戳、表格 */
+  --nb-fs-13: 0.8125rem;  /* 13px  次级控件、会话标题 */
+  --nb-fs-14: 0.875rem;   /* 14px  正文基准 */
+  --nb-fs-16: 1rem;       /* 16px  回答正文（移动端）、卡片标题 */
+  --nb-fs-20: 1.25rem;    /* 20px  区块标题 */
+  --nb-fs-24: 1.5rem;     /* 24px  页面标题 */
+  --nb-fs-32: 2rem;       /* 32px  空态 / 展示型数字 */
+
+  --nb-lh-tight: 1.35;    /* 标题 */
+  --nb-lh-snug: 1.5;      /* 控件 */
+  --nb-lh-normal: 1.65;   /* 正文 */
+  --nb-lh-prose: 1.9;     /* 长文阅读（回答正文） */
+
+  --nb-fw-regular: 400;
+  --nb-fw-medium: 500;
+  --nb-fw-semibold: 600;
+  --nb-fw-bold: 700;
+
+  /* ------------------------------------------------------------ 间距 8px 基线 */
+  --nb-space-1: 4px;
+  --nb-space-2: 8px;
+  --nb-space-3: 12px;
+  --nb-space-4: 16px;
+  --nb-space-5: 20px;
+  --nb-space-6: 24px;
+  --nb-space-8: 32px;
+  --nb-space-10: 40px;
+  --nb-space-12: 48px;
+
+  /* ---------------------------------------------------------------- 圆角 */
+  --nb-radius-sm: 6px;
+  --nb-radius-md: 9px;
+  --nb-radius-lg: 14px;
+  --nb-radius-xl: 18px;
+  --nb-radius-pill: 999px;
+
+  /* ---------------------------------------------------------------- 阴影 */
+  --nb-shadow-soft: 0 8px 24px rgba(31, 42, 34, 0.05);
+  --nb-shadow: 0 18px 50px rgba(31, 42, 34, 0.07);
+
+  /* ------------------------------------------------------------ 微交互 --
+   * 只动 transform / opacity；时长 120–240ms；超过 400ms 一律视为"移动"
+   */
+  --nb-dur-fast: 120ms;    /* 颜色 / 透明度 */
+  --nb-dur-base: 200ms;    /* 位移 / 缩放 */
+  --nb-dur-slow: 320ms;    /* 抽屉 / 大面板 */
+  --nb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --nb-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ------------------------------------------------------------ 触控尺寸 */
+  --nb-tap-min: 44px;      /* WCAG 2.5.8 目标尺寸最小值 */
+}
+
+/* ============================================================================
+ * 焦点可见性统一（WCAG 2.4.7 / 2.4.11）
+ * 现状：styles.css 用 3px solid #a9d2f5（蓝色），与绿色体系冲突且对比度不足。
+ * ========================================================================== */
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--nb-line-strong);
+  outline-offset: 2px;
+  border-radius: var(--nb-radius-sm);
+}
+
+/* ============================================================================
+ * 触控目标最小尺寸（仅指针设备，避免影响桌面密度）
+ * ========================================================================== */
+@media (pointer: coarse) {
+  :where(button, a[href], [role="button"]):not([data-keep-size]) {
+    min-height: var(--nb-tap-min);
+    min-width: var(--nb-tap-min);
+  }
+}
+
+/* ============================================================================
+ * 降低动效偏好
+ * ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
