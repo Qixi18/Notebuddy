@@ -7,10 +7,19 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.shared import ensure_course
 from app.db.database import get_db
-from app.db.models import Course, Material, Note, Notebook, NotebookReadingPosition, utc_now
+from app.db.models import (
+    Course,
+    Material,
+    Note,
+    Notebook,
+    NotebookReadingPosition,
+    UnboundNotebook,
+    utc_now,
+)
 from app.notes.notebook import default_notebook, list_course_notebooks, notebook_outline
 from app.schemas.notebook import (
     ChapterContentRead,
+    NotebookBindRequest,
     NotebookDocumentRead,
     NotebookDocumentUpdate,
     NotebookOrderUpdate,
@@ -19,9 +28,58 @@ from app.schemas.notebook import (
     NotebookTitleUpdate,
     ReadingPositionRead,
     ReadingPositionUpdate,
+    UnboundNotebookSummary,
 )
 
 router = APIRouter()
+
+
+@router.get("/notebooks/unbound", response_model=list[UnboundNotebookSummary])
+def list_unbound_notebooks(db: Session = Depends(get_db)):
+    books = db.scalars(select(UnboundNotebook).order_by(
+        UnboundNotebook.created_at.desc(), UnboundNotebook.id)).all()
+    return [{"id": book.id, "course_id": None, "title": book.title, "tree_slot": None,
+             "display_order": 0, "order_revision": 0, "is_default": False,
+             "created_at": book.created_at, "updated_at": book.updated_at} for book in books]
+
+
+@router.post("/notebooks/unbound", response_model=UnboundNotebookSummary, status_code=201)
+def create_unbound_notebook(payload: NotebookTitleUpdate, db: Session = Depends(get_db)):
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(422, "笔记名称不能为空")
+    book = UnboundNotebook(title=title)
+    db.add(book)
+    db.commit()
+    db.refresh(book)
+    return book
+
+
+@router.post("/notebooks/{notebook_id}/bind", response_model=NotebookSummary)
+def bind_notebook(notebook_id: str, payload: NotebookBindRequest, db: Session = Depends(get_db)):
+    course_id = payload.course_id
+    course = ensure_course(db, course_id)
+    claimed = db.execute(update(UnboundNotebook).where(
+        UnboundNotebook.id == notebook_id).values(title=UnboundNotebook.title))
+    if claimed.rowcount != 1:
+        raise HTTPException(404, "未绑定的笔记不存在")
+    book = db.get(UnboundNotebook, notebook_id)
+    if book is None:
+        raise HTTPException(404, "未绑定的笔记不存在")
+    # Lock the course row before assigning the next permanent branch slot.
+    db.execute(update(Course).where(Course.id == course_id).values(
+        notebook_order_revision=Course.notebook_order_revision))
+    slot = db.scalar(select(func.max(Notebook.tree_slot)).where(Notebook.course_id == course_id))
+    bound_book = Notebook(id=book.id, course_id=course.id, title=book.title,
+                          tree_slot=0 if slot is None else slot + 1,
+                          display_order=0 if slot is None else slot + 1,
+                          is_default=slot is None, document_json="[]", document_revision=0)
+    db.add(bound_book)
+    db.flush()
+    db.delete(book)
+    db.commit()
+    db.refresh(bound_book)
+    return bound_book
 
 
 def ensure_notebook(db: Session, course_id: str, notebook_id: str) -> Notebook:

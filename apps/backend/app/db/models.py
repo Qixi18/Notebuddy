@@ -111,6 +111,15 @@ class Notebook(Base):
     reading_position: Mapped[NotebookReadingPosition | None] = relationship(cascade="all, delete-orphan")
 
 
+class UnboundNotebook(Base):
+    __tablename__ = "unbound_notebooks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+
+
 class NotebookReadingPosition(Base):
     __tablename__ = "notebook_reading_positions"
     notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True)

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import type { UnboundNotebookSummary } from '../api/notebook'
 import { useWorkspace } from '../components/AppLayout'
 import type { Course, NotebookSummary } from '../types'
 import './CourseLibraryPage.css'
@@ -25,28 +26,33 @@ function NoteCover({ variant, courseName }: { variant: number; courseName: strin
 }
 
 export function CourseLibraryPage() {
-  const { courses, coursesLoading, createCourse } = useWorkspace()
+  const { courses, coursesLoading, createCourse, refreshCourses } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const [groups, setGroups] = useState<CourseNotes[]>([])
   const [notesLoading, setNotesLoading] = useState(true)
   const [query, setQuery] = useState('')
-  const [newNoteOpen, setNewNoteOpen] = useState(false)
-  const [selectedCourseId, setSelectedCourseId] = useState('')
-  const [newNoteName, setNewNoteName] = useState('')
-  const [creatingNote, setCreatingNote] = useState(false)
-  const [newNoteError, setNewNoteError] = useState<string>()
-  const [courseDialogOpen, setCourseDialogOpen] = useState(false)
+  const [coursePopoverOpen, setCoursePopoverOpen] = useState(false)
   const [courseName, setCourseName] = useState('')
   const [creatingCourse, setCreatingCourse] = useState(false)
   const [createError, setCreateError] = useState<string>()
+  const [notePopoverOpen, setNotePopoverOpen] = useState(false)
+  const [noteName, setNoteName] = useState('')
+  const [creatingNote, setCreatingNote] = useState(false)
+  const [noteError, setNoteError] = useState<string>()
+  const [unboundNotes, setUnboundNotes] = useState<UnboundNotebookSummary[]>([])
+  const [bindNote, setBindNote] = useState<UnboundNotebookSummary>()
+  const [bindCourseId, setBindCourseId] = useState('')
+  const [bindingNote, setBindingNote] = useState(false)
+  const [bindError, setBindError] = useState<string>()
+  const createAreaRef = useRef<HTMLDivElement>(null)
 
   // 继续承接侧边栏已有的「新建课程」入口。
   useEffect(() => {
     const state = location.state as { openCreateCourse?: boolean } | null
     if (!state?.openCreateCourse) return
     setCreateError(undefined)
-    setCourseDialogOpen(true)
+    setCoursePopoverOpen(true)
     navigate('/courses', { replace: true, state: null })
   }, [location.state, navigate])
 
@@ -54,24 +60,41 @@ export function CourseLibraryPage() {
     if (coursesLoading) return
     let active = true
     setNotesLoading(true)
-    void Promise.all(courses.map(async (course): Promise<CourseNotes> => {
+    void Promise.all([
+      Promise.all(courses.map(async (course): Promise<CourseNotes> => {
       try { return { course, notes: await api.listNotebooks(course.id) } }
       catch (cause) { return { course, notes: [], error: cause instanceof Error ? cause.message : '笔记读取失败' } }
-    })).then((result) => { if (active) setGroups(result) })
+      })),
+      api.listUnboundNotebooks().catch((): UnboundNotebookSummary[] => []),
+    ]).then(([result, unbound]) => { if (active) { setGroups(result); setUnboundNotes(unbound) } })
       .finally(() => { if (active) setNotesLoading(false) })
     return () => { active = false }
   }, [courses, coursesLoading])
 
   useEffect(() => {
-    if (!newNoteOpen && !courseDialogOpen) return
-    function onEscape(event: KeyboardEvent) {
+    if (!coursePopoverOpen && !notePopoverOpen && !bindNote) return
+    function onEscape(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape') return
-      if (!creatingNote) setNewNoteOpen(false)
-      if (!creatingCourse) setCourseDialogOpen(false)
+      if (bindNote && !bindingNote) setBindNote(undefined)
+      else if (notePopoverOpen && !creatingNote) setNotePopoverOpen(false)
+      else if (coursePopoverOpen && !creatingCourse) setCoursePopoverOpen(false)
     }
     window.addEventListener('keydown', onEscape)
     return () => window.removeEventListener('keydown', onEscape)
-  }, [newNoteOpen, courseDialogOpen, creatingCourse, creatingNote])
+  }, [bindNote, bindingNote, coursePopoverOpen, creatingCourse, notePopoverOpen, creatingNote])
+
+  useEffect(() => {
+    if (!coursePopoverOpen && !notePopoverOpen) return
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (createAreaRef.current?.contains(target)) return
+      setCoursePopoverOpen(false)
+      setNotePopoverOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [coursePopoverOpen, notePopoverOpen])
 
   const visibleGroups = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase()
@@ -83,27 +106,10 @@ export function CourseLibraryPage() {
     })).filter(({ course, notes }) => !needle || course.name.toLocaleLowerCase().includes(needle) || notes.length > 0)
   }, [groups, query])
 
-  function openNewNote() {
-    if (!courses.length) { setCourseDialogOpen(true); return }
-    setSelectedCourseId((current) => current || courses[0]?.id || '')
-    setNewNoteError(undefined)
-    setNewNoteOpen(true)
-  }
-
-  async function handleCreateNote(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!selectedCourseId || !newNoteName.trim() || creatingNote) return
-    setCreatingNote(true)
-    setNewNoteError(undefined)
-    try {
-      const notebook = await api.createNotebook(selectedCourseId, newNoteName.trim())
-      setNewNoteOpen(false)
-      setNewNoteName('')
-      navigate(`/courses/${selectedCourseId}/notebooks/${notebook.id}`)
-    } catch (cause) {
-      setNewNoteError(cause instanceof Error ? cause.message : '笔记创建失败，请重试。')
-    } finally { setCreatingNote(false) }
-  }
+  const visibleUnboundNotes = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase()
+    return unboundNotes.filter((note) => !needle || note.title.toLocaleLowerCase().includes(needle))
+  }, [unboundNotes, query])
 
   async function handleCreateCourse(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -111,13 +117,59 @@ export function CourseLibraryPage() {
     setCreatingCourse(true)
     setCreateError(undefined)
     try {
-      const course = await createCourse(courseName.trim())
-      setCourseDialogOpen(false)
+      await createCourse(courseName.trim())
+      await refreshCourses()
+      setCoursePopoverOpen(false)
       setCourseName('')
-      navigate(`/courses/${course.id}`)
     } catch (cause) {
       setCreateError(cause instanceof Error ? cause.message : '课程创建失败，请重试。')
     } finally { setCreatingCourse(false) }
+  }
+
+  function openCreateCourse() {
+    setNotePopoverOpen(false)
+    setCreateError(undefined)
+    if (coursePopoverOpen) setCoursePopoverOpen(false)
+    else setCoursePopoverOpen(true)
+  }
+
+  function openCreateNote() {
+    setCoursePopoverOpen(false)
+    if (notePopoverOpen) setNotePopoverOpen(false)
+    else { setNoteName(''); setNoteError(undefined); setNotePopoverOpen(true) }
+  }
+
+  async function handleCreateNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!noteName.trim() || creatingNote) return
+    setCreatingNote(true)
+    setNoteError(undefined)
+    try {
+      const notebook = await api.createUnboundNotebook(noteName.trim())
+      setUnboundNotes((current) => [notebook, ...current])
+      setNotePopoverOpen(false)
+      setNoteName('')
+    } catch (cause) {
+      setNoteError(cause instanceof Error ? cause.message : '笔记创建失败，请重试。')
+    } finally { setCreatingNote(false) }
+  }
+
+  async function handleBindNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!bindNote || !bindCourseId || bindingNote) return
+    setBindingNote(true)
+    setBindError(undefined)
+    try {
+      const bound = await api.bindNotebook(bindNote.id, bindCourseId)
+      setUnboundNotes((current) => current.filter((note) => note.id !== bindNote.id))
+      setGroups((current) => current.map((group) => group.course.id === bindCourseId
+        ? { ...group, notes: [...group.notes, bound] }
+        : group))
+      setBindNote(undefined)
+      navigate(`/courses/${bindCourseId}/notebooks/${bound.id}`)
+    } catch (cause) {
+      setBindError(cause instanceof Error ? cause.message : '绑定失败，请重试。')
+    } finally { setBindingNote(false) }
   }
 
   return (
@@ -127,7 +179,22 @@ export function CourseLibraryPage() {
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.8" cy="10.8" r="7.1" /><path d="m16 16 5 5" /></svg>
           <input value={query} onChange={(event) => setQuery(event.target.value)} type="search" aria-label="搜索笔记或课程" placeholder="搜索笔记或课程…" />
         </label>
-        <button className="course-notes-new" type="button" onClick={openNewNote}><span aria-hidden="true">＋</span> 新建笔记</button>
+        <div className="course-notes-create" ref={createAreaRef}>
+          <button className="course-notes-create-trigger course-notes-create-secondary" type="button" onClick={openCreateCourse} aria-expanded={coursePopoverOpen}>新建课程</button>
+          <button className="course-notes-create-trigger" type="button" onClick={openCreateNote} aria-expanded={notePopoverOpen}><span aria-hidden="true">＋</span> 新建笔记</button>
+          {coursePopoverOpen && <form className="course-notes-create-popover" onSubmit={(event) => void handleCreateCourse(event)}>
+            <label htmlFor="course-notes-create-name">课程名称</label>
+            <input id="course-notes-create-name" autoFocus value={courseName} onChange={(event) => setCourseName(event.target.value)} placeholder="例如：数学分析" maxLength={120} />
+            {createError && <p className="course-notes-error" role="alert">{createError}</p>}
+            <button className="course-notes-dialog-submit" type="submit" disabled={!courseName.trim() || creatingCourse}>{creatingCourse ? '正在创建…' : '确认新建'}</button>
+          </form>}
+          {notePopoverOpen && <form className="course-notes-create-popover" onSubmit={(event) => void handleCreateNote(event)}>
+            <label htmlFor="course-notes-create-note-name">笔记名称</label>
+            <input id="course-notes-create-note-name" autoFocus value={noteName} onChange={(event) => setNoteName(event.target.value)} placeholder="例如：一元微积分" maxLength={120} />
+            {noteError && <p className="course-notes-error" role="alert">{noteError}</p>}
+            <button className="course-notes-dialog-submit" type="submit" disabled={!noteName.trim() || creatingNote}>{creatingNote ? '正在创建…' : '确认新建'}</button>
+          </form>}
+        </div>
       </div>
 
       {coursesLoading || notesLoading ? (
@@ -135,10 +202,10 @@ export function CourseLibraryPage() {
           <span className="course-notes-loading-title" />
           <div className="course-notes-loading-grid">{[0, 1, 2].map((item) => <span key={item} />)}</div>
         </div>
-      ) : courses.length === 0 ? (
-        <div className="course-notes-empty"><h2>还没有课程</h2><p>先创建一门课程，再开始第一篇笔记。</p><button type="button" onClick={() => setCourseDialogOpen(true)}>新建课程</button></div>
-      ) : visibleGroups.length === 0 ? (
+      ) : visibleGroups.length === 0 && visibleUnboundNotes.length === 0 && query.trim() ? (
         <div className="course-notes-empty"><h2>没有找到相关笔记</h2><p>试试其他笔记名称或课程名称。</p></div>
+      ) : visibleGroups.length === 0 && visibleUnboundNotes.length === 0 ? (
+        <div className="course-notes-empty"><h2>还没有课程</h2><p>创建课程，或先新建一篇空白笔记。</p><button type="button" onClick={openCreateCourse}>新建课程</button></div>
       ) : (
         <div className="course-notes-groups">
           {visibleGroups.map(({ course, notes, error }, groupIndex) => (
@@ -159,40 +226,31 @@ export function CourseLibraryPage() {
               ) : <p className="course-notes-group-empty">这门课程还没有笔记。</p>}
             </section>
           ))}
+          {visibleUnboundNotes.length > 0 && <section className="course-notes-group" aria-labelledby="course-notes-unbound">
+            <div className="course-notes-group-heading"><h2 id="course-notes-unbound">未绑定课程</h2><span>{visibleUnboundNotes.length} 篇笔记</span></div>
+            <div className="course-notes-grid">
+              {visibleUnboundNotes.map((note, noteIndex) => <article className="course-note-card course-note-card-unbound" key={note.id}>
+                <NoteCover variant={noteIndex} courseName="" />
+                <strong title={note.title}>{note.title}</strong>
+                <button type="button" onClick={() => { setBindNote(note); setBindCourseId(courses[0]?.id ?? ''); setBindError(undefined) }} disabled={!courses.length} aria-label={`为“${note.title}”绑定课程`}>绑定课程</button>
+              </article>)}
+            </div>
+          </section>}
         </div>
       )}
-
-      {newNoteOpen && (
-        <div className="course-notes-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !creatingNote) setNewNoteOpen(false) }}>
-          <section className="course-notes-dialog" role="dialog" aria-modal="true" aria-labelledby="course-notes-new-title">
-            <button className="course-notes-dialog-close" type="button" onClick={() => setNewNoteOpen(false)} disabled={creatingNote} aria-label="关闭">×</button>
-            <h2 id="course-notes-new-title">新建笔记</h2>
-            <p>为笔记命名并选择所属课程，创建后可以继续添加课件和内容。</p>
-            <form onSubmit={(event) => void handleCreateNote(event)}>
-              <label htmlFor="course-notes-course">所属课程</label>
-              <select id="course-notes-course" value={selectedCourseId} onChange={(event) => setSelectedCourseId(event.target.value)}>
+      {bindNote && (
+        <div className="course-notes-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !bindingNote) setBindNote(undefined) }}>
+          <section className="course-notes-dialog" role="dialog" aria-modal="true" aria-labelledby="course-notes-bind-title">
+            <button className="course-notes-dialog-close" type="button" onClick={() => setBindNote(undefined)} disabled={bindingNote} aria-label="关闭">×</button>
+            <h2 id="course-notes-bind-title">绑定课程</h2>
+            <p>为“{bindNote.title}”选择一门课程。</p>
+            <form onSubmit={(event) => void handleBindNote(event)}>
+              <label htmlFor="course-notes-bind-course">所属课程</label>
+              <select id="course-notes-bind-course" value={bindCourseId} onChange={(event) => setBindCourseId(event.target.value)}>
                 {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
               </select>
-              <label htmlFor="course-notes-new-name">笔记名称</label>
-              <input id="course-notes-new-name" autoFocus value={newNoteName} onChange={(event) => setNewNoteName(event.target.value)} placeholder="例如：一元微积分" maxLength={120} />
-              {newNoteError && <p className="course-notes-error" role="alert">{newNoteError}</p>}
-              <button className="course-notes-dialog-submit" type="submit" disabled={!selectedCourseId || !newNoteName.trim() || creatingNote}>{creatingNote ? '正在创建…' : '创建并打开'}</button>
-            </form>
-          </section>
-        </div>
-      )}
-
-      {courseDialogOpen && (
-        <div className="course-notes-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !creatingCourse) setCourseDialogOpen(false) }}>
-          <section className="course-notes-dialog" role="dialog" aria-modal="true" aria-labelledby="course-notes-create-course-title">
-            <button className="course-notes-dialog-close" type="button" onClick={() => setCourseDialogOpen(false)} disabled={creatingCourse} aria-label="关闭">×</button>
-            <h2 id="course-notes-create-course-title">新建课程</h2>
-            <p>先创建课程，再添加课件与笔记。</p>
-            <form onSubmit={(event) => void handleCreateCourse(event)}>
-              <label htmlFor="course-notes-create-name">课程名称</label>
-              <input id="course-notes-create-name" autoFocus value={courseName} onChange={(event) => setCourseName(event.target.value)} placeholder="例如：数学分析" maxLength={120} />
-              {createError && <p className="course-notes-error" role="alert">{createError}</p>}
-              <button className="course-notes-dialog-submit" type="submit" disabled={!courseName.trim() || creatingCourse}>{creatingCourse ? '正在创建…' : '创建并打开'}</button>
+              {bindError && <p className="course-notes-error" role="alert">{bindError}</p>}
+              <button className="course-notes-dialog-submit" type="submit" disabled={!bindCourseId || bindingNote}>{bindingNote ? '正在绑定…' : '确认绑定'}</button>
             </form>
           </section>
         </div>

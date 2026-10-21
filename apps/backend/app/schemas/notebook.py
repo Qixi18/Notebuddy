@@ -43,6 +43,24 @@ class NotebookSummary(BaseModel):
     updated_at: datetime
 
 
+class UnboundNotebookSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    course_id: str | None = None
+    title: str
+    tree_slot: int | None = None
+    display_order: int = 0
+    order_revision: int = 0
+    is_default: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class NotebookBindRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    course_id: str = Field(min_length=1, max_length=36)
+
+
 class NotebookTitleUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
