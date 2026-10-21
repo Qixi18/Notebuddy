@@ -433,6 +433,12 @@ class Conversation(Base):
     course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(300), default="新对话", nullable=False)
     default_scope: Mapped[str] = mapped_column(String(30), default="course", nullable=False)
+    # 会话归属：course（整门课程）/ global（跨课程）/ note（锁定某篇笔记）。
+    # 首次提问时确定，之后同一会话内改范围不搬家，避免历史列表跳动。
+    scope: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # 仅 scope='note' 时写入，存笔记 id 与标题快照（笔记改名不回溯历史）。
+    note_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    note_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
