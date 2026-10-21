@@ -7,6 +7,7 @@ import 'katex/dist/katex.min.css'
 import './styles.css'
 import './redesign.css'
 import './course-assistant.css'
+import './assistant-workspace.css'
 
 const router = createBrowserRouter([{ path: '*', element: <App /> }])
 

@@ -1901,7 +1901,7 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 /* 流式回答：正文逐字出现，末尾光标闪烁 */
 .assistant-dock-live { border-radius: 8px; }
 .assistant-dock-streaming { position: relative; }
-.assistant-dock-streaming .assistant-dock-cursor { display: inline-block; width: 7px; height: 14px; margin-left: 2px; vertical-align: -2px; background: #4c7a55; animation: agent-cursor-blink .9s steps(1) infinite; }
+.assistant-dock-cursor { display: inline-block; width: 7px; height: 14px; margin-left: 2px; vertical-align: -2px; background: #4c7a55; animation: agent-cursor-blink .9s steps(1) infinite; }
 @keyframes agent-cursor-blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
 .assistant-dock-agent-notice { margin: 0 0 6px; padding: 5px 8px; border-radius: 7px; color: #8a6d3b; background: #faf3e3; font-size: 11px; }
 /* 建议-确认卡片：笔记修改建议（可采纳/忽略）与知识节点提议（信息卡） */
@@ -1927,6 +1927,9 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .agent-diff-same { color: #9aa398; }
 .agent-diff-removed { color: #8c3d33; background: #fbe9e7; }
 .agent-diff-added { color: #2f5e3f; background: #e8f4e4; }
+/* 增删符号：+ 绿 / − 红。用 ::before 画，不进 DOM，行文本保持纯内容 */
+.agent-diff-added::before { content: '+'; font-weight: 700; color: #1d6b3c; margin-right: 4px; }
+.agent-diff-removed::before { content: '−'; font-weight: 700; color: #a3291c; margin-right: 4px; }
 .agent-card-adopted { border-color: #cfe3d2; background: #f2f8f1; }
 /* 笔记原位建议：红删绿增直接嵌在阅读视图正文区 */
 .note-inline-suggestions { display: grid; gap: 10px; }

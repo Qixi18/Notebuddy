@@ -9,6 +9,7 @@ import type { Material } from '../../types'
 import { teacherPersonaMeta } from '../persona/personas'
 import { modeLabelsShort } from './answerMeta'
 import { AgentSteps } from './AgentSteps'
+import { useNoteSuggestions } from './useNoteSuggestions'
 import { AssistantMessageMarkdown, AssistantMessageSource } from './AssistantMessageContent'
 import { KnowledgeProposalCards, NoteSuggestionCards, type PendingNoteSuggestion } from './AgentCards'
 
@@ -72,10 +73,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const [ownMaterials, setOwnMaterials] = useState<Material[]>([])
   const [writeBackBusy, setWriteBackBusy] = useState(false)
   const [writeBackNotice, setWriteBackNotice] = useState<string>()
-  const [pendingSuggestions, setPendingSuggestions] = useState<PendingNoteSuggestion[]>([])
-  const [pendingBusyId, setPendingBusyId] = useState<string>()
   /** 已采纳建议 id → 采纳前正文（一键撤销用） */
-  const [adoptedContents, setAdoptedContents] = useState<Record<string, string>>({})
   const messagesRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -124,6 +122,8 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const lastMessage = messages[messages.length - 1]
   const lastAnswer = [...messages].reverse().find((message) => message.role === 'assistant' && message.id !== 'local-greeting')
   const hasAsked = messages.some((message) => message.role === 'user')
+  /* 范围锁定：会话已有真实问答后，后端不再按本轮改 scope（api/v1/agent.py:91 只在首轮落库） */
+  const scopeLocked = conversation.hasMessages === true
   const streamingTextLength = conversation.agentRun?.streamingText.length ?? 0
   const bottomKey = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.busy}:${streamingTextLength}:${conversation.agentRun?.steps.length ?? 0}`
 
@@ -206,69 +206,15 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
     if (!await conversation.askAgent(text, { scope, materialId: agentMaterialId, readingContext })) setDraft(text)
   }
 
-  /* 当前笔记的待确认建议：打开笔记或 agent 产出新建议后刷新；建议持久化在服务端，重开悬浮坞仍在 */
+  /* 当前笔记的待确认建议：打开笔记或 agent 产出新建议后刷新；建议持久化在服务端，重开悬浮坞仍在。
+     建议状态机与答疑页共用 useNoteSuggestions，两条入口的写入逻辑不会漂移。 */
   const lastAgentFinalId = conversation.agentRun?.final?.message_id
-  useEffect(() => {
-    if (!selectedNote || !notePath) { setPendingSuggestions([]); return }
-    let active = true
-    api.listSuggestions(selectedNote.id)
-      .then((items) => {
-        if (active) setPendingSuggestions(items.filter((item) => item.status === 'pending') as PendingNoteSuggestion[])
-      })
-      .catch(() => { if (active) setPendingSuggestions([]) })
-    return () => { active = false }
-  }, [selectedNote, notePath, lastAgentFinalId])
-
-  /* 建议-确认：采纳走现有 review 接口（可携带逐块勾选后的最终正文）；忽略只标记状态。
-     采纳成功后卡片保留「撤销本次 AI 改动」，撤销 = 回写采纳前正文 */
-  async function reviewPending(suggestion: PendingNoteSuggestion, decision: 'confirm' | 'reject', finalMarkdown?: string) {
-    setPendingBusyId(suggestion.id)
-    setWriteBackNotice(undefined)
-    const beforeContent = selectedNote?.content_markdown ?? ''
-    try {
-      await api.reviewSuggestion(suggestion.note_id, suggestion.id, decision, undefined, finalMarkdown)
-      if (decision === 'confirm') {
-        setAdoptedContents((current) => ({ ...current, [suggestion.id]: beforeContent }))
-        await refreshCurrentNotes()
-        const partial = finalMarkdown !== undefined && finalMarkdown !== suggestion.proposed_markdown
-        setWriteBackNotice(`已${partial ? '部分采纳' : '采纳'}建议，《${selectedNote?.title ?? '笔记'}》已更新，可在修订历史中回退。`)
-      } else {
-        setPendingSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
-        setWriteBackNotice('已忽略该建议。')
-      }
-    } catch (cause) {
-      setWriteBackNotice(cause instanceof ApiError && cause.status === 409
-        ? '这条建议已处理或笔记刚更新过。'
-        : cause instanceof Error ? cause.message : '处理建议失败')
-    } finally {
-      setPendingBusyId(undefined)
-    }
-  }
-
-  /* 撤销本次 AI 改动：回写采纳前正文；期间笔记被改过则 409 提示刷新 */
-  async function undoAdoption(suggestion: PendingNoteSuggestion) {
-    const beforeContent = adoptedContents[suggestion.id]
-    if (!selectedNote || beforeContent === undefined) return
-    setPendingBusyId(suggestion.id)
-    setWriteBackNotice(undefined)
-    try {
-      await api.updateNote(suggestion.note_id, beforeContent, selectedNote.revision_number)
-      await refreshCurrentNotes()
-      setAdoptedContents((current) => {
-        const next = { ...current }
-        delete next[suggestion.id]
-        return next
-      })
-      setPendingSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
-      setWriteBackNotice(`已撤销本次 AI 改动，《${selectedNote.title}》恢复到采纳前内容。`)
-    } catch (cause) {
-      setWriteBackNotice(cause instanceof ApiError && cause.status === 409
-        ? '笔记刚在别处更新过，请刷新笔记后再撤销。'
-        : cause instanceof Error ? cause.message : '撤销失败')
-    } finally {
-      setPendingBusyId(undefined)
-    }
-  }
+  const noteSuggestions = useNoteSuggestions({
+    noteId: notePath ? selectedNote?.id : undefined,
+    note: selectedNote,
+    refreshNotes: refreshCurrentNotes,
+    agentFinalId: lastAgentFinalId,
+  })
 
   /* 回写：只追加、绝不覆盖原文；编辑器里有未保存改动时直接禁用，避免把用户的字冲掉 */
   const canWriteBack = Boolean(selectedNote && lastAnswer && notePath && !noteDirty && !noteSaving) && !writeBackBusy
@@ -339,12 +285,18 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
 
           <label className="assistant-dock-scope">作用范围
             <select value={scopeChoice} onChange={(event) => setScopeChoice(event.target.value)} aria-label="本次提问的作用范围">
-              {canLockNote && selectedNote ? <option value="__note__">📌 锁定当前笔记《{selectedNote.title}》</option> : null}
-              <option value="">整门课程</option>
+              {/* 范围是会话级属性：首条消息之后后端不再改写 scope，
+                  所以这三档在会话开始提问后就禁用，避免「标签变了、回答范围没变」。
+                  课件收窄是消息级参数（material_id 只校验不锁定），保持可选。 */}
+              {canLockNote && selectedNote ? <option value="__note__" disabled={scopeLocked}>📌 锁定当前笔记《{selectedNote.title}》</option> : null}
+              <option value="" disabled={scopeLocked}>整门课程</option>
               {scopeMaterials.map((material) => <option key={material.id} value={material.id}>{material.lecture_title}</option>)}
-              <option value="__global__">🌲 全局可查（跨课程）</option>
+              <option value="__global__" disabled={scopeLocked}>🌲 全局可查（跨课程）</option>
             </select>
           </label>
+          {scopeLocked ? (
+            <p className="assistant-dock-scope-lock" role="status">🔒 范围已锁定（首条消息后不能改）；仍可限定到某份课件。</p>
+          ) : null}
           {!canLockNote ? (
             <p className="assistant-dock-open-hint">想让我直接读写某一篇笔记？先进入「课程笔记本」，在目录里点开一个具体小节（即“打开笔记”），这里就会出现「锁定当前笔记」选项。</p>
           ) : null}
@@ -388,16 +340,17 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 ))}
               </div>
             )}
-            {/* agent 执行中的实时块：步骤时间线 + 流式回答；final 到达后由历史消息接管，不再重复展示 */}
+            {/* agent 执行中的实时块：步骤时间线 + 流式回答；final 到达后由历史消息接管，不再重复展示。
+                被用户中断时保留已收到的正文，但标题改成「已中断」，不再假装还在执行。 */}
             {conversation.agentRun && !conversation.agentRun.final ? (
-              <article className="assistant-dock-message assistant-dock-message-assistant assistant-dock-live">
-                <small>{persona.name}</small>
+              <article className={`assistant-dock-message assistant-dock-message-assistant assistant-dock-live${conversation.agentRun.aborted ? ' is-aborted' : ''}`}>
+                <small>{conversation.agentRun.aborted ? `${persona.name} · 已中断` : persona.name}</small>
                 <AgentSteps steps={conversation.agentRun.steps} />
                 {conversation.agentRun.notice ? <p className="assistant-dock-agent-notice">{conversation.agentRun.notice}</p> : null}
                 {conversation.agentRun.streamingText ? (
                   <div className="assistant-dock-answer assistant-dock-streaming">
                     <AssistantMessageMarkdown content={conversation.agentRun.streamingText} />
-                    <span className="assistant-dock-cursor" aria-hidden="true" />
+                    {conversation.agentRun.aborted ? null : <span className="assistant-dock-cursor" aria-hidden="true" />}
                   </div>
                 ) : null}
               </article>
@@ -410,12 +363,12 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
             />
           ) : null}
           <NoteSuggestionCards
-            suggestions={pendingSuggestions}
+            suggestions={noteSuggestions.suggestions}
             currentContent={selectedNote?.content_markdown ?? ''}
-            busyId={pendingBusyId}
-            adoptedContents={adoptedContents}
-            onReview={(suggestion, decision, finalMarkdown) => void reviewPending(suggestion, decision, finalMarkdown)}
-            onUndo={(suggestion) => void undoAdoption(suggestion)}
+            busyId={noteSuggestions.busyId}
+            adoptedContents={noteSuggestions.adopted}
+            onReview={(suggestion, decision, finalMarkdown) => void noteSuggestions.review(suggestion, decision, finalMarkdown)}
+            onUndo={(suggestion) => void noteSuggestions.undo(suggestion)}
           />
 
           {hasAsked && <div className="assistant-dock-quick">
@@ -430,14 +383,18 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
             <div className="assistant-dock-actions">
               <button type="button" className="assistant-dock-ghost" disabled={conversation.busy} onClick={() => { setWriteBackNotice(undefined); void conversation.startNewConversation() }}>新建对话</button>
               <button type="button" className="assistant-dock-ghost" disabled={!canWriteBack} title={writeBackHint} onClick={() => void writeBackToNote()}>{writeBackBusy ? '写入中…' : '写入当前笔记'}</button>
-              <button type="submit" className="assistant-dock-send" disabled={!draft.trim() || conversation.busy}>{conversation.busy ? '思考中…' : '发送'}</button>
+              {conversation.busy ? (
+                <button type="button" className="assistant-dock-stop" onClick={() => conversation.stopAgent?.()}>停止</button>
+              ) : (
+                <button type="submit" className="assistant-dock-send" disabled={!draft.trim()}>发送</button>
+              )}
             </div>
             <div className="assistant-dock-links"><Link to={featurePath(conversationCourseId, 'assistant')}>打开完整答疑</Link></div>
           </form>
 
-          {(writeBackNotice || conversation.error) && (
-            <p className={`assistant-dock-status${writeBackNotice && !conversation.error ? '' : ' assistant-dock-status-error'}`} role="status">
-              {conversation.error ?? writeBackNotice}
+          {(writeBackNotice || noteSuggestions.notice || conversation.error) && (
+            <p className={`assistant-dock-status${(writeBackNotice || noteSuggestions.notice) && !conversation.error ? '' : ' assistant-dock-status-error'}`} role="status">
+              {conversation.error ?? writeBackNotice ?? noteSuggestions.notice}
             </p>
           )}
         </>
