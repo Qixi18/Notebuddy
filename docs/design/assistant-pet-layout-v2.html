@@ -1,0 +1,1466 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>答疑桌宠 · 布局方案 v2（效果示意）</title>
+<style>
+  /* ============ 设计令牌：与 apps/web/src/redesign.css 对齐 ============ */
+  :root {
+    --white: #ffffff;
+    --mist: #f5f7f3;
+    --ink: #1f2a22;
+    --muted: #6f7b6f;
+    --line: #e5e7e2;
+    --forest: #2f5d45;
+    --forest-deep: #244c38;
+    --sage: #8fa98c;
+    --clay: #b2684a;
+    --wheat: #e6d5b4;
+    --serif: "Songti SC", "SimSun", "Noto Serif SC", "Source Han Serif SC", serif;
+    --sans: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+    --mono: "Cascadia Mono", "Consolas", monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: #eef1ec;
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ============ 画布外框 ============ */
+  .page-head {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 26px 36px 14px;
+    display: flex;
+    align-items: flex-end;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .page-head h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .page-head p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .page-head .badge {
+    display: inline-flex;
+    align-items: center;
+    height: 22px;
+    padding: 0 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--white);
+    color: var(--forest);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+  }
+  .head-meta { display: flex; gap: 10px; align-items: center; margin-left: auto; }
+
+  .board { display: flex; justify-content: center; padding: 0 36px 40px; }
+  .frame { position: relative; }
+
+  .canvas {
+    position: relative;
+    width: 1440px;
+    height: 920px;
+    display: grid;
+    grid-template-columns: 236px minmax(0, 1fr);
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    transform-origin: top left;
+    box-shadow: 0 30px 80px rgba(31, 42, 34, 0.13);
+  }
+
+  /* ============ 左侧全局导航 ============ */
+  .appnav {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--line);
+    padding: 16px 12px 14px;
+    background: var(--white);
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 16px; }
+  .brand-mark {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--mist);
+    color: var(--forest);
+  }
+  .brand-name { font-family: var(--serif); font-size: 15px; font-weight: 600; letter-spacing: 0.01em; }
+  .nav-label {
+    padding: 0 10px 6px;
+    color: #9aa79a;
+    font-size: 9.5px;
+    letter-spacing: 0.16em;
+  }
+  .nav { display: grid; gap: 2px; }
+  .nav a {
+    display: flex; align-items: center; gap: 10px;
+    height: 36px; padding: 0 10px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 12.5px;
+    text-decoration: none;
+  }
+  .nav a:hover { background: var(--mist); color: var(--forest); }
+  .nav a.active {
+    background: #eef3ec;
+    color: var(--forest);
+    font-weight: 600;
+    box-shadow: inset 2px 0 0 var(--forest);
+  }
+  .nav a .ic { display: grid; place-items: center; width: 16px; opacity: 0.8; }
+  .nav-sep { height: 1px; background: var(--line); margin: 14px 8px; }
+  .course-link {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 8px;
+    color: var(--muted); font-size: 12px; text-decoration: none;
+  }
+  .course-link .dot-course { width: 6px; height: 6px; border-radius: 50%; background: var(--sage); flex: none; }
+  .course-link.active { background: var(--mist); color: var(--ink); font-weight: 600; }
+  .nav-foot { margin-top: auto; padding: 10px 8px 0; border-top: 1px solid var(--line); }
+
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+  /* ============ 顶栏 ============ */
+  .topbar {
+    position: relative;
+    flex: none;
+    height: 60px;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--white);
+  }
+  .crumb { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .crumb b { color: var(--ink); font-weight: 600; }
+  .crumb .sep { color: #c3ccc0; }
+  .topbar .spacer { flex: 1; }
+  .icon-btn {
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: none;
+    color: var(--muted);
+  }
+  .icon-btn:hover { background: var(--mist); border-color: var(--line); color: var(--forest); }
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 34px; padding: 0 13px;
+    border: 0; border-radius: 8px;
+    background: var(--forest); color: #fff;
+    font-size: 12px; letter-spacing: 0.01em;
+  }
+  .btn-primary:hover { background: var(--forest-deep); }
+  .avatar-top {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--mist); border: 1px solid var(--line);
+    display: grid; place-items: center;
+    font-family: var(--serif); font-size: 12px; color: var(--forest);
+  }
+
+  /* ============ 三栏工作区 ============ */
+  .workspace {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 252px minmax(0, 1fr) 320px;
+  }
+
+  /* ---- 左栏：桌宠书房 ---- */
+  .rail {
+    position: relative;
+    display: flex; flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--line);
+    background: linear-gradient(180deg, #ffffff 0%, #fdfefc 100%);
+  }
+  .pet-stage {
+    position: relative;
+    height: 216px;
+    margin-top: 6px;
+    display: grid; place-items: end center;
+    overflow: hidden;
+  }
+  .pet-stage::before {
+    content: "";
+    position: absolute;
+    bottom: 18px;
+    width: 150px; height: 150px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 38%, #f1f6ee 0%, #e6eee4 68%, #e2ebe0 100%);
+  }
+  .pet-ripple {
+    position: absolute; bottom: 10px;
+    width: 120px; height: 15px;
+    border: 1px solid #d8e1d5;
+    border-radius: 50%;
+  }
+  .pet-sprite {
+    position: relative; z-index: 1;
+    height: 158px;
+    aspect-ratio: 720 / 960;
+    background-image:
+      url("../../apps/web/public/assets/teacher/teacher-idle-sheet.webp"),
+      radial-gradient(circle at 50% 60%, rgba(143, 169, 140, 0.18), rgba(143, 169, 140, 0) 70%);
+    background-size: 1000% 600%, contain;
+    background-position: 0 0, center bottom;
+    background-repeat: no-repeat;
+  }
+  .pet-say {
+    position: absolute;
+    z-index: 3;
+    top: 2px; left: 14px; right: 14px;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--white);
+    color: #4a574c;
+    font-size: 11px;
+    line-height: 1.55;
+    box-shadow: 0 10px 22px rgba(31, 42, 34, 0.07);
+  }
+  .pet-say::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -5px;
+    width: 8px; height: 8px;
+    background: var(--white);
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    transform: translateX(-50%) rotate(45deg);
+  }
+  .pet-say b { color: var(--forest); font-weight: 600; }
+  .pet-id { padding: 8px 18px 0; }
+  .pet-id h2 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 19px; font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .pet-id p { margin: 3px 0 0; color: var(--muted); font-size: 10.5px; }
+  .pet-status {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 7px; padding: 3px 8px;
+    border-radius: 999px;
+    background: #eef3ec;
+    color: var(--forest);
+    font-size: 10px;
+  }
+  .pet-status i { width: 5px; height: 5px; border-radius: 50%; background: var(--sage); }
+  .pet-status.busy i { background: var(--clay); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+  .course-card {
+    margin: 12px 14px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--mist);
+  }
+  .course-card .mini { color: #8b958a; font-size: 9.5px; letter-spacing: 0.08em; }
+  .course-card strong { display: block; margin-top: 3px; font-size: 12.5px; font-weight: 600; }
+  .course-card .stats { display: flex; gap: 10px; margin-top: 5px; color: var(--muted); font-size: 10.5px; }
+  .course-card .stats b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .convos { flex: 1; min-height: 0; overflow: auto; padding: 12px 8px 6px; }
+  .convos-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 10px 6px;
+    color: #9aa79a; font-size: 9.5px; letter-spacing: 0.12em;
+  }
+  .convos-head button {
+    border: 0; background: none; color: var(--muted);
+    font-size: 10px; padding: 2px 4px; border-radius: 4px;
+  }
+  .convos-head button:hover { color: var(--forest); background: var(--mist); }
+  .convo-group { padding: 8px 10px 3px; color: #a7b2a6; font-size: 9.5px; letter-spacing: 0.1em; }
+  .convo {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    color: #3d4a3f;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .convo span.t { margin-left: auto; color: #a7b2a6; font-size: 9.5px; font-variant-numeric: tabular-nums; }
+  .convo:hover { background: var(--mist); }
+  .convo.active { background: #eef3ec; color: var(--forest); font-weight: 600; box-shadow: inset 2px 0 0 var(--forest); }
+  .convo .more { opacity: 0; color: var(--muted); }
+  .convo:hover .more { opacity: 1; }
+
+  .rail-foot {
+    flex: none;
+    border-top: 1px solid var(--line);
+    padding: 10px 14px 12px;
+    display: grid; gap: 7px;
+    font-size: 10.5px;
+    color: var(--muted);
+    background: #fcfdfb;
+  }
+  .rail-foot .row { display: flex; align-items: center; gap: 8px; }
+  .rail-foot b { color: var(--ink); font-weight: 600; }
+  .rail-foot .edit { margin-left: auto; color: var(--forest); text-decoration: none; font-size: 10px; }
+
+  /* ---- 中栏：答疑主线 ---- */
+  .chat { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+
+  .ctxbar {
+    flex: none;
+    height: 46px;
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    background: #fdfefc;
+  }
+  .ctx-label { color: #9aa79a; font-size: 9.5px; letter-spacing: 0.1em; margin-right: 1px; }
+  .ctxchip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 25px; padding: 0 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--white);
+    color: #4a574c;
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+  .ctxchip b { color: var(--ink); font-weight: 600; }
+  .ctxchip .caret { color: #b6c0b4; font-size: 8px; }
+  .ctxchip.add { border-style: dashed; color: #9aa79a; }
+  .ctxbar .right { margin-left: auto; color: #9aa79a; font-size: 10px; white-space: nowrap; }
+
+  .thread {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 18px 24px 10px;
+    display: flex; flex-direction: column; gap: 16px;
+    scrollbar-width: thin;
+  }
+
+  .msg-user {
+    align-self: flex-end;
+    max-width: 78%;
+    padding: 9px 13px;
+    border: 1px solid var(--line);
+    border-radius: 13px 13px 4px 13px;
+    background: var(--mist);
+    font-size: 13px;
+    line-height: 1.7;
+    color: #26332b;
+  }
+
+  .msg-ai { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; }
+  .msg-ai .mark {
+    width: 26px; height: 26px;
+    display: grid; place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--mist);
+    color: var(--forest);
+  }
+  .msg-body { min-width: 0; }
+  .msg-meta {
+    display: flex; align-items: center; gap: 7px;
+    color: #9aa79a; font-size: 10px;
+    margin-bottom: 5px;
+  }
+  .msg-meta b { color: var(--ink); font-size: 11px; font-weight: 600; }
+  .mode-tag {
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #eef3ec;
+    color: var(--forest);
+    font-size: 9px;
+    letter-spacing: 0.02em;
+  }
+  .steps-count { margin-left: auto; color: #a7b2a6; font-size: 9.5px; }
+
+  .answer { font-size: 13.2px; line-height: 1.85; color: #26332b; }
+  .answer p { margin: 0 0 10px; }
+  .answer p:last-child { margin-bottom: 0; }
+  .answer .lead { font-size: 13.5px; }
+  .answer ul { margin: 0 0 12px; padding-left: 0; list-style: none; display: grid; gap: 7px; }
+  .answer ul li { position: relative; padding-left: 15px; }
+  .answer ul li::before {
+    content: "";
+    position: absolute; left: 2px; top: 0.72em;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--sage);
+  }
+  .answer em { font-style: normal; color: var(--forest); font-weight: 600; }
+  .answer h4 {
+    margin: 14px 0 7px;
+    font-family: var(--serif);
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--forest-deep);
+  }
+
+  .cite {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 15px; height: 15px;
+    margin-left: 2px; padding: 0 3px;
+    border: 1px solid #d9e4d6;
+    border-radius: 4px;
+    background: #eef3ec;
+    color: var(--forest);
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 1;
+    vertical-align: 1px;
+    cursor: pointer;
+    transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+  }
+  .cite:hover, .cite.is-active { background: var(--forest); border-color: var(--forest); color: #fff; }
+
+  .callout {
+    margin: 0 0 12px;
+    padding: 10px 13px;
+    border-left: 2px solid var(--clay);
+    border-radius: 0 8px 8px 0;
+    background: #fcfaf6;
+  }
+  .callout ol { margin: 0; padding-left: 16px; display: grid; gap: 3px; font-size: 12.5px; }
+  .callout li::marker { color: var(--clay); font-family: var(--mono); font-size: 10px; }
+  .callout-note { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
+
+  .term-wrap { position: relative; display: inline-block; }
+  .term {
+    border: 0; padding: 0 0 1px;
+    background: none;
+    border-bottom: 1px dashed var(--sage);
+    color: var(--forest);
+    font-size: inherit;
+    font-family: inherit;
+  }
+  .term sup { font-size: 8px; color: var(--sage); margin-left: 1px; }
+
+  .msg-actions {
+    display: flex; align-items: center; gap: 12px;
+    margin-top: 9px; padding-top: 8px;
+    border-top: 1px dashed var(--line);
+    color: #8b958a; font-size: 10px;
+  }
+  .msg-actions button {
+    display: inline-flex; align-items: center; gap: 4px;
+    border: 0; background: none; padding: 2px 0;
+    color: #8b958a; font-size: 10px;
+  }
+  .msg-actions button:hover { color: var(--forest); }
+  .msg-actions .divider { width: 1px; height: 10px; background: var(--line); }
+  .msg-actions .push { margin-left: auto; }
+
+  .followups { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .followups > span { color: #9aa79a; font-size: 9.5px; letter-spacing: 0.08em; }
+  .followups button {
+    height: 26px; padding: 0 10px;
+    border: 1px dashed #cfd9cc;
+    border-radius: 999px;
+    background: var(--white);
+    color: #4a574c;
+    font-size: 10.5px;
+  }
+  .followups button:hover { border-color: var(--sage); color: var(--forest); background: #f7faf5; }
+
+  /* 流式执行态 */
+  .steps { list-style: none; margin: 2px 0 9px; padding: 0; display: grid; gap: 4px; }
+  .steps li { display: flex; align-items: center; gap: 7px; color: #8b958a; font-size: 10.5px; }
+  .steps li .tick {
+    width: 13px; height: 13px; flex: none;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: #eef3ec; color: var(--forest);
+    font-size: 8px;
+  }
+  .steps li.running { color: var(--ink); }
+  .steps li.running .tick { background: transparent; border: 1px solid #dbe5d8; }
+  .spin {
+    width: 7px; height: 7px; border-radius: 50%;
+    border: 1.5px solid #cfdccc; border-top-color: var(--forest);
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .stream { margin: 0; font-size: 13.2px; line-height: 1.85; }
+  .cursor {
+    display: inline-block;
+    width: 6px; height: 13px;
+    margin-left: 2px;
+    background: var(--forest);
+    vertical-align: -2px;
+    animation: blink 1s steps(2, start) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* 输入区 */
+  .composer { flex: none; padding: 8px 20px 14px; border-top: 1px solid var(--line); background: linear-gradient(180deg, #ffffff, #fcfdfb); }
+  .composer-box {
+    border: 1px solid #d9e1d6;
+    border-radius: 12px;
+    background: var(--white);
+    padding: 9px 11px 7px;
+    box-shadow: 0 8px 22px rgba(31, 42, 34, 0.05);
+  }
+  .composer-box:focus-within { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(143, 169, 140, 0.13); }
+  .ctx-inline { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; flex-wrap: wrap; }
+  .ctx-inline .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 21px; padding: 0 7px;
+    border: 1px dashed #cfd9cc;
+    border-radius: 6px;
+    background: #fbfcfa;
+    color: #5a675b;
+    font-size: 9.5px;
+  }
+  .ctx-inline .chip b { color: var(--forest); font-weight: 600; }
+  .ctx-inline .chip.filled { border-style: solid; background: #f3f7f1; }
+  .composer textarea {
+    width: 100%;
+    min-height: 42px;
+    border: 0; outline: 0; resize: none;
+    padding: 2px 2px 0;
+    color: var(--ink);
+    background: transparent;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .composer textarea::placeholder { color: #a7b2a6; }
+  .composer-foot { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+  .hint { color: #a7b2a6; font-size: 9.5px; }
+  .hint kbd {
+    padding: 0 3px; border: 1px solid var(--line); border-radius: 3px;
+    background: var(--mist); font-family: var(--mono); font-size: 9px; color: var(--muted);
+  }
+  .composer-foot .send {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 31px; padding: 0 13px;
+    border: 0; border-radius: 8px;
+    background: var(--forest); color: #fff;
+    font-size: 11.5px;
+  }
+  .composer-foot .send:hover { background: var(--forest-deep); }
+  .composer-foot .stop {
+    margin-left: 2px; height: 31px; padding: 0 6px;
+    border: 0; background: none; color: #8b958a;
+    font-size: 10.5px;
+  }
+  .composer-foot .stop:hover { color: var(--clay); }
+
+  /* ---- 右栏：依据台 ---- */
+  .evidence {
+    position: relative;
+    display: flex; flex-direction: column;
+    min-height: 0;
+    border-left: 1px solid var(--line);
+    background: #fcfdfb;
+  }
+  .ev-head {
+    flex: none;
+    height: 46px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--white);
+  }
+  .ev-head strong { font-size: 11.5px; font-weight: 600; }
+  .ev-head .count {
+    min-width: 16px; height: 16px; padding: 0 4px;
+    display: grid; place-items: center;
+    border-radius: 4px; background: #eef3ec;
+    color: var(--forest); font-family: var(--mono); font-size: 9px;
+  }
+  .ev-head .icon-btn { margin-left: auto; width: 26px; height: 26px; }
+
+  .ev-body {
+    flex: 1; min-height: 0;
+    overflow: auto;
+    padding: 8px 12px 12px;
+    display: grid; gap: 7px; align-content: start;
+  }
+  .ev-group {
+    display: flex; align-items: center; gap: 6px;
+    margin: 3px 2px 0;
+    color: #9aa79a; font-size: 9.5px; letter-spacing: 0.1em;
+  }
+  .ev-group .n { color: #c3ccc0; font-family: var(--mono); }
+
+  .src {
+    display: grid; gap: 5px;
+    padding: 7px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--white);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+  }
+  .src:hover { border-color: #cfdccc; }
+  .src.is-active { border-color: var(--sage); box-shadow: 0 0 0 3px rgba(143, 169, 140, 0.13); }
+  .src-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: #2b3a31; }
+  .src-idx {
+    width: 15px; height: 15px; flex: none;
+    display: grid; place-items: center;
+    border-radius: 3px;
+    background: #eef3ec; color: var(--forest);
+    font-family: var(--mono); font-size: 8.5px;
+  }
+  .src.is-active .src-idx { background: var(--forest); color: #fff; }
+  .src-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src-meta { display: flex; align-items: center; gap: 6px; color: #9aa79a; font-size: 9.5px; }
+  .src-quote {
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--mist);
+    color: #4a574c;
+    font-size: 10.5px;
+    line-height: 1.65;
+  }
+  .src-quote mark { padding: 0 1px; border-radius: 2px; background: #e9dcc8; color: #5a4028; }
+  .src-foot { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
+  .tag { padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 8.5px; }
+  .tag.ok { border-color: #dbe5d8; background: #eef3ec; color: var(--forest); }
+  .tag.part { border-color: #efe0c6; background: #fdf6ec; color: #8a6a2f; }
+  .tag.web { border-color: #e2ded2; background: #faf8f2; color: #8a8071; }
+  .src-foot .open { margin-left: auto; color: var(--forest); font-size: 9.5px; text-decoration: none; }
+  .src-foot .open:hover { text-decoration: underline; }
+
+  .note-card {
+    display: grid; gap: 4px;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--white);
+  }
+  .note-card .t { font-size: 11px; font-weight: 600; color: #2b3a31; }
+  .note-card .m { display: flex; align-items: center; gap: 6px; color: #9aa79a; font-size: 9.5px; }
+  .note-card .act { display: flex; gap: 8px; margin-top: 2px; }
+  .note-card .act button {
+    border: 0; background: none; padding: 0;
+    color: var(--forest); font-size: 9.5px;
+  }
+  .note-card .act button.muted { color: #a7b2a6; }
+
+  .glossary {
+    display: grid; gap: 4px;
+    padding: 7px 10px;
+    border: 1px solid #e6ddd0;
+    border-left: 2px solid var(--clay);
+    border-radius: 0 9px 9px 0;
+    background: #fdfbf7;
+  }
+  .glossary .t { font-family: var(--serif); font-size: 11.5px; font-weight: 600; color: var(--ink); }
+  .glossary .t span { font-family: var(--sans); font-size: 9px; font-weight: 400; color: #a7b2a6; margin-left: 4px; }
+  .glossary p { margin: 0; color: #5a675b; font-size: 10px; line-height: 1.6; }
+  .glossary .src { color: #9aa79a; font-size: 9px; }
+
+  .ev-foot {
+    flex: none;
+    border-top: 1px solid var(--line);
+    padding: 9px 14px 11px;
+    color: #9aa79a;
+    font-size: 9.5px;
+    line-height: 1.65;
+    background: var(--white);
+  }
+  .ev-foot b { color: var(--muted); font-weight: 600; }
+
+  /* ============ 本阶段态：不含流式、步骤、追问与延后动作 ============ */
+  .alt-tag { display: none; }
+  .canvas.phase1 .steps,
+  .canvas.phase1 .cursor,
+  .canvas.phase1 .live-tag,
+  .canvas.phase1 .followups,
+  .canvas.phase1 .defer,
+  .canvas.phase1 .second-exchange { display: none; }
+  .canvas.phase1 .alt-tag { display: inline-flex; }
+
+  /* 浮动态下左栏的锚点：不留空槽，身份压成一行 */
+  .pet-anchor {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 14px 0;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #fcfdfb;
+  }
+  .canvas.float .pet-anchor { display: flex; }
+  .canvas.float .pet-id { display: none; }
+  .anchor-avatar {
+    width: 24px; height: 24px; flex: none;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background-color: var(--mist);
+    background-image: url("../../apps/web/public/assets/teacher/teacher-idle-sheet.webp");
+    background-size: 1000% 600%;
+    background-position: 0 0;
+    background-repeat: no-repeat;
+  }
+  .pet-anchor .who { display: grid; gap: 1px; min-width: 0; }
+  .pet-anchor .who b { font-size: 11px; font-weight: 600; }
+  .pet-anchor .who span { color: var(--muted); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .anchor-back {
+    margin-left: auto; flex: none;
+    border: 0; background: none; padding: 3px 2px;
+    color: var(--forest); font-size: 9.5px;
+  }
+  .anchor-back:hover { text-decoration: underline; }
+  .convo.extra { display: none; }
+  .canvas.float .convo.extra { display: flex; }
+
+  /* ============ 浮动态：桌宠离开左栏 ============ */
+  .canvas.float .pet-stage { display: none; }
+
+  .pet-float {
+    display: none;
+    position: absolute;
+    z-index: 30;
+    right: 12px; bottom: 66px;
+    width: 146px;
+    justify-items: center;
+    gap: 4px;
+  }
+  .canvas.float .pet-float { display: grid; }
+
+  .float-body {
+    position: relative;
+    display: grid; place-items: end center;
+    width: 112px; height: 118px;
+    border-radius: 50% 50% 44% 44%;
+    background: radial-gradient(circle at 50% 42%, rgba(245, 248, 242, 0.96) 0%, rgba(238, 243, 235, 0.86) 58%, rgba(238, 243, 235, 0) 74%);
+    filter: drop-shadow(0 14px 22px rgba(31, 42, 34, 0.16));
+    cursor: grab;
+  }
+  .float-body::after {
+    content: "";
+    position: absolute;
+    bottom: 5px;
+    width: 72px; height: 9px;
+    border: 1px solid #d8e1d5;
+    border-radius: 50%;
+  }
+  .float-sprite {
+    position: relative; z-index: 1;
+    height: 106px;
+    aspect-ratio: 720 / 960;
+    background-image: url("../../apps/web/public/assets/teacher/teacher-idle-sheet.webp");
+    background-size: 1000% 600%;
+    background-position: 0 0;
+    background-repeat: no-repeat;
+  }
+  .float-badge {
+    padding: 2px 8px;
+    border: 1px solid #dbe5d8;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--forest);
+    font-size: 9px;
+    white-space: nowrap;
+    box-shadow: 0 6px 14px rgba(31, 42, 34, 0.08);
+  }
+  /* ============ 布局标注层 ============ */
+  .zone-tag {
+    display: none;
+    position: absolute;
+    z-index: 60;
+    top: 50%; left: 2px;
+    width: 17px; height: 17px;
+    transform: translateY(-50%);
+    align-items: center; justify-content: center;
+    border-radius: 50%;
+    background: var(--clay);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    line-height: 1;
+    box-shadow: 0 3px 10px rgba(178, 104, 74, 0.32);
+    pointer-events: none;
+  }
+  .annotate .zone-tag { display: flex; }
+  .annotate [data-zone] { outline: 1px dashed rgba(178, 104, 74, 0.45); outline-offset: -2px; }
+  .annotate .composer .zone-tag { top: 12px; transform: none; }
+
+  /* 页头操作 */
+  .head-split { width: 1px; height: 18px; background: var(--line); margin: 0 2px; }
+  .head-btn {
+    height: 28px; padding: 0 11px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--white);
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+  .head-btn:hover { border-color: var(--sage); color: var(--forest); background: #f8fbf6; }
+  .head-btn.on { border-color: #dbe5d8; background: #eef3ec; color: var(--forest); font-weight: 600; }
+
+  /* #shot：导出用纯布局视图（隐藏页头、说明、控制条） */
+  body.shot { background: #fff; }
+  body.shot .page-head,
+  body.shot .legend,
+  body.shot .mobile-section { display: none; }
+  body.shot .board { padding: 0; }
+  body.shot .canvas { border: 0; border-radius: 0; box-shadow: none; }
+
+  /* ============ 标注说明条 ============ */
+  .legend {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 36px 34px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .legend div {
+    display: grid; gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--white);
+  }
+  .legend span { color: var(--clay); font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.08em; }
+  .legend strong { font-size: 11.5px; font-weight: 600; }
+  .legend p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.6; }
+
+  /* ============ 移动端示意 ============ */
+  .mobile-section { padding: 8px 36px 60px; }
+  .mobile-section > h2 {
+    max-width: 1440px;
+    margin: 0 auto 4px;
+    font-family: var(--serif);
+    font-size: 19px; font-weight: 600;
+  }
+  .mobile-section > p {
+    max-width: 1440px;
+    margin: 0 auto 20px;
+    color: var(--muted); font-size: 11.5px;
+  }
+  .phones { display: flex; justify-content: center; gap: 40px; flex-wrap: wrap; }
+  .phone-wrap { display: grid; gap: 10px; justify-items: center; }
+  .phone {
+    position: relative;
+    width: 390px; height: 760px;
+    border: 1px solid var(--line);
+    border-radius: 26px;
+    background: var(--white);
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(31, 42, 34, 0.12);
+    display: flex; flex-direction: column;
+  }
+  .phone-cap { color: var(--muted); font-size: 10.5px; }
+  .phone-cap b { color: var(--ink); font-weight: 600; }
+  .m-head {
+    flex: none; height: 52px;
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .m-pet {
+    width: 30px; height: 30px;
+    border: 1px solid var(--line); border-radius: 50%;
+    background-color: var(--mist);
+    background-image: url("../../apps/web/public/assets/teacher/teacher-idle-sheet.webp");
+    background-size: 1000% 600%;
+    background-position: 0 0;
+    background-repeat: no-repeat;
+  }
+  .m-head .who { display: grid; gap: 1px; }
+  .m-head .who b { font-size: 12px; font-weight: 600; }
+  .m-head .who span { color: var(--muted); font-size: 9.5px; }
+  .m-head .icon-btn { margin-left: auto; width: 30px; height: 30px; }
+
+  .m-ctx {
+    flex: none;
+    display: flex; gap: 5px; align-items: center;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--line);
+    overflow: hidden;
+    background: #fdfefc;
+  }
+  .m-ctx .ctxchip { height: 22px; font-size: 9.5px; padding: 0 8px; flex: none; }
+  .m-thread { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .m-msg-user {
+    align-self: flex-end; max-width: 84%;
+    padding: 8px 11px; border-radius: 12px 12px 4px 12px;
+    background: var(--mist); border: 1px solid var(--line);
+    font-size: 12px; line-height: 1.7;
+  }
+  .m-answer { padding: 10px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--white); box-shadow: 0 6px 18px rgba(31,42,34,.04); }
+  .m-answer .who { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; color: #9aa79a; font-size: 9px; }
+  .m-answer .who b { color: var(--ink); font-size: 10.5px; font-weight: 600; }
+  .m-answer p { margin: 0 0 6px; font-size: 12px; line-height: 1.75; }
+  .m-answer p:last-child { margin: 0; }
+  .m-answer .cite { height: 13px; min-width: 13px; font-size: 8px; }
+  .m-src {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 8px; padding-top: 7px;
+    border-top: 1px dashed var(--line);
+    color: var(--forest); font-size: 9.5px;
+  }
+  .m-src .pill { padding: 1px 6px; border-radius: 999px; background: #eef3ec; }
+  .m-follow { display: flex; gap: 5px; margin-top: 8px; overflow: hidden; }
+  .m-follow button {
+    flex: none; height: 22px; padding: 0 8px;
+    border: 1px dashed #cfd9cc; border-radius: 999px;
+    background: var(--white); color: #5a675b; font-size: 9px;
+  }
+  .m-composer {
+    flex: none;
+    border-top: 1px solid var(--line);
+    padding: 8px 10px 12px;
+    background: var(--white);
+  }
+  .m-box {
+    border: 1px solid #d9e1d6; border-radius: 11px;
+    padding: 7px 9px 6px; background: var(--white);
+  }
+  .m-box .row { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+  .m-box .row .chip {
+    height: 19px; padding: 0 6px;
+    display: inline-flex; align-items: center;
+    border: 1px dashed #cfd9cc; border-radius: 5px;
+    color: #5a675b; font-size: 8.5px;
+  }
+  .m-box .ph { color: #a7b2a6; font-size: 11.5px; line-height: 1.6; min-height: 34px; }
+  .m-box .foot { display: flex; align-items: center; }
+  .m-box .foot span { color: #a7b2a6; font-size: 8.5px; }
+  .m-box .foot .send {
+    margin-left: auto; width: 28px; height: 26px;
+    display: grid; place-items: center;
+    border: 0; border-radius: 6px;
+    background: var(--forest); color: #fff; font-size: 12px;
+  }
+
+  /* 会话抽屉态 */
+  .phone.drawer .m-thread { position: relative; }
+  .drawer-panel {
+    position: absolute; inset: 52px 0 0 0;
+    z-index: 5;
+    background: var(--white);
+    display: flex; flex-direction: column;
+    box-shadow: 12px 0 30px rgba(31, 42, 34, 0.12);
+    width: 84%;
+  }
+  .drawer-panel .dp-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 11px; font-weight: 600;
+  }
+  .drawer-panel .dp-head .icon-btn { margin-left: auto; width: 26px; height: 26px; }
+  .drawer-panel .dp-new {
+    margin: 10px 12px;
+    height: 32px;
+    display: flex; align-items: center; justify-content: center; gap: 5px;
+    border: 1px solid #dbe5d8; border-radius: 8px;
+    background: #eef3ec; color: var(--forest);
+    font-size: 11px; font-weight: 600;
+  }
+  .drawer-panel .dp-body { flex: 1; overflow: auto; padding: 0 8px 12px; }
+  .drawer-panel .convo { font-size: 11.5px; padding: 8px 9px; }
+  .drawer-panel .convo-group { padding: 8px 9px 3px; }
+  .drawer-scrim { position: absolute; inset: 52px 0 0 0; background: rgba(31, 42, 34, 0.26); z-index: 4; }
+
+  @media (max-width: 980px) {
+    .legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .page-head { padding: 20px 18px 12px; }
+    .board { padding: 0 18px 24px; }
+    .head-meta { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <div>
+    <h1>答疑桌宠 · 页面布局方案 v2</h1>
+    <p>1440 × 920 设计基准，按窗口宽度等比缩放。默认展示最终效果，页头可切换「布局标注」查看分区与尺寸、或按 100% 查看。</p>
+  </div>
+  <div class="head-meta">
+    <span class="badge">三区工作台</span>
+    <span class="badge">引用可核验</span>
+    <span class="badge">桌宠可收起</span>
+    <span class="head-split"></span>
+    <button class="head-btn" id="btn-phase">本阶段</button>
+    <button class="head-btn" id="btn-float">浮动态</button>
+    <button class="head-btn" id="btn-anno">布局标注</button>
+    <button class="head-btn" id="btn-zoom">100% 查看</button>
+  </div>
+</header>
+
+<div class="board" id="board">
+  <div class="frame" id="frame">
+    <div class="canvas" id="canvas">
+
+      <!-- ============ 全局导航 ============ -->
+      <aside class="appnav">
+        <div class="brand">
+          <span class="brand-mark">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 5.5c3.6-1 7-.4 10 1.8 1 .8 1.9 1.8 2.6 3-3.5.6-7 .3-10.4-.9C5.2 9 4.5 7.3 4 5.5Z"/>
+              <path d="M17 10.5c2 .2 3.6 1.1 5 2.6-2.2.9-4.4.8-6.5-.2"/>
+            </svg>
+          </span>
+          <span class="brand-name">NoteBuddy</span>
+        </div>
+
+        <div class="nav-label">工作区</div>
+        <nav class="nav">
+          <a href="#"><span class="ic">⌂</span>首页</a>
+          <a href="#"><span class="ic">▦</span>课程</a>
+          <a href="#"><span class="ic">❧</span>知识森林</a>
+          <a href="#" class="active"><span class="ic">✧</span>答疑桌宠</a>
+          <a href="#"><span class="ic">✎</span>笔记本</a>
+          <a href="#"><span class="ic">⌫</span>回收站</a>
+        </nav>
+
+        <div class="nav-sep"></div>
+        <div class="nav-label">最近课程</div>
+        <a class="course-link active" href="#"><span class="dot-course"></span>数据结构与算法</a>
+        <a class="course-link" href="#"><span class="dot-course"></span>计算机网络</a>
+        <a class="course-link" href="#"><span class="dot-course"></span>概率论与数理统计</a>
+
+        <div class="nav-foot">
+          <a class="course-link" href="#"><span class="ic">⚙</span>设置</a>
+        </div>
+      </aside>
+
+      <div class="main">
+
+        <!-- ============ 顶栏 ============ -->
+        <header class="topbar" data-zone>
+          <span class="zone-tag" title="顶栏 60px：课程路径、会话搜索、新对话">1</span>
+          <div class="crumb">
+            <b>数据结构与算法</b><span class="sep">/</span><span>答疑桌宠</span><span class="sep">/</span><span>红黑树的旋转规则</span>
+          </div>
+          <div class="spacer"></div>
+          <button class="icon-btn" title="搜索会话（Ctrl + K）" aria-label="搜索会话">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>
+          </button>
+          <button class="icon-btn" title="显示 / 隐藏依据栏" aria-label="显示或隐藏依据栏">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/></svg>
+          </button>
+          <button class="btn-primary">＋ 新对话</button>
+          <span class="avatar-top">王</span>
+        </header>
+
+        <!-- ============ 三栏 ============ -->
+        <div class="workspace">
+
+          <!-- ---------- 左栏 ---------- -->
+          <aside class="rail" data-zone>
+            <span class="zone-tag" title="左栏 252px：桌宠舞台、当前课程、会话历史">2</span>
+
+            <div class="pet-stage">
+              <div class="pet-say"><b>第 3 讲</b>的树结构，想从哪问起？</div>
+              <span class="pet-ripple" aria-hidden="true"></span>
+              <div class="pet-sprite" role="img" aria-label="AI 教师莉艾尔·待机"></div>
+            </div>
+
+            <div class="pet-anchor">
+              <span class="anchor-avatar" aria-hidden="true"></span>
+              <span class="who"><b>莉艾尔</b><span>在页面上 · 正在读第 4 讲</span></span>
+              <button class="anchor-back" type="button">召回 ←</button>
+            </div>
+
+            <div class="pet-id">
+              <h2>莉艾尔</h2>
+              <p>课程助教 · 数据结构与算法</p>
+              <span class="pet-status busy"><i></i>正在读第 4 讲 · 可随时打断</span>
+            </div>
+
+            <div class="course-card">
+              <span class="mini">当前课程</span>
+              <strong>数据结构与算法</strong>
+              <div class="stats"><span><b>12</b> 份资料</span><span><b>38</b> 条笔记</span><a href="#" style="margin-left:auto;color:var(--forest);text-decoration:none;font-size:10px;">概览 →</a></div>
+            </div>
+
+            <div class="convos">
+              <div class="convos-head"><span>会话</span><button>全部 →</button></div>
+              <div class="convo-group">今天</div>
+              <div class="convo active"><span>红黑树的旋转规则</span><span class="t">14:02</span></div>
+              <div class="convo"><span>B+ 树与磁盘 IO 的关系</span><span class="t">10:31</span></div>
+              <div class="convo"><span>第 5 讲 最短路径复习</span><span class="t">09:12</span></div>
+              <div class="convo-group">昨天</div>
+              <div class="convo"><span>堆排序的时间复杂度</span><span class="t">昨天</span></div>
+              <div class="convo"><span>AVL 与红黑树怎么选</span><span class="t">昨天</span></div>
+              <div class="convo-group">更早</div>
+              <div class="convo"><span>哈希冲突的处理方式</span><span class="t">10-17</span></div>
+              <div class="convo extra"><span>图的邻接矩阵与邻接表</span><span class="t">10-16</span></div>
+              <div class="convo extra"><span>动态规划的状态设计</span><span class="t">10-15</span></div>
+              <div class="convo extra"><span>第 2 讲 线性表复习</span><span class="t">10-14</span></div>
+            </div>
+
+            <div class="rail-foot">
+              <div class="row"><span>范围</span><b>整门课程</b><a class="edit" href="#">修改</a></div>
+              <div class="row"><span>目标</span><b>理解概念</b><span style="margin-left:auto;color:#a7b2a6;">影响回答结构</span></div>
+            </div>
+          </aside>
+
+          <!-- ---------- 中栏 ---------- -->
+          <section class="chat" data-zone>
+            <span class="zone-tag" title="对话主线：自适应宽度，消息与引用在同一动线">3</span>
+
+            <div class="ctxbar">
+              <span class="ctx-label">上下文</span>
+              <button class="ctxchip">范围 <b>第 3 讲 树与二叉树</b><span class="caret">▼</span></button>
+              <button class="ctxchip">目标 <b>理解概念</b><span class="caret">▼</span></button>
+              <button class="ctxchip add">＋ 限定页面</button>
+              <span class="right">本轮检索 2 份资料 · 3 段原文</span>
+            </div>
+
+            <div class="thread">
+
+              <div class="msg-user">为什么红黑树插入后最多只需要两次旋转就能恢复平衡？</div>
+
+              <article class="msg-ai">
+                <span class="mark" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 5.5c3.6-1 7-.4 10 1.8 1 .8 1.9 1.8 2.6 3-3.5.6-7 .3-10.4-.9C5.2 9 4.5 7.3 4 5.5Z"/>
+                    <path d="M17 10.5c2 .2 3.6 1.1 5 2.6-2.2.9-4.4.8-6.5-.2"/>
+                    <circle cx="7.4" cy="7.1" r=".8" fill="currentColor" stroke="none"/>
+                  </svg>
+                </span>
+                <div class="msg-body">
+                  <header class="msg-meta">
+                    <b>莉艾尔</b>
+                    <span class="mode-tag">课程资料检索</span>
+                    <span>14:02</span>
+                    <span class="steps-count">已检索 2 份资料 · 3 步</span>
+                  </header>
+
+                  <div class="answer">
+                    <p class="lead">先说结论：插入只会破坏「性质 4：红节点的孩子必须是黑」这一条。修复时冲突每次向上移动两层：叔节点为红只变色、不旋转；叔节点为黑才需要旋转，且最多两次就能终止。<sup class="cite is-active" data-src="1">1</sup></p>
+                    <ul>
+                      <li>新节点默认染红，黑高不变，性质 5 不受影响，唯一风险是父子同红。<sup class="cite" data-src="1">1</sup></li>
+                      <li>叔节点为红：父与叔变黑、祖父变红，冲突上移两层，<em>不产生旋转</em>。这种情形可以连续出现，但每轮上升两层，最多 O(log n) 轮。<sup class="cite" data-src="2">2</sup></li>
+                      <li>叔节点为黑：三点成折线时先旋转拉直，再做一次旋转并重新着色。完成后子树根为黑，冲突消失、循环结束 —— 这就是「最多两次」的来源。<sup class="cite" data-src="3">3</sup></li>
+                    </ul>
+
+                    <h4>红黑树的五条性质</h4>
+                    <div class="callout">
+                      <ol>
+                        <li>每个节点非红即黑。</li>
+                        <li>根节点为黑。</li>
+                        <li>每个叶子（NIL）为黑。</li>
+                        <li>红节点的两个孩子都是黑。</li>
+                        <li>任一节点到其所有叶子的路径上<span class="term-wrap"><button class="term">黑高<sup>?</sup></button></span>相同。</li>
+                      </ol>
+                      <p class="callout-note">插入只会破坏第 4 条，所以修复只需要沿一条路径向上走。</p>
+                    </div>
+
+                    <p>换个视角：把红节点压进父节点，红黑树等价于一棵 2-3-4 树；一次旋转对应一次 4-节点分裂，因此一次插入在一条路径上最多发生两次分裂。</p>
+                  </div>
+
+                  <div class="msg-actions">
+                    <button class="defer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5h10"/></svg>复制</button>
+                    <button class="defer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4.5h-4.5"/></svg>重新生成</button>
+                    <button class="defer"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 19h4l10-10-4-4L4 15v4Z"/><path d="M14 5l4 4"/></svg>写入笔记</button>
+                    <span class="divider"></span>
+                    <button>有帮助</button>
+                    <button>需改进</button>
+                    <span class="push"></span>
+                    <button>3 段原文 →</button>
+                  </div>
+
+                  <div class="followups">
+                    <span>继续追问</span>
+                    <button>举个插入的例子</button>
+                    <button>出 2 道判断题</button>
+                    <button>和 AVL 的旋转次数对比</button>
+                  </div>
+                </div>
+              </article>
+
+              <div class="msg-user second-exchange">那删除呢？为什么都说删除比插入麻烦？</div>
+
+              <article class="msg-ai second-exchange">
+                <span class="mark" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 5.5c3.6-1 7-.4 10 1.8 1 .8 1.9 1.8 2.6 3-3.5.6-7 .3-10.4-.9C5.2 9 4.5 7.3 4 5.5Z"/>
+                    <path d="M17 10.5c2 .2 3.6 1.1 5 2.6-2.2.9-4.4.8-6.5-.2"/>
+                    <circle cx="7.4" cy="7.1" r=".8" fill="currentColor" stroke="none"/>
+                  </svg>
+                </span>
+                <div class="msg-body">
+                  <header class="msg-meta">
+                    <b>莉艾尔</b>
+                    <span class="mode-tag live-tag">正在检索</span>
+                    <span class="mode-tag alt-tag">课程资料检索</span>
+                    <span>14:03</span>
+                  </header>
+                  <ol class="steps">
+                    <li><span class="tick">✓</span>检索课程课件 · 第 3 讲 树与二叉树</li>
+                    <li><span class="tick">✓</span>检索课程课件 · 第 4 讲 平衡二叉树</li>
+                    <li class="running"><span class="tick"><span class="spin"></span></span>阅读笔记 · 红黑树的五个不变量</li>
+                  </ol>
+                  <p class="stream">删除的麻烦在于它可能同时破坏两条性质：删掉黑节点会让某条路径的黑高减少，而用来顶替的节点还可能把「红-红」冲突带到新的位置，修复要同时向兄弟和父节点两个方向看。<sup class="cite" data-src="2">2</sup><span class="cursor"></span></p>
+                </div>
+              </article>
+
+            </div>
+
+            <div class="composer" data-zone>
+              <span class="zone-tag" title="输入区：上下文标签可见可改">4</span>
+              <div class="composer-box">
+                <div class="ctx-inline">
+                  <span class="chip filled"><b>@</b> 第 3 讲 树与二叉树</span>
+                  <span class="chip"><b>#</b> 添加页面</span>
+                  <span class="chip"><b>◎</b> 目标：理解概念</span>
+                </div>
+                <textarea rows="2" placeholder="追问莉艾尔，或把课件页面拖进来作为上下文…"></textarea>
+                <div class="composer-foot">
+                  <span class="hint"><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行 · 回答只依据本门课程</span>
+                  <button class="send">发送 <span aria-hidden="true">↑</span></button>
+                  <button class="stop">■ 停止</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ---------- 右栏 ---------- -->
+          <aside class="evidence" data-zone>
+            <span class="zone-tag" title="依据台 320px：来源片段、术语、相关笔记">5</span>
+            <div class="ev-head">
+              <strong>回答依据</strong><span class="count">3</span>
+              <button class="icon-btn" aria-label="收起依据栏">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg>
+              </button>
+            </div>
+
+            <div class="ev-body">
+              <div class="ev-group">课程资料<span class="n">2</span></div>
+
+              <div class="src is-active" data-src-card="1">
+                <div class="src-head"><span class="src-idx">1</span><span class="src-title">第 3 讲 树与二叉树</span></div>
+                <div class="src-meta"><span>p.18</span><span>·</span><span>插入修复</span><span>·</span><span>命中 2 段</span></div>
+                <div class="src-quote">插入初始颜色为红，黑高不变；只需处理可能出现的<mark>红-红冲突</mark>。情形 1（叔为红）只重新着色，冲突<mark>上移两层</mark>，不涉及旋转。</div>
+                <div class="src-foot"><span class="tag ok">支撑</span><a class="open" href="#">打开课件 →</a></div>
+              </div>
+
+              <div class="src" data-src-card="2">
+                <div class="src-head"><span class="src-idx">2</span><span class="src-title">第 3 讲 树与二叉树</span></div>
+                <div class="src-meta"><span>p.19</span><span>·</span><span>情形 1 / 2 / 3</span></div>
+                <div class="src-quote">情形 2 与情形 3（叔为黑）经<mark>一次或两次旋转</mark>转换，旋转后子树根为黑，冲突不再上传播。</div>
+                <div class="src-foot"><span class="tag ok">支撑</span><a class="open" href="#">打开课件 →</a></div>
+              </div>
+
+              <div class="src" data-src-card="3">
+                <div class="src-head"><span class="src-idx">3</span><span class="src-title">第 4 讲 平衡二叉树</span></div>
+                <div class="src-meta"><span>p.6</span><span>·</span><span>与 2-3-4 树同构</span></div>
+                <div class="src-quote">红黑树与 2-3-4 树一一对应，染色与旋转可视为<mark>4-节点分裂</mark>的两种写法。</div>
+                <div class="src-foot"><span class="tag part">部分支撑</span><a class="open" href="#">打开课件 →</a></div>
+              </div>
+
+              <div class="ev-group">网络补充<span class="n">1</span></div>
+              <div class="src">
+                <div class="src-head"><span class="src-idx">4</span><span class="src-title">Red–black tree</span></div>
+                <div class="src-meta"><span>Wikipedia</span><span>·</span><span>检索于 14:02</span></div>
+                <div class="src-meta">交叉核对旋转次数的表述 · 未用于本结论</div>
+                <div class="src-foot"><span class="tag web">补充</span><a class="open" href="#">打开 ↗</a></div>
+              </div>
+
+            </div>
+
+            <div class="ev-foot"><b>支撑</b> 表示课件原文直接支持该结论；<b>部分支撑</b> 表示需要结合上下文推断。</div>
+          </aside>
+
+        </div>
+      </div>
+
+      <!-- 浮动态：桌宠脱离左栏，可拖到任意位置 -->
+      <div class="pet-float" aria-hidden="true">
+        <span class="float-badge">正在读第 4 讲 · 可打断</span>
+        <div class="float-body"><div class="float-sprite"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <div><span>01 · 60px</span><strong>顶栏：只留任务动作</strong><p>课程路径 + 会话搜索 + 新对话。原来的大标题「问莉艾尔」下沉为会话名，首屏不再重复叙事。</p></div>
+  <div><span>02 · 252px</span><strong>左栏：桌宠与历史同栏</strong><p>桌宠可拖出左栏变成浮层（页头「浮动态」可预览）；离开后左栏让位给会话历史。</p></div>
+  <div><span>03 · 自适应</span><strong>对话主线：阅读动线</strong><p>行宽收敛到约 600px。角标引用、执行步骤、追问建议都贴着回答，不跨区跳转。</p></div>
+  <div><span>04 · 常驻</span><strong>输入区：上下文可见</strong><p>范围与学习目标以标签形式出现在输入框内，随时可改；支持 @ 资料、# 页面、拖入课件。</p></div>
+  <div><span>05 · 320px</span><strong>依据台：可核验</strong><p>点角标就地定位来源片段并高亮，术语与相关笔记同处一栏；窄屏收为右侧抽屉。</p></div>
+</div>
+
+<!-- ============ 移动端 ============ -->
+<section class="mobile-section">
+  <h2>移动端：单列 + 抽屉</h2>
+  <p>桌宠收成 30px 头像条，会话改为左滑抽屉，输入区固定底部；首屏即可看到最近一条回答，不再被左栏挤下去。</p>
+  <div class="phones">
+    <div class="phone-wrap">
+      <div class="phone">
+        <header class="m-head">
+          <span class="m-pet" aria-hidden="true"></span>
+          <span class="who"><b>莉艾尔</b><span>数据结构与算法 · 正在思考</span></span>
+          <button class="icon-btn" aria-label="会话列表">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          </button>
+        </header>
+        <div class="m-ctx">
+          <span class="ctxchip">第 3 讲 <span class="caret">▼</span></span>
+          <span class="ctxchip">理解概念 <span class="caret">▼</span></span>
+        </div>
+        <div class="m-thread">
+          <div class="m-msg-user">为什么插入后最多两次旋转就够了？</div>
+          <div class="m-answer">
+            <div class="who"><b>莉艾尔</b><span>课程资料检索</span></div>
+            <p>插入只破坏「红节点的孩子必须是黑」这一条；叔为红时只变色不旋转，叔为黑时才旋转，最多两次即可终止。<sup class="cite">1</sup></p>
+            <p>冲突每轮上移两层，因此变色可能发生多次，旋转次数上界固定。<sup class="cite">2</sup></p>
+            <div class="m-src"><span class="pill">依据 3 段</span><span>第 3 讲 · p.18–19</span></div>
+            <div class="m-follow"><button>举例</button><button>出题</button><button>对比 AVL</button></div>
+          </div>
+          <div class="m-msg-user">那删除为什么更难？</div>
+          <div class="m-answer">
+            <div class="who"><b>莉艾尔</b><span>正在检索</span></div>
+            <p style="color:#9aa79a;font-size:10.5px;">✓ 检索第 3 讲 · ✓ 检索第 4 讲 · 阅读笔记…</p>
+            <p>删除黑节点会让某条路径的黑高减少，顶替节点还可能带来新的红-红冲突，需要同时看兄弟与父节点。<span class="cursor" style="height:11px;"></span></p>
+          </div>
+        </div>
+        <div class="m-composer">
+          <div class="m-box">
+            <div class="row"><span class="chip">@ 第 3 讲</span><span class="chip"># 页面</span></div>
+            <div class="ph">继续追问…</div>
+            <div class="foot"><span>只依据本门课程</span><span class="send">↑</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="phone-cap"><b>对话态</b> · 首屏直达回答</div>
+    </div>
+
+    <div class="phone-wrap">
+      <div class="phone drawer">
+        <header class="m-head">
+          <span class="m-pet" aria-hidden="true"></span>
+          <span class="who"><b>莉艾尔</b><span>数据结构与算法</span></span>
+          <button class="icon-btn" aria-label="会话列表">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+          </button>
+        </header>
+        <div class="m-thread"></div>
+        <div class="drawer-scrim"></div>
+        <div class="drawer-panel">
+          <div class="dp-head">会话<button class="icon-btn" aria-label="关闭">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button></div>
+          <div class="dp-new">＋ 新对话</div>
+          <div class="dp-body">
+            <div class="convo-group">今天</div>
+            <div class="convo active"><span>红黑树的旋转规则</span><span class="t">14:02</span></div>
+            <div class="convo"><span>B+ 树与磁盘 IO</span><span class="t">10:31</span></div>
+            <div class="convo"><span>最短路径复习</span><span class="t">09:12</span></div>
+            <div class="convo-group">昨天</div>
+            <div class="convo"><span>堆排序的时间复杂度</span><span class="t">昨天</span></div>
+            <div class="convo"><span>AVL 与红黑树怎么选</span><span class="t">昨天</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="phone-cap"><b>会话抽屉</b> · 搜索、重命名、删除</div>
+    </div>
+  </div>
+</section>
+
+
+<script>
+  var canvas = document.getElementById('canvas');
+  var frame = document.getElementById('frame');
+  var board = document.getElementById('board');
+  var btnAnno = document.getElementById('btn-anno');
+  var btnZoom = document.getElementById('btn-zoom');
+  var zoom = 'fit';
+
+  function fit() {
+    var gap = 76;
+    var s = zoom === 'fit' ? Math.min(1, (document.documentElement.clientWidth - gap) / 1440) : 1;
+    canvas.style.transform = 'scale(' + s + ')';
+    frame.style.width = (1440 * s) + 'px';
+    frame.style.height = (920 * s) + 'px';
+    board.style.justifyContent = s < 1 ? 'center' : 'flex-start';
+    btnZoom.textContent = zoom === 'fit' ? '100% 查看' : '适应窗口';
+    btnZoom.classList.toggle('on', zoom !== 'fit');
+  }
+
+  var btnFloat = document.getElementById('btn-float');
+  var btnPhase = document.getElementById('btn-phase');
+  btnPhase.addEventListener('click', function () {
+    var on = canvas.classList.toggle('phase1');
+    btnPhase.classList.toggle('on', on);
+  });
+
+  btnFloat.addEventListener('click', function () {
+    var on = canvas.classList.toggle('float');
+    btnFloat.classList.toggle('on', on);
+  });
+
+  btnAnno.addEventListener('click', function () {
+    var on = canvas.classList.toggle('annotate');
+    btnAnno.classList.toggle('on', on);
+  });
+
+  btnZoom.addEventListener('click', function () {
+    zoom = zoom === 'fit' ? 'full' : 'fit';
+    fit();
+  });
+
+  /* 角标 → 依据卡片联动，模拟真实页面的就地定位 */
+  document.querySelectorAll('.cite').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      document.querySelectorAll('.cite').forEach(function (c) { c.classList.remove('is-active'); });
+      document.querySelectorAll('.src').forEach(function (s) { s.classList.remove('is-active'); });
+      chip.classList.add('is-active');
+      var id = chip.getAttribute('data-src');
+      var card = document.querySelector('.src[data-src-card="' + id + '"]');
+      if (card) {
+        card.classList.add('is-active');
+        var body = card.closest('.ev-body');
+        if (body) body.scrollTo({ top: Math.max(0, card.offsetTop - 70), behavior: 'smooth' });
+      }
+    });
+  });
+
+  /* 哈希组合： #anno / #float / #shot，可叠加成 #shot-float */
+  var hash = location.hash;
+  if (hash.indexOf('phase1') >= 0 || hash.indexOf('phase') >= 0) {
+    canvas.classList.add('phase1');
+    document.getElementById('btn-phase').classList.add('on');
+  }
+  if (hash.indexOf('float') >= 0) {
+    canvas.classList.add('float');
+    document.getElementById('btn-float').classList.add('on');
+  }
+  if (hash.indexOf('shot') >= 0) {
+    document.body.classList.add('shot');
+    zoom = 'full';
+  }
+  if (hash.indexOf('anno') >= 0) {
+    canvas.classList.add('annotate');
+    btnAnno.classList.add('on');
+  }
+
+  window.addEventListener('resize', fit);
+  fit();
+</script>
+</body>
+</html>
