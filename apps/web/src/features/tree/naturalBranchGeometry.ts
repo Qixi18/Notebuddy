@@ -72,6 +72,22 @@ const RECIPES: Recipe[][] = [
   ]
 ];
 
+// One notebook grows along one central leader; its smaller forks open the crown.
+// Two notebooks have their own rising leaders. Neither borrows another book lane.
+const SINGLE_RECIPE: Recipe = {
+  axis: [[-8,-202],[-28,-260],[-14,-350],[5,-407],[24,-464],[7,-546],[30,-612]],
+  forks: [[.31,[-160,-380],-.18],[.59,[150,-490],.17],[.83,[-65,-590],-.16]],
+  leaves: [[-230,-385,-60],[-85,-440,-10],[226,-493,57],[94,-555,8],[-135,-638,-25],[58,-663,19]],
+};
+const DUAL_RECIPES: Recipe[] = [
+  { axis: [[-8,-202],[-65,-245],[-65,-317],[-110,-373],[-155,-429],[-164,-510],[-142,-577]],
+    forks: [[.30,[-156,-326],-.20],[.59,[-205,-440],.19],[.88,[-184,-561],-.15]],
+    leaves: [[-220,-337,-65],[-97,-398,-10],[-266,-459,-48],[-134,-501,7],[-226,-602,-28],[-116,-650,14]] },
+  { axis: [[12,-230],[80,-263],[97,-335],[139,-388],[181,-441],[198,-519],[169,-596]],
+    forks: [[.30,[174,-330],.21],[.58,[217,-453],-.18],[.88,[196,-581],.15]],
+    leaves: [[239,-342,64],[116,-407,10],[281,-468,51],[152,-524,-5],[248,-622,38],[152,-676,6]] },
+];
+
 export function hashId(id: string): number {
   let h = 2166136261;
   for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
@@ -148,6 +164,19 @@ function paintLimb(id: string, bookId: string, level: 1|2|3, curves: Cubic[], ro
   return {id,bookId,level,parentId,parentT,curves,rootRadius,tipRadius,centerPath:curvePath(curves),outline,grain,textureSpans};
 }
 
+/** Continue the existing leader down into the redrawn stock without moving it. */
+export function rootstockJoin(primary: Limb, scaleY = 1): Limb {
+  const end = pointAt(primary.curves, 0);
+  // Expanded preview banks scale around the leader's start. Invert that scale
+  // for the stock attachment so every bank still begins at world (-8, -165).
+  const start = P(-8, end.y + (-165 - end.y) / scaleY);
+  const tangent = tangentAt(primary.curves, 0);
+  const reach = Math.min(22, Math.hypot(end.x-start.x, end.y-start.y) * .4);
+  return paintLimb(primary.id+':stock', primary.bookId, 1,
+    [[start, P(start.x, start.y-24/scaleY), sub(end,mul(tangent,reach)), end]],
+    22, primary.rootRadius);
+}
+
 /** The child starts at B_parent(t), with its first control along the parent's tangent. */
 function fork(parent: Limb, t: number, end: Point, bend: number, id: string, level: 2|3): Limb {
   const start=pointAt(parent.curves,t),v=tangentAt(parent.curves,t),delta=sub(end,start);
@@ -170,10 +199,11 @@ function assertSlot(slot: number, label: string): void {
  * Scope: three notebook lanes, six reserved Note sites per lane for the home overview.
  * A bank >0 requires a separate/expanded tree, deliberately not silent modulo aliasing.
  */
-export function notebookGeometry(book: BookInput, variant: 0|1|2): BookGeometry {
+export function notebookGeometry(book: BookInput, variant: 0|1|2, crownSize: 1|2|3 = 3): BookGeometry {
   assertSlot(book.treeSlot,'book');
   if(book.treeSlot>2) throw new RangeError('Home design has lanes 0..2. Pass a persisted homeLayoutSlot; do not compact by array index.');
-  const recipe=RECIPES[variant][book.treeSlot], seed=book.id;
+  if(book.treeSlot>=crownSize) throw new RangeError('A main branch must belong to one of the visible notebooks.');
+  const recipe=crownSize===1?SINGLE_RECIPE:crownSize===2?DUAL_RECIPES[book.treeSlot]:RECIPES[variant][book.treeSlot], seed=book.id;
   const spread=[.86,.82,.74][variant];
   const raw=recipe.axis.map(([x,y],i)=>P(x*spread+(i===0?0:noise(seed,'axis-x-'+i)*2),y+(i===0?0:noise(seed,'axis-y-'+i)*2)));
   // Exact C1 tangent continuity across the two primary cubic segments.

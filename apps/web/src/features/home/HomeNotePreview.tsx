@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../../api'
 import type { HomeLeafPreview } from './HomeCourseTree'
+import './note-preview.css'
 
 function excerpt(markdown: string) {
   const paragraph = markdown.split('\n').map(line => line.trim()).find(line => line && !/^(#|\$\$|---)/.test(line)) ?? ''

@@ -16,17 +16,18 @@ const tree = { course_id: 'c0', notebooks: [0, 1, 2, 3].map(index => ({
   })) }],
 })) } as unknown as CourseTree
 
-test('home fits two courses, pages through the third, and exposes no camera controls', async () => {
+test.each([1, 2, 3])('home shows all %i learning courses together without paging or camera controls', count => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 900, height: 700 } as DOMRect)
   const watch = vi.fn()
-  const { container } = render(<HomeCourseGarden courses={courses} trees={[tree]} onVisibleCourseIdsChange={watch} onRoot={vi.fn()} onNotebook={vi.fn()} onNote={vi.fn()} />)
-  expect(screen.getAllByRole('article')).toHaveLength(2)
+  const chosen = courses.slice(0, count)
+  const { container } = render(<HomeCourseGarden courses={chosen} trees={[tree]} onVisibleCourseIdsChange={watch} onRoot={vi.fn()} onNotebook={vi.fn()} onNote={vi.fn()} />)
+  expect(screen.getAllByRole('article')).toHaveLength(count)
+  for (const course of chosen) expect(screen.getByRole('heading', { name: course.name })).toBeTruthy()
+  expect(screen.queryByRole('button', { name: '上一组课程' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '下一组课程' })).toBeNull()
   expect(screen.queryByRole('button', { name: '放大知识树' })).toBeNull()
   expect(container.querySelector('.kt-canvas')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: '下一组课程' }))
-  expect(screen.getAllByRole('article')).toHaveLength(1)
-  expect(screen.getByRole('heading', { name: '课程2' })).toBeTruthy()
-  expect(watch).toHaveBeenLastCalledWith(['c2'])
+  expect(watch).toHaveBeenLastCalledWith(chosen.map(course => course.course_id))
 })
 
 test('bare leaves show their own note preview on focus and retain exact navigation IDs', async () => {

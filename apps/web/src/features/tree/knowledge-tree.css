@@ -33,6 +33,17 @@
 .kt-aggregate text { fill: #45583b; font: 12px 'Microsoft YaHei', system-ui, sans-serif; }
 .kt-aggregate:hover rect, .kt-aggregate:focus-visible rect { fill: #e1e5c8; stroke: #798c57; stroke-width: 2; }
 .kt-vine:hover .kt-vine-paint, .kt-vine:focus-visible .kt-vine-paint, .kt-vine-selected .kt-vine-paint { stroke: #8c883e; stroke-width: 4; }
+.kt-course-directory { outline: none; }
+.kt-course-directory:hover circle, .kt-course-directory:focus-visible circle { fill: #e6ecd7; stroke: #6f8650; stroke-width: 2; }
+.kt-vine-preview > strong { font-size: 16px; }
+.kt-vine-group-heading { color: #566d4c; font-size: 13px; line-height: 1.7; }
+.kt-vine-group-list { display: grid; gap: 10px; }
+.forest-dialog .kt-vine-group-list button { display: grid; grid-template-columns: 1fr auto; gap: 8px 14px; text-align: left; padding: 17px; background: #faf9f0; }
+.kt-vine-group-list strong { font-weight: 600; font-size: 15px; }
+.kt-vine-group-list small { color: #68775a; font-size: 11px; }
+.kt-vine-group-list button > span { grid-column: 1 / -1; font-size: 12px; line-height: 1.85; color: #56664c; }
+.forest-dialog .kt-vine-group-list button:hover, .forest-dialog .kt-vine-group-list .kt-vine-list-selected { background: #edf1df; border-color: #8b9e73; }
+.forest-dialog .forest-relation-selected { border-color: #879b6e; background: #f5f7e9; box-shadow: inset 3px 0 #6d8555; }
 .kt-hint { position: absolute; bottom: 10px; left: 22px; pointer-events: none; margin: 0; padding: 7px 10px; font: 12px 'Microsoft YaHei', system-ui, sans-serif; color: #4b5e46; background: #f7f5eac9; border-radius: 5px; }
 .kt-empty { position: absolute; inset: 42% 0 auto; text-align: center; font-family: 'STSong', 'SimSun', serif; }
 .kt-contents { position: absolute; z-index: 3; top: 80px; right: 18px; bottom: 52px; width: min(360px, calc(100% - 36px)); display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; background: #fcfbf3fa; border: 1px solid #b5b99c; box-shadow: 0 9px 32px #34452f1a; border-radius: 8px; }

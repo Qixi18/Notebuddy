@@ -94,6 +94,74 @@ def test_profile_stale_revision_conflicts_and_preserves_first_write(forest_setup
     assert row["revision"] == 1
 
 
+def test_homepage_limit_allows_edits_and_frees_a_slot_without_changing_notes(forest_setup):
+    client, db, courses, _, notes, _ = forest_setup
+    client.get("/api/v1/forest")
+    third = client.patch(f"/api/v1/forest/courses/{courses[2].id}", json={"expected_revision": 0, "learning_state": "learning"})
+    assert third.status_code == 200
+    fourth = client.post("/api/v1/courses", json={"name": "第四门"}).json()["id"]
+    rejected = client.patch(f"/api/v1/forest/courses/{fourth}", json={"expected_revision": 0, "learning_state": "learning"})
+    assert rejected.status_code == 409
+    assert "最多" in rejected.json()["detail"] and "3" in rejected.json()["detail"]
+    edited = client.patch(f"/api/v1/forest/courses/{courses[0].id}", json={"expected_revision": 0, "learning_state": "learning", "semester": 2})
+    assert edited.status_code == 200
+    removed = client.patch(f"/api/v1/forest/courses/{courses[0].id}", json={"expected_revision": 1, "learning_state": "planned"})
+    assert removed.status_code == 200
+    admitted = client.patch(f"/api/v1/forest/courses/{fourth}", json={"expected_revision": 0, "learning_state": "learning"})
+    assert admitted.status_code == 200
+    rows = client.get("/api/v1/forest").json()["courses"]
+    assert sum(row["learning_state"] == "learning" for row in rows) == 3
+    assert db.get(Note, notes[0].id).content_markdown == "用户正文0"
+    assert db.get(Note, notes[0].id).revision_number == 3
+
+
+def test_homepage_deleted_course_does_not_use_a_slot_and_full_restore_stays_planned(forest_setup):
+    from app.db.models import ForestCourseProfile, utc_now
+    client, db, courses, *_ = forest_setup
+    client.get("/api/v1/forest")
+    client.patch(f"/api/v1/forest/courses/{courses[2].id}", json={"expected_revision": 0, "learning_state": "learning"})
+    courses[0].deleted_at = utc_now()
+    db.commit()
+    fourth = client.post("/api/v1/courses", json={"name": "第四门"}).json()["id"]
+    admitted = client.patch(f"/api/v1/forest/courses/{fourth}", json={"expected_revision": 0, "learning_state": "learning"})
+    assert admitted.status_code == 200
+    assert client.post(f"/api/v1/courses/{courses[0].id}/restore").status_code == 200
+    db.expire_all()
+    assert db.get(ForestCourseProfile, courses[0].id).learning_state == "planned"
+    assert sum(row["learning_state"] == "learning" for row in client.get("/api/v1/forest").json()["courses"]) == 3
+
+
+def test_homepage_legacy_initialization_does_not_overfill(forest_setup):
+    client, db, *_ = forest_setup
+    for i in range(4):
+        course = Course(id=f"legacy-{i}", name=f"旧课{i}")
+        db.add(course); db.flush()
+        db.add(Material(course_id=course.id, lecture_title="讲义", original_filename="old.pdf", stored_filename=f"old-{i}.pdf", size_bytes=1))
+    db.commit()
+    rows = client.get("/api/v1/forest").json()["courses"]
+    assert sum(row["learning_state"] == "learning" for row in rows) == 3
+
+
+def test_homepage_capacity_is_checked_after_another_preloaded_writer_commits(tmp_path):
+    from app.db.models import ForestCourseProfile
+    from app.forest.service import ForestConflict, update_profile
+    engine = create_engine(f"sqlite:///{tmp_path / 'home-capacity.sqlite3'}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        for i in range(4):
+            db.add(Course(id=f"c{i}", name=f"课{i}")); db.flush()
+            db.add(ForestCourseProfile(course_id=f"c{i}", position=i, learning_state="learning" if i < 2 else "planned"))
+        db.commit()
+    with Session(engine, expire_on_commit=False) as first, Session(engine, expire_on_commit=False) as second:
+        a, b = first.get(Course, "c2"), second.get(Course, "c3")
+        second.get(ForestCourseProfile, "c3"); second.commit()
+        update_profile(first, a, expected_revision=0, changes={"learning_state": "learning"}); first.commit()
+        with pytest.raises(ForestConflict, match="3"):
+            update_profile(second, b, expected_revision=0, changes={"learning_state": "learning"})
+        second.rollback()
+    engine.dispose()
+
+
 def test_manual_relation_uses_two_real_notes_and_sources_without_editing_body(forest_setup):
     client, _, courses, _, notes, refs = forest_setup
     response = client.post("/api/v1/forest/relations", json=relation_payload(notes))

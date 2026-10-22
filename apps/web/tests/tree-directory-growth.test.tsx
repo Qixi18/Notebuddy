@@ -28,8 +28,6 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
   </WorkspaceProvider></MemoryRouter>)
   await screen.findByRole('button', { name: '打开知识点：旧知识点' })
   expect(container.querySelector('.kt-branch-growth')).toBeNull()
-  const leafPosition = container.querySelector('[data-note-id="old-note"] [data-leaf-paint]')!.getAttribute('transform')
-  const oldSpine = container.querySelector('.kt-branch[data-notebook-id="old-book"] .kt-book-action path')!.getAttribute('d')
   // The SVG updates immediately; the rounded percentage follows on the next frame.
   if (mode === 'forest') {
     const zoomBefore = Number(container.querySelector('.kt-canvas > g')!.getAttribute('transform')!.match(/scale\(([^)]+)\)/)![1]) * 100
@@ -57,8 +55,13 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
     expect(growth).toHaveLength(1)
     expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe(added.id)
   }
-  expect(container.querySelector('[data-note-id="old-note"] [data-leaf-paint]')!.getAttribute('transform')).toBe(leafPosition)
-  expect(container.querySelector('.kt-branch[data-notebook-id="old-book"] .kt-book-action path')!.getAttribute('d')).toBe(oldSpine)
+  // Changing the notebook count selects a new crown silhouette. The existing
+  // knowledge point keeps its real identity and notebook ownership as it moves.
+  const oldLeaf = screen.getByRole('button', { name: '打开知识点：旧知识点' })
+  expect(oldLeaf.closest('[data-note-id]')?.getAttribute('data-note-id')).toBe('old-note')
+  expect(oldLeaf.closest('[data-notebook-id]')?.getAttribute('data-notebook-id')).toBe(old.id)
+  expect(container.querySelectorAll('.kt-branch[data-notebook-id="old-book"]')).toHaveLength(1)
+  expect(container.querySelectorAll('.kt-branch[data-notebook-id="new-book"]')).toHaveLength(1)
   expect(container.querySelector('.kt-canvas > g')?.getAttribute('transform')).toBe(camera)
 })
 test.each(['home', 'forest'])('%s grows a real generated Note in the same scene and stops polling when its pending material completes', async mode => {
