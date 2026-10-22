@@ -60,10 +60,3 @@ def find_candidates(
     candidates.sort(key=lambda item: item.score, reverse=True)
     return candidates[:limit]
 
-
-def classify_match(score: float, *, exact_name: bool = False) -> tuple[str, str]:
-    if exact_name or score >= 0.98:
-        return "repeat", "名称完全一致，可自动补充来源"
-    if score >= 0.72:
-        return "deepen", "候选名称或摘要相似，需要核对是否为深化内容"
-    return "new", "没有达到课程内自动合并阈值"

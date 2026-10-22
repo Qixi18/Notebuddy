@@ -146,21 +146,6 @@ export type WebSource = {
   retrieved_at: string
 }
 
-export type AssistantResponse = {
-  answer: string
-  sources: AssistantSource[]
-  claims: AssistantClaim[]
-  mode: string
-  web_search_status: 'unavailable' | 'failed' | 'no_results' | 'completed' | 'disabled_by_request' | 'daily_limit'
-}
-
-export type AssistantClaim = {
-  claim_key: string
-  evidence_type: string
-  support_level: string
-  source_indexes: number[]
-}
-
 export type TermExplanationSource = {
   material_id: string
   lecture_title: string
@@ -220,8 +205,6 @@ export type NotebookReadingPosition = {
   notebook_id: string; chapter_id: string | null; note_id: string | null
   mode: 'chapter' | 'book'; section_offset: number; revision: number; updated_at: string
 }
-export type ReadingPositionUpdate = Omit<NotebookReadingPosition, 'notebook_id' | 'revision' | 'updated_at'> & { expected_revision: number }
-
 export type NoteRevision = {
   id: string
   note_id: string

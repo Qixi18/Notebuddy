@@ -2,9 +2,9 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 
-const { createCourse, listNotebooks, createNotebook } = vi.hoisted(() => ({ createCourse: vi.fn(), listNotebooks: vi.fn(), createNotebook: vi.fn() }))
+const { createCourse, listNotebooks } = vi.hoisted(() => ({ createCourse: vi.fn(), listNotebooks: vi.fn() }))
 
-vi.mock('../src/api', () => ({ api: { listNotebooks, createNotebook } }))
+vi.mock('../src/api', () => ({ api: { listNotebooks } }))
 vi.mock('../src/components/AppLayout', () => {
   const courses = [
     { id: 'math', name: '数学分析', description: null, created_at: '2026-10-07T07:07:57' },
@@ -19,7 +19,7 @@ vi.mock('../src/components/AppLayout', () => {
 
 import { CourseLibraryPage } from '../src/pages/CourseLibraryPage'
 
-afterEach(() => { cleanup(); createCourse.mockReset(); listNotebooks.mockReset(); createNotebook.mockReset() })
+afterEach(() => { cleanup(); createCourse.mockReset(); listNotebooks.mockReset() })
 
 function renderPage(initialEntry: string | { pathname: string; state: object } = '/courses') {
   render(<MemoryRouter initialEntries={[initialEntry]}>
@@ -58,20 +58,6 @@ test('搜索笔记名时只显示匹配卡片，搜索课程名时显示该课�
   expect(screen.queryByRole('region', { name: '大学物理' })).toBeNull()
   fireEvent.change(screen.getByRole('searchbox', { name: '搜索笔记或课程' }), { target: { value: '大学物理' } })
   expect(screen.getByRole('link', { name: '打开笔记：波动光学' })).toBeTruthy()
-})
-
-test('新建笔记使用现有笔记本接口，创建后进入笔记', async () => {
-  mockNotes()
-  createNotebook.mockResolvedValue({ id: 'new-note', course_id: 'physics', title: '力学' })
-  renderPage()
-  await screen.findByRole('link', { name: '打开笔记：导数' })
-  fireEvent.click(screen.getByRole('button', { name: '新建笔记' }))
-  expect(screen.getByRole('dialog', { name: '新建笔记' })).toBeTruthy()
-  fireEvent.change(screen.getByLabelText('所属课程'), { target: { value: 'physics' } })
-  fireEvent.change(screen.getByLabelText('笔记名称'), { target: { value: '力学' } })
-  fireEvent.click(screen.getByRole('button', { name: '创建并打开' }))
-  await waitFor(() => expect(createNotebook).toHaveBeenCalledWith('physics', '力学'))
-  expect(await screen.findByText('笔记页面')).toBeTruthy()
 })
 
 test('侧边栏创建课程状态仍由课程页处理', async () => {

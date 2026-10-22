@@ -271,8 +271,7 @@ select:focus-visible {
 }
 
 .global-alert,
-.form-error,
-.form-success {
+.form-error {
   border-color: #ead2c8;
   color: #8b4e42;
   background: #fff8f5;
@@ -755,10 +754,6 @@ textarea::placeholder {
 .materials-browser,
 .materials-list,
 .material-pages-panel,
-.assistant-workspace,
-.assistant-context-bar,
-.assistant-question-form,
-.course-library-card,
 .course-library-empty,
 .course-entry-row {
   border-color: var(--nb-line);
@@ -831,45 +826,6 @@ textarea::placeholder {
   background: var(--nb-mist);
 }
 
-.assistant-workspace,
-.assistant-context-bar,
-.assistant-question-form {
-  background: var(--nb-white);
-}
-
-.assistant-context-bar {
-  border-bottom-color: var(--nb-line);
-}
-
-.assistant-context-bar strong {
-  color: var(--nb-ink);
-}
-
-.assistant-context-bar small,
-.assistant-teacher-status {
-  color: var(--nb-muted);
-}
-
-.conversation-assistant {
-  background: var(--nb-mist);
-}
-
-.course-library-card {
-  border-color: var(--nb-line);
-  background: var(--nb-white);
-  box-shadow: none;
-}
-
-.course-library-card:hover {
-  border-color: var(--nb-sage);
-  box-shadow: 0 12px 30px rgba(31, 42, 34, 0.06);
-}
-
-.course-library-card-mark {
-  color: var(--nb-forest);
-  background: var(--nb-mist);
-}
-
 /* --------------------------------------------------------------- assistant */
 
 .assistant-page .page-heading-block h1 {
@@ -890,17 +846,11 @@ body .material-upload-fields,
 body .material-file-field,
 body .feature-empty-card,
 body .page-loading,
-body .notes-workspace,
-body .notes-index-panel,
 body .note-evidence-sidebar,
 body .note-evidence-panel,
 body .source-card,
 body .knowledge-canvas-panel,
-body .knowledge-relation-panel,
-body .assistant-workspace,
-body .assistant-context-bar,
-body .assistant-question-form,
-body .course-library-card {
+body .knowledge-relation-panel {
   background: var(--nb-white);
 }
 
@@ -942,14 +892,8 @@ body .materials-forest-start {
   left: 28px;
 }
 
-.assistant-answer-content,
 .markdown-preview {
   font-size: 13.5px;
-}
-
-.assistant-question-form textarea {
-  border-color: var(--nb-line);
-  background: var(--nb-white);
 }
 
 .assistant-dock {

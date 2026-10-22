@@ -12,7 +12,6 @@ from app.db.models import SourceRef
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 # 行内公式定界符：$...$（不跨行、非空、内部不再含 $）
 _INLINE_MATH_RE = re.compile(r"\$(?!\$)([^$\n]+?)\$(?!\$)")
-_BLOCK_MATH_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)
 
 
 def _looks_like_prose(text: str) -> bool:

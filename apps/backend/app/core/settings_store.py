@@ -355,6 +355,3 @@ def _apply_to_process(sanitized: dict[str, str]) -> None:
     if "NOTEBOOK_MAX_UPLOAD_MB" in sanitized:
         settings.max_upload_bytes = int(sanitized["NOTEBOOK_MAX_UPLOAD_MB"]) * 1024 * 1024
 
-
-def env_template_path() -> Path:
-    return PROJECT_ROOT / ".env.example"

@@ -2,14 +2,7 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import PurePosixPath
-
-
-def safe_filename(value: str, *, fallback: str = "upload") -> str:
-    name = PurePosixPath(value.replace("\\", "/")).name
-    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
-    return name[:255] or fallback
 
 
 def validate_archive_member(name: str) -> str:
@@ -21,6 +14,3 @@ def validate_archive_member(name: str) -> str:
         raise ValueError("empty archive path")
     return normalized
 
-
-def redact_secrets(value: str) -> str:
-    return re.sub(r"(?i)(api[_-]?key|token|secret|password)\s*[=:]\s*[^\s,;]+", r"\1=[REDACTED]", value)

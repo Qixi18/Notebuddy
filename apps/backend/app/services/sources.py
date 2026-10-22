@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import MaterialPage, NoteSourceMapping, PageBlock, SourceRef
+from app.db.models import MaterialPage, NoteSourceMapping, SourceRef
 
 
 def mark_pages_stale(db: Session, pages: Iterable[MaterialPage]) -> int:
@@ -32,22 +32,3 @@ def mark_pages_stale(db: Session, pages: Iterable[MaterialPage]) -> int:
     )
     return len(source_ids)
 
-
-def active_page_query(material_id: str):
-    """Return the canonical predicate for the current parse version."""
-    return select(MaterialPage).where(
-        MaterialPage.material_id == material_id,
-        MaterialPage.is_active.is_(True),
-    )
-
-
-def active_block_query(material_id: str):
-    return (
-        select(PageBlock)
-        .join(MaterialPage, PageBlock.page_id == MaterialPage.id)
-        .where(
-            MaterialPage.material_id == material_id,
-            MaterialPage.is_active.is_(True),
-            PageBlock.content != "",
-        )
-    )
