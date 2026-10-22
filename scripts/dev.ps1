@@ -12,7 +12,7 @@ function Assert-PortFree([int] $port) {
     $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
     if ($listeners.Count -gt 0) {
         $owners = ($listeners | Select-Object -ExpandProperty OwningProcess -Unique) -join ', '
-        throw "端口 $port 已被占用（进程 $owners）。请先停止占用进程后再启动 NoteBuddy。"
+        throw "Port $port is already in use (processes: $owners). Stop the owning service before starting NoteBuddy."
     }
 }
 

@@ -10,6 +10,16 @@ export function TrunkSprite({ variant, empty = false }: { variant: number; empty
     <image href="/assets/forest/trunks-atlas.webp" width="1254" height="1254" />
   </svg>
 }
+
+/** Redrawn lower stocks; the existing procedural crown remains unchanged. */
+export function RootstockSprite({ variant }: { variant: number }) {
+  const crops = ['30 35 665 735', '695 35 665 735', '1360 35 639 735']
+  const offsets = [-24, -8, -14]
+  const index = variant % 3
+  return <svg x={-112 + offsets[index]} y="-248" width="224" height="265" viewBox={crops[index]} preserveAspectRatio="none" overflow="hidden" aria-hidden="true">
+    <image href="/assets/forest/rootstocks-v2.png" width="1999" height="787" />
+  </svg>
+}
 export function LeafSprite({ variant, angle = 0 }: { variant: number; angle?: number }) {
   return <g transform={`rotate(${angle})`} aria-hidden="true" pointerEvents="none">
     <svg x="-23" y="-65" width="46" height="69" viewBox={`${(variant % 3) * 418} ${Math.floor(variant / 3) * 627} 418 627`} preserveAspectRatio="none" overflow="hidden">

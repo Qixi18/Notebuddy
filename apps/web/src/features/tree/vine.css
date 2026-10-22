@@ -1,0 +1,36 @@
+/* Shared renderer styles, extracted from forest.css. Rebuild instead of editing. */
+.nb-vines {
+  --bg: oklch(96.8692% 0.014678 98.2839);
+  --fg: oklch(38.0360% 0.051598 160.1586);
+  --nav: var(--fg);
+  --on-nav: var(--bg);
+  --hover: oklch(from var(--bg) calc(l - .065) c h);
+  --focus: oklch(from var(--fg) calc(l + .08) c h);
+  --vine: #66804b;
+  --vine-dark: oklch(from var(--vine) calc(l - .12) c h);
+  --vine-light: #bac28a;
+  --leaf-dark: oklch(from var(--vine) calc(l - .08) c h);
+  --leaf-mid: oklch(from var(--vine) calc(l + .04) c h);
+  --leaf-light: oklch(from var(--vine) calc(l + .12) calc(c * .8) h);
+}
+.vine-outline { fill:var(--vine); stroke:var(--vine-dark); stroke-width:.45; }
+.vine-grain { stroke:var(--vine-light); fill:none; stroke-width:.7; opacity:.8; }
+.vine-grain:nth-child(even) { stroke:var(--vine-dark); stroke-width:.6; opacity:.65; }
+.vine-tendril,.vine-petiole { stroke:var(--vine); fill:none; stroke-width:1.5; stroke-linecap:round; }
+.vine-control { outline:none; cursor:pointer; }
+.vine-control:hover .vine-outline,.vine-control:focus-visible .vine-outline,.vine-control.is-selected .vine-outline { fill:var(--vine-dark); }
+.vine-focus { fill:none; stroke:transparent; stroke-width:1.8; vector-effect:non-scaling-stroke; pointer-events:none; }
+.vine-control:focus-visible .vine-focus { stroke:var(--fg); stroke-dasharray:3 5; }
+.vine-leaf { outline:none; cursor:pointer; }
+.relation-leaf-shape { stroke:var(--vine-dark); stroke-width:.7; }
+.leaf-variant-1 { fill:url(#vine-leaf-1); }
+.leaf-variant-2 { fill:url(#vine-leaf-2); }
+.relation-leaf-wash { fill:var(--vine-light); opacity:.14; }
+.relation-vein { fill:none; stroke:var(--vine-light); stroke-width:.8; opacity:.9; }
+.relation-side-vein { fill:none; stroke:var(--vine-light); stroke-width:.45; opacity:.65; }
+.relation-leaf-focus { fill:none; stroke:transparent; stroke-width:2; vector-effect:non-scaling-stroke; }
+.vine-leaf:hover .relation-leaf-focus,.vine-leaf:focus-visible .relation-leaf-focus,.vine-leaf.is-selected .relation-leaf-focus { stroke:var(--fg); }
+.vine-leaf:hover .relation-leaf-shape,.vine-leaf:focus-visible .relation-leaf-shape,.vine-leaf.is-selected .relation-leaf-shape { fill:var(--vine-dark); }
+.vine-leaf:hover .relation-leaf-texture,.vine-leaf:focus-visible .relation-leaf-texture,.vine-leaf.is-selected .relation-leaf-texture { filter:brightness(.83) saturate(1.1); }
+.selected-dot { fill:var(--bg); stroke:var(--fg); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+@media (prefers-reduced-motion:reduce) { .nb-vines * { animation:none!important;transition:none!important; } }

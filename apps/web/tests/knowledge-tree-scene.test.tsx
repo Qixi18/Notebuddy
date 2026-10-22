@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { KnowledgeTreeScene } from '../src/features/tree/KnowledgeTreeScene'
+import { FOREST_LAYOUT_VERSION } from '../src/features/tree/forestGroveLayout'
 import { notebookGeometry, overviewLeaves, sceneInitialCamera } from '../src/features/tree/treeGeometry'
 import type { NotebookRead, SectionRead } from '../src/types'
 import type { CrossCourseRelation, ForestCourse } from '../src/features/forest/types'
@@ -44,7 +45,7 @@ it('lazy directories preserve a camera the reader already moved', async () => {
   expect(container.querySelector('.kt-canvas > g')!.getAttribute('transform')).toBe(before)
 })
 describe('persistent botanical slots', () => {
-  it('adds one independently growing book branch without replacing or moving existing books and Notes', () => {
+  it('rebalances the sparse crown on notebook creation while keeping existing book and Note identities', () => {
     const first = book(3)
     const second = { ...book(0, 1), id: 'new-book', title: '新增的笔记本' }
     const callbacks = { onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn() }
@@ -52,14 +53,16 @@ describe('persistent botanical slots', () => {
     const view = render(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: [first] }]} />)
     const oldBranch = view.container.querySelector('.kt-branch[data-notebook-id="book"]')
     const oldLeaf = view.container.querySelector('[data-note-id="note-1"]')
-    const leafPosition = oldLeaf?.querySelector('[data-leaf-paint]')?.getAttribute('transform')
     const oldGeometry = notebookGeometry(first)
     expect(view.container.querySelector('.kt-branch-growth')).toBeNull()
     view.rerender(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: [first, second] }]} />)
     expect(screen.getByRole('button', { name: '续读笔记本：新增的笔记本' })).toBeTruthy()
     expect(view.container.querySelector('.kt-branch[data-notebook-id="book"]')).toBe(oldBranch)
     expect(view.container.querySelector('[data-note-id="note-1"]')).toBe(oldLeaf)
-    expect(oldLeaf?.querySelector('[data-leaf-paint]')?.getAttribute('transform')).toBe(leafPosition)
+    expect(oldLeaf?.getAttribute('data-notebook-id')).toBe(first.id)
+    const balancedPosition = oldLeaf?.querySelector('[data-leaf-paint]')?.getAttribute('transform')
+    fireEvent.click(screen.getByRole('button', { name: '打开知识点：知识点1' }))
+    expect(callbacks.onNote).toHaveBeenCalledWith('course', first.id, first.chapters[0].sections[1])
     expect(notebookGeometry(first)).toEqual(oldGeometry)
     const growth = view.container.querySelectorAll('.kt-branch-growth')
     expect(growth).toHaveLength(1)
@@ -68,6 +71,7 @@ describe('persistent botanical slots', () => {
     expect(callbacks.onNotebook).toHaveBeenCalledExactlyOnceWith('course', 'new-book')
     // A refreshed copy of the directory must not replay old branch growth.
     view.rerender(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: structuredClone([first, second]) }]} />)
+    expect(oldLeaf?.querySelector('[data-leaf-paint]')?.getAttribute('transform')).toBe(balancedPosition)
     expect(view.container.querySelector('.kt-branch-growth')).toBeNull()
     view.unmount()
     const reloaded = render(<KnowledgeTreeScene {...props} trees={[{ course_id: 'course', notebooks: [first, second] }]} />)
@@ -164,7 +168,7 @@ describe('tree actions', () => {
   })
   it('allows all 200 real sections through dense expansion and closes with focus restored', () => {
     const c = mount(200)
-    const expand = screen.getByRole('button', { name: '展开数学笔记的全部200个知识点' })
+    const expand = screen.getByRole('button', { name: '查看离散数学的完整目录' })
     fireEvent.click(expand)
     fireEvent.click(screen.getByRole('button', { name: '第一讲 · 知识点199' }))
     expect(c.onNote).toHaveBeenCalledExactlyOnceWith('course', 'book', section(199))
@@ -184,7 +188,7 @@ describe('tree actions', () => {
   it('restores camera using measured container dimensions and returns its viewport', async () => {
     const dimensions = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 900, bottom: 600, width: 900, height: 600, toJSON: () => ({}) })
     const onViewChange = vi.fn()
-    mount(3, { initialView: { camera: { x: -500, y: -100, k: 1 }, viewport: { width: 1200, height: 800 }, slots: {} }, onViewChange })
+    mount(3, { initialView: { layoutVersion: FOREST_LAYOUT_VERSION, camera: { x: -500, y: -100, k: 1 }, viewport: { width: 1200, height: 800 }, slots: {} }, onViewChange })
     await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith(expect.objectContaining({ camera: { x: -650, y: -200, k: 1 }, viewport: { width: 900, height: 600 } })))
     dimensions.mockRestore()
   })
@@ -193,8 +197,8 @@ describe('tree actions', () => {
     const onViewChange = vi.fn()
     const props = { courses: [course], trees: [{ course_id: 'course', notebooks: [book(200)] }], onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn(), onViewChange }
     const first = render(<KnowledgeTreeScene {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: '展开数学笔记的全部200个知识点' }))
-    await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith(expect.objectContaining({ contents: { courseId: 'course', notebookId: 'book' } })))
+    fireEvent.click(screen.getByRole('button', { name: '查看离散数学的完整目录' }))
+    await waitFor(() => expect(onViewChange).toHaveBeenLastCalledWith(expect.objectContaining({ contents: { courseId: 'course' } })))
     const saved = onViewChange.mock.lastCall![0]
     first.unmount()
     const restored = render(<KnowledgeTreeScene {...props} trees={[]} initialView={saved} />)
@@ -210,7 +214,7 @@ describe('tree actions', () => {
     mount(200, { initialView: { camera: { x: 0, y: 0, k: 1 }, viewport: { width: 1000, height: 700 }, slots: {}, revealedNoteId: 'note-199' } })
     expect(screen.getByRole('button', { name: '打开知识点：知识点199' })).toBeTruthy()
   })
-  it('frames both selected vine endpoints after the second course directory arrives', async () => {
+  it.each(['fresh', 'old-row'])('frames both selected vine endpoints after the second course directory arrives (%s view)', async loadMode => {
     const dimensions = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 1100, bottom: 750, width: 1100, height: 750, toJSON: () => ({}) })
     const courses = Array.from({ length: 9 }, (_, index) => ({ ...course, course_id: `course-${index}`, position: index }))
     const a = book(1); a.course_id = 'course-0'
@@ -219,25 +223,28 @@ describe('tree actions', () => {
     const onViewChange = vi.fn()
     const onVisibleCourseIdsChange = vi.fn()
     const props = { courses, trees: [{ course_id: a.course_id, notebooks: [a] }], relations: [relation], selectedRelationId: 'vine', onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn(), onViewChange, onVisibleCourseIdsChange }
-    const instance = render(<KnowledgeTreeScene {...props} />)
+    const legacyView = loadMode === 'old-row' ? { camera: { x: -125, y: -80, k: .7 }, viewport: { width: 1100, height: 750 }, slots: {} } : undefined
+    const instance = render(<KnowledgeTreeScene {...props} initialView={legacyView} />)
     await waitFor(() => expect(onViewChange).toHaveBeenCalled())
     expect(onVisibleCourseIdsChange.mock.lastCall![0]).toEqual(expect.arrayContaining([a.course_id, b.course_id]))
-    instance.rerender(<KnowledgeTreeScene {...props} trees={[...props.trees, { course_id: b.course_id, notebooks: [b] }]} />)
+    instance.rerender(<KnowledgeTreeScene {...props} initialView={legacyView} trees={[...props.trees, { course_id: b.course_id, notebooks: [b] }]} />)
     await waitFor(() => {
       const current = onViewChange.mock.lastCall![0].camera
       for (const [courseId, notebook] of [[a.course_id, a], [b.course_id, b]] as const) {
         const element = instance.container.querySelector(`[data-course-id="${courseId}"]`)!
         const [x, y] = element.getAttribute('transform')!.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
-        const leaf = notebookGeometry(notebook).leaves[0]
-        expect((x + leaf.x) * current.k + current.x).toBeGreaterThan(0)
-        expect((x + leaf.x) * current.k + current.x).toBeLessThan(1100)
-        expect((y + leaf.y - 25) * current.k + current.y).toBeGreaterThan(0)
-        expect((y + leaf.y - 25) * current.k + current.y).toBeLessThan(750)
+        const noteId = notebook.chapters[0].sections[0].id
+        const paint = element.querySelector(`[data-note-id="${noteId}"] [data-leaf-paint]`)!
+        const [leafX, leafY] = paint.getAttribute('transform')!.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
+        expect((x + leafX) * current.k + current.x).toBeGreaterThan(0)
+        expect((x + leafX) * current.k + current.x).toBeLessThan(1100)
+        expect((y + leafY) * current.k + current.y).toBeGreaterThan(0)
+        expect((y + leafY) * current.k + current.y).toBeLessThan(750)
       }
     })
     instance.unmount()
     const savedCamera = { x: -125, y: -80, k: .7 }
-    const initialView = { camera: savedCamera, viewport: { width: 1100, height: 750 }, slots: {} }
+    const initialView = { layoutVersion: FOREST_LAYOUT_VERSION, camera: savedCamera, viewport: { width: 1100, height: 750 }, slots: {} }
     const restored = render(<KnowledgeTreeScene {...props} initialView={initialView} />)
     await waitFor(() => expect(onViewChange.mock.lastCall![0].camera).toEqual(savedCamera))
     restored.rerender(<KnowledgeTreeScene {...props} initialView={initialView} trees={[...props.trees, { course_id: b.course_id, notebooks: [b] }]} />)

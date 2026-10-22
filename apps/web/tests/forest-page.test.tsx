@@ -67,7 +67,7 @@ test.each([900, 390])('two returns preserve camera and directory at %ipx', async
   for (let i = 0; i < 2; i++) {
     const focus = screen.queryByRole('button', { name: '聚焦课程：课程0' })
     if (focus) fireEvent.click(focus)
-    fireEvent.click(await screen.findByRole('button', { name: '展开c0笔记本的全部200个知识点' }))
+    fireEvent.click(await screen.findByRole('button', { name: '查看课程0的完整目录' }))
     fireEvent.click(await screen.findByRole('button', { name: '第一讲 · c0知识点199' }))
     const saved = JSON.parse(sessionStorage.getItem('notebuddy.scene.forest')!).view
     fireEvent.click(await screen.findByRole('button', { name: '返回森林' }))

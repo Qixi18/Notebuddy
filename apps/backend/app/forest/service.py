@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 
-from sqlalchemy import exists, func, or_, select, update
+from sqlalchemy import case, exists, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.db.models import (
     Course,
@@ -24,6 +24,20 @@ from app.db.models import (
 
 class ForestConflict(ValueError):
     pass
+
+
+HOME_COURSE_LIMIT = 3
+
+
+def _learning_count():
+    counted = aliased(ForestCourseProfile)
+    return (
+        select(func.count())
+        .select_from(counted)
+        .join(Course, Course.id == counted.course_id)
+        .where(Course.deleted_at.is_(None), counted.learning_state == "learning")
+        .scalar_subquery()
+    )
 
 
 def _json_strings(value: str) -> list[str]:
@@ -54,7 +68,10 @@ def ensure_profile(db: Session, course: Course) -> ForestCourseProfile:
         .values(
             course_id=course.id,
             position=position,
-            learning_state="learning" if has_material else "planned",
+            learning_state=(
+                case((_learning_count() < HOME_COURSE_LIMIT, "learning"), else_="planned")
+                if has_material else "planned"
+            ),
         )
         .on_conflict_do_nothing(index_elements=[ForestCourseProfile.course_id])
     )
@@ -198,16 +215,46 @@ def update_profile(db: Session, course: Course, *, expected_revision: int, chang
     if "prerequisites" in values:
         values["prerequisites_json"] = json.dumps(values.pop("prerequisites"), ensure_ascii=False)
     values["revision"] = ForestCourseProfile.revision + 1
+    criteria = [
+        ForestCourseProfile.course_id == course.id,
+        ForestCourseProfile.revision == expected_revision,
+    ]
+    if changes.get("learning_state") == "learning":
+        # Keep the count in the write statement: two readers may both have seen
+        # the final free slot, but only one writer may claim it.
+        criteria.append(or_(
+            ForestCourseProfile.learning_state == "learning",
+            _learning_count() < HOME_COURSE_LIMIT,
+        ))
     updated = db.execute(
         update(ForestCourseProfile)
-        .where(
-            ForestCourseProfile.course_id == course.id,
-            ForestCourseProfile.revision == expected_revision,
-        )
+        .where(*criteria)
         .values(**values)
     )
     if updated.rowcount != 1:
+        current = db.get(ForestCourseProfile, course.id, populate_existing=True)
+        if (
+            current is not None
+            and current.revision == expected_revision
+            and changes.get("learning_state") == "learning"
+            and current.learning_state != "learning"
+        ):
+            raise ForestConflict("首页最多放 3 棵正在学的课程树，请先移出一门课程后重试")
         raise ForestConflict("森林课程信息已被修改，请刷新后重试")
+
+
+def prepare_course_restore(db: Session, course: Course) -> None:
+    """Restore all course data while keeping an already full home selection."""
+    ensure_profile(db, course)
+    db.execute(
+        update(ForestCourseProfile)
+        .where(
+            ForestCourseProfile.course_id == course.id,
+            ForestCourseProfile.learning_state == "learning",
+            _learning_count() >= HOME_COURSE_LIMIT,
+        )
+        .values(learning_state="planned", revision=ForestCourseProfile.revision + 1)
+    )
 
 
 def relation_display(db: Session, relation: CrossCourseRelation) -> dict | None:
