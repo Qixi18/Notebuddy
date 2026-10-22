@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>答疑页三栏分割 · 方案对比（效果图，未落地）</title>
+<style>
+  :root {
+    --line-now: #e5e7e2;   /* 现状 1.25:1 */
+    --line-light: #c9d3c6; /* 轻   1.54:1 */
+    --line-mid: #aebfa8;   /* 中   1.94:1 */
+    --line-heavy: #8fa78c; /* 重   2.60:1 */
+    --panel-green: #eef4ee;
+    --forest: #2f5d45;
+    --ink: #26332a;
+    --muted: #6b7a6d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 32px 48px;
+    background: #f7f9f7;
+    font: 14px/1.7 "Microsoft YaHei", "PingFang SC", Inter, system-ui, sans-serif;
+    color: var(--ink);
+  }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .lead { color: var(--muted); font-size: 13px; margin: 0 0 26px; max-width: 860px; }
+  h2 { font-size: 15px; margin: 34px 0 4px; }
+  .note { color: var(--muted); font-size: 12.5px; margin: 0 0 16px; }
+
+  /* ---------- 迷你不会话页 ---------- */
+  .grid { display: flex; flex-wrap: wrap; gap: 22px; }
+  .card { background: #fff; border: 1px solid #e3e8e3; border-radius: 12px; padding: 14px; }
+  .card h3 { margin: 0 0 2px; font-size: 13px; }
+  .card .sub { margin: 0 0 12px; font-size: 11.5px; color: var(--muted); }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 10.5px; margin-left: 6px; vertical-align: 1px; }
+  .tag.rec { background: #e7f1e8; color: #2c5c40; }
+  .tag.no  { background: #f2f2ee; color: #7c857c; }
+
+  .stage {
+    display: flex; width: 660px; height: 320px;
+    border: 1px solid #e5e7e2; border-radius: 10px; overflow: hidden;
+    background: #fff; font-size: 10px;
+  }
+  .rail { width: 168px; padding: 10px 8px; display: flex; flex-direction: column; gap: 7px; }
+  .rail .pet { height: 44px; border-radius: 7px; background: #eef2ee; display: flex; align-items: center; gap: 6px; padding: 0 7px; }
+  .rail .pet i { width: 22px; height: 22px; border-radius: 50%; background: #cfdccf; }
+  .rail .pet span { font-size: 9.5px; color: var(--muted); }
+  .rail .newbtn { height: 20px; border-radius: 5px; background: #f1f5f1; color: #3d5744; display: flex; align-items: center; padding: 0 7px; font-size: 9.5px; }
+  .grp { font-size: 9px; color: var(--muted); display: flex; justify-content: space-between; padding: 0 4px; }
+  .row { height: 19px; border-radius: 5px; padding: 0 7px; display: flex; align-items: center; color: #4a5a4d; font-size: 9.5px; }
+  .row.on { background: rgba(47,93,69,.14); color: var(--forest); font-weight: 600; }
+  .row.plain { color: #8b968b; }
+
+  .chat { flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .chat .ttl { font-size: 11px; font-weight: 600; color: var(--ink); }
+  .chat .ctx { font-size: 9px; color: var(--muted); display: flex; gap: 8px; }
+  .chat .ctx b { color: var(--forest); font-weight: 600; }
+  .bubble { border: 1px solid #e7ebe7; border-radius: 4px 10px 10px 10px; padding: 9px 11px; display: flex; flex-direction: column; gap: 6px; }
+  .bubble .h { font-size: 9.5px; font-weight: 700; }
+  .bubble .p { height: 6px; border-radius: 3px; background: #eef1ee; }
+  .bubble .p.s { width: 72%; }
+  .bubble .p.m { width: 88%; }
+  .chips { display: flex; gap: 4px; }
+  .chip { height: 14px; width: 46px; border-radius: 20px; background: #eef4ee; }
+  .composer { margin-top: auto; height: 26px; border: 1px solid #e2e8e2; border-radius: 8px; display: flex; align-items: center; padding: 0 9px; color: #9aa69b; font-size: 9px; justify-content: space-between; }
+  .send { width: 34px; height: 16px; border-radius: 5px; background: var(--forest); color: #fff; font-size: 8.5px; display: flex; align-items: center; justify-content: center; }
+
+  .changes { width: 150px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+  .changes .h { font-size: 9.5px; font-weight: 600; color: var(--forest); display: flex; justify-content: space-between; }
+  .changes .empty { font-size: 9px; color: var(--muted); line-height: 1.6; }
+  .changes .foot { margin-top: auto; font-size: 8.5px; color: var(--muted); }
+
+  /* ---------- 变体：只改两处边界的画法 ---------- */
+  .v-now   .rail { border-right: none; }
+  .v-now   .changes { border-left: 1px solid var(--line-now); }
+
+  .v-light .rail { border-right: 1px solid var(--line-light); }
+  .v-light .changes { border-left: 1px solid var(--line-light); }
+
+  .v-mid   .rail { border-right: 2px solid var(--line-mid); }
+  .v-mid   .changes { border-left: 2px solid var(--line-mid); }
+
+  .v-heavy .rail { border-right: 3px solid var(--line-heavy); }
+  .v-heavy .changes { border-left: 3px solid var(--line-heavy); }
+
+  .v-green .rail { border-right: none; }
+  .v-green .changes { border-left: 1px solid #d3e2d5; background: var(--panel-green); }
+
+  .v-both  .rail { border-right: 1px solid var(--line-light); background: #fbfcfa; }
+  .v-both  .changes { border-left: 1px solid #d3e2d5; background: var(--panel-green); }
+
+  /* ---------- 对比表 ---------- */
+  table { border-collapse: collapse; margin-top: 10px; font-size: 12px; background: #fff; border-radius: 10px; overflow: hidden; }
+  th, td { border: 1px solid #e6eae6; padding: 6px 12px; text-align: left; }
+  th { background: #f2f5f1; font-weight: 600; }
+  td.bar { width: 150px; }
+  .swatch { display: inline-block; width: 100%; height: 8px; border-radius: 4px; vertical-align: middle; }
+  .verdict { margin-top: 18px; padding: 14px 16px; background: #eef4ee; border-left: 3px solid var(--forest); border-radius: 0 10px 10px 0; max-width: 900px; }
+  .verdict b { color: var(--forest); }
+  .verdict ol { margin: 8px 0 0; padding-left: 20px; }
+</style>
+</head>
+<body>
+
+<h1>答疑页三栏分割 · 方案对比</h1>
+<p class="lead">
+  只画「做出来长什么样」，没有改任何产品代码。左栏与对话列之间<strong>原本没有线</strong>（只有间距）；
+  右栏是一条 <code>1px #e5e7e2</code>，与白底对比度约 1.25:1，等于没画。下面按「加线的力度」和「换底色」两条路给效果。
+</p>
+
+<h2>一、加线：四档力度</h2>
+<p class="note">同一条线，从「几乎看不见」到「明确分区」。色值都取灰绿，避免引入外来色。</p>
+<div class="grid">
+
+  <div class="card">
+    <h3>现状<span class="tag no">等于没有</span></h3>
+    <p class="sub">左栏无线；右栏 1px #e5e7e2 · 1.25:1</p>
+    <div class="stage v-now">
+      <aside class="rail">
+        <div class="pet"><i></i><span>肥鱼 · 数学助手</span></div>
+        <div class="newbtn">＋ 新对话</div>
+        <div class="grp"><span>昨天</span></div>
+        <div class="row plain">新对话</div>
+        <div class="row plain">新对话</div>
+        <div class="grp"><span>软件 · 12 篇会话</span></div>
+        <div class="row">红黑树是什么？</div>
+        <div class="row plain">周布联调</div>
+        <div class="grp"><span>聊天课程 · 11</span></div>
+        <div class="row plain">新对话</div>
+      </aside>
+      <section class="chat">
+        <div class="ttl">答疑桌宠 · 软件</div>
+        <div class="ctx"><span>范围 <b>整门课程</b></span><span>依据 2 段</span></div>
+        <div class="bubble">
+          <div class="h">先说依据</div>
+          <div class="p m"></div><div class="p s"></div>
+          <div class="chips"><div class="chip"></div><div class="chip"></div></div>
+        </div>
+        <div class="composer"><span>问肥鱼任何关于「软件」的问题……</span><span class="send">发送</span></div>
+      </section>
+      <aside class="changes">
+        <div class="h"><span>本次改动</span><span>0</span></div>
+        <div class="empty">这次会话还没有改动记录。<br>在笔记里做修改时，改动会出现在这里。</div>
+        <div class="foot">全部写入笔记</div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>轻<span class="tag">能看见，不抢</span></h3>
+    <p class="sub">1px #c9d3c6 · 1.54:1</p>
+    <div class="stage v-light">
+      <aside class="rail">
+        <div class="pet"><i></i><span>肥鱼 · 数学助手</span></div>
+        <div class="newbtn">＋ 新对话</div>
+        <div class="grp"><span>昨天</span></div>
+        <div class="row plain">新对话</div>
+        <div class="row plain">新对话</div>
+        <div class="grp"><span>软件 · 12 篇会话</span></div>
+        <div class="row on">红黑树是什么？</div>
+        <div class="row plain">周布联调</div>
+        <div class="grp"><span>聊天课程 · 11</span></div>
+        <div class="row plain">新对话</div>
+      </aside>
+      <section class="chat">
+        <div class="ttl">答疑桌宠 · 软件</div>
+        <div class="ctx"><span>范围 <b>整门课程</b></span><span>依据 2 段</span></div>
+        <div class="bubble">
+          <div class="h">先说依据</div>
+          <div class="p m"></div><div class="p s"></div>
+          <div class="chips"><div class="chip"></div><div class="chip"></div></div>
+        </div>
+        <div class="composer"><span>问肥鱼任何关于「软件」的问题……</span><span class="send">发送</span></div>
+      </section>
+      <aside class="changes">
+        <div class="h"><span>本次改动</span><span>0</span></div>
+        <div class="empty">这次会话还没有改动记录。<br>在笔记里做修改时，改动会出现在这里。</div>
+        <div class="foot">全部写入笔记</div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>中<span class="tag">分区明确</span></h3>
+    <p class="sub">2px #aebfa8 · 1.94:1</p>
+    <div class="stage v-mid">
+      <aside class="rail">
+        <div class="pet"><i></i><span>肥鱼 · 数学助手</span></div>
+        <div class="newbtn">＋ 新对话</div>
+        <div class="grp"><span>昨天</span></div>
+        <div class="row plain">新对话</div>
+        <div class="row plain">新对话</div>
+        <div class="grp"><span>软件 · 12 篇会话</span></div>
+        <div class="row on">红黑树是什么？</div>
+        <div class="row plain">周布联调</div>
+        <div class="grp"><span>聊天课程 · 11</span></div>
+        <div class="row plain">新对话</div>
+      </aside>
+      <section class="chat">
+        <div class="ttl">答疑桌宠 · 软件</div>
+        <div class="ctx"><span>范围 <b>整门课程</b></span><span>依据 2 段</span></div>
+        <div class="bubble">
+          <div class="h">先说依据</div>
+          <div class="p m"></div><div class="p s"></div>
+          <div class="chips"><div class="chip"></div><div class="chip"></div></div>
+        </div>
+        <div class="composer"><span>问肥鱼任何关于「软件」的问题……</span><span class="send">发送</span></div>
+      </section>
+      <aside class="changes">
+        <div class="h"><span>本次改动</span><span>0</span></div>
+        <div class="empty">这次会话还没有改动记录。<br>在笔记里做修改时，改动会出现在这里。</div>
+        <div class="foot">全部写入笔记</div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>重<span class="tag no">偏硬，容易框碎</span></h3>
+    <p class="sub">3px #8fa78c · 2.60:1</p>
+    <div class="stage v-heavy">
+      <aside class="rail">
+        <div class="pet"><i></i><span>肥鱼 · 数学助手</span></div>
+        <div class="newbtn">＋ 新对话</div>
+        <div class="grp"><span>昨天</span></div>
+        <div class="row plain">新对话</div>
+        <div class="row plain">新对话</div>
+        <div class="grp"><span>软件 · 12 篇会话</span></div>
+        <div class="row on">红黑树是什么？</div>
+        <div class="row plain">周布联调</div>
+        <div class="grp"><span>聊天课程 · 11</span></div>
+        <div class="row plain">新对话</div>
+      </aside>
+      <section class="chat">
+        <div class="ttl">答疑桌宠 · 软件</div>
+        <div class="ctx"><span>范围 <b>整门课程</b></span><span>依据 2 段</span></div>
+        <div class="bubble">
+          <div class="h">先说依据</div>
+          <div class="p m"></div><div class="p s"></div>
+          <div class="chips"><div class="chip"></div><div class="chip"></div></div>
+        </div>
+        <div class="composer"><span>问肥鱼任何关于「软件」的问题……</span><span class="send">发送</span></div>
+      </section>
+      <aside class="changes">
+        <div class="h"><span>本次改动</span><span>0</span></div>
+        <div class="empty">这次会话还没有改动记录。<br>在笔记里做修改时，改动会出现在这里。</div>
+        <div class="foot">全部写入笔记</div>
+      </aside>
+    </div>
+  </div>
+
+</div>
+
+<h2>二、换底色：用浅绿代替线</h2>
+<p class="note">线最多做到 2.6:1 仍然偏弱；底色是靠「面」而不是「线」来分区，视觉重量大得多，而且不产生额外线条噪声。</p>
+<div class="grid">
+
+  <div class="card">
+    <h3>只把右栏铺浅绿<span class="tag rec">推荐</span></h3>
+    <p class="sub">#eef4ee + 1px #d3e2d5 收口，左栏不动</p>
+    <div class="stage v-green">
+      <aside class="rail">
+        <div class="pet"><i></i><span>肥鱼 · 数学助手</span></div>
+        <div class="newbtn">＋ 新对话</div>
+        <div class="grp"><span>昨天</span></div>
+        <div class="row plain">新对话</div>
+        <div class="row plain">新对话</div>
+        <div class="grp"><span>软件 · 12 篇会话</span></div>
+        <div class="row on">红黑树是什么？</div>
+        <div class="row plain">周布联调</div>
+        <div class="grp"><span>聊天课程 · 11</span></div>
+        <div class="row plain">新对话</div>
+      </aside>
+      <section class="chat">
+        <div class="ttl">答疑桌宠 · 软件</div>
+        <div class="ctx"><span>范围 <b>整门课程</b></span><span>依据 2 段</span></div>
+        <div class="bubble">
+          <div class="h">先说依据</div>
+          <div class="p m"></div><div class="p s"></div>
+          <div class="chips"><div class="chip"></div><div class="chip"></div></div>
+        </div>
+        <div class="composer"><span>问肥鱼任何关于「软件」的问题……</span><span class="send">发送</span></div>
+      </section>
+      <aside class="changes">
+        <div class="h"><span>本次改动</span><span>0</span></div>
+        <div class="empty">这次会话还没有改动记录。<br>在笔记里做修改时，改动会出现在这里。</div>
+        <div class="foot">全部写入笔记</div>
+      </aside>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>两栏都铺（左更浅）<span class="tag">也可行，但更沉</span></h3>
+    <p class="sub">右栏 #eef4ee，左栏仅 #fbfcfa</p>
+    <div class="stage v-both">
+      <aside class="rail">
+        <div class="pet"><i></i><span>肥鱼 · 数学助手</span></div>
+        <div class="newbtn">＋ 新对话</div>
+        <div class="grp"><span>昨天</span></div>
+        <div class="row plain">新对话</div>
+        <div class="row plain">新对话</div>
+        <div class="grp"><span>软件 · 12 篇会话</span></div>
+        <div class="row on">红黑树是什么？</div>
+        <div class="row plain">周布联调</div>
+        <div class="grp"><span>聊天课程 · 11</span></div>
+        <div class="row plain">新对话</div>
+      </aside>
+      <section class="chat">
+        <div class="ttl">答疑桌宠 · 软件</div>
+        <div class="ctx"><span>范围 <b>整门课程</b></span><span>依据 2 段</span></div>
+        <div class="bubble">
+          <div class="h">先说依据</div>
+          <div class="p m"></div><div class="p s"></div>
+          <div class="chips"><div class="chip"></div><div class="chip"></div></div>
+        </div>
+        <div class="composer"><span>问肥鱼任何关于「软件」的问题……</span><span class="send">发送</span></div>
+      </section>
+      <aside class="changes">
+        <div class="h"><span>本次改动</span><span>0</span></div>
+        <div class="empty">这次会话还没有改动记录。<br>在笔记里做修改时，改动会出现在这里。</div>
+        <div class="foot">全部写入笔记</div>
+      </aside>
+    </div>
+  </div>
+
+</div>
+
+<h2>三、力度对照表</h2>
+<table>
+  <tr><th>档位</th><th>规格</th><th>对比度</th><th>样子</th><th>适用</th></tr>
+  <tr><td>现状</td><td>1px #e5e7e2（左栏还没有）</td><td>≈1.25:1</td><td class="bar"><span class="swatch" style="background:#e5e7e2"></span></td><td>—</td></tr>
+  <tr><td>轻</td><td>1px #c9d3c6</td><td>≈1.54:1</td><td class="bar"><span class="swatch" style="background:#c9d3c6"></span></td><td>只想「知道边界在哪」</td></tr>
+  <tr><td>中</td><td>2px #aebfa8</td><td>≈1.94:1</td><td class="bar"><span class="swatch" style="background:#aebfa8"></span></td><td>要明确分区</td></tr>
+  <tr><td>重</td><td>3px #8fa78c</td><td>≈2.60:1</td><td class="bar"><span class="swatch" style="background:#8fa78c"></span></td><td>偏硬，三栏会被框碎</td></tr>
+  <tr><td>浅绿底</td><td>#eef4ee 整栏 + 1px #d3e2d5 收口</td><td>靠「面」分区</td><td class="bar"><span class="swatch" style="background:#eef4ee;border:1px solid #d3e2d5"></span></td><td>辅助栏，最省认知</td></tr>
+</table>
+
+<div class="verdict">
+  <b>结论：不要加粗线，把右栏铺成浅绿底。</b>
+  <ol>
+    <li><b>左栏保持白底、最多补最轻档 1px #c9d3c6。</b>左栏是主线导航，18 条会话已经够密，铺底色会让它比对话列还沉；它的边界靠 12px 间距加组头就基本够，真要线就用最轻那档。</li>
+    <li><b>右栏「本次改动」铺 #eef4ee。</b>它是辅助栏、经常是空态，铺底色刚好把「辅助」的语义显出来，还顺带解决了和对话列的边界问题——不需要再维护线宽。绿色取自产品主色 #2f5d45 的同族浅色，不是外来色。</li>
+    <li><b>不建议用「中/重」两档线。</b>线在浅色主题里天花板就是 2.6:1，花了视觉预算还达不到底色的分区效果，而且线条会把三栏切得更碎。</li>
+    <li>如果只想改一处：<b>就改右栏底色</b>，左栏完全不动。</li>
+  </ol>
+</div>
+
+</body>
+</html>

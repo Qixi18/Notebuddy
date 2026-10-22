@@ -7,6 +7,10 @@ import 'katex/dist/katex.min.css'
 import './styles.css'
 import './redesign.css'
 import './course-assistant.css'
+import './assistant-workspace.css'
+import './features/home/home.css'
+import './features/home/home-courses.css'
+import './garden-theme.css'
 
 const router = createBrowserRouter([{ path: '*', element: <App /> }])
 

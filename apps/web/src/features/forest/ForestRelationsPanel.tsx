@@ -73,12 +73,14 @@ export function ForestRelationsPanel({
   onChange,
   onClose,
   onLocate,
+  selectedRelationId,
 }: {
   relations: CrossCourseRelation[]
   courses: ForestCourse[]
   onChange: () => void
   onClose: () => void
   onLocate?: (relation: CrossCourseRelation) => void
+  selectedRelationId?: string
 }) {
   const [filter, setFilter] = useState<'pending' | 'confirmed' | 'rejected'>('confirmed')
   const [manual, setManual] = useState(false)
@@ -286,8 +288,9 @@ export function ForestRelationsPanel({
         <div className="forest-relation-list">
           {relations
             .filter((relation) => relation.status === filter)
+            .sort((a, b) => Number(b.id === selectedRelationId) - Number(a.id === selectedRelationId))
             .map((relation) => (
-              <article key={relation.id} className="forest-relation-card">
+              <article key={relation.id} className={`forest-relation-card${relation.id === selectedRelationId ? ' forest-relation-selected' : ''}`}>
                 <span className="forest-relation-kind">
                   {relationLabels[relation.relation_type]} ·{' '}
                   {relation.activation_mode === 'automatic' ? '自动关联 · 模型推断' : relation.status === 'pending' ? '等待后台校验 · 模型推断' : '手动关联'}

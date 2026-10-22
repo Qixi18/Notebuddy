@@ -34,6 +34,8 @@ export type AgentFinalEvent = {
   message_id?: string
   fallback?: boolean
   reason?: string
+  /** 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表 */
+  conversation_title?: string
 }
 
 export type AgentErrorEvent = { type: 'error'; message: string }

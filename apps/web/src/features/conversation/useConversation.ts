@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
+import type { ConversationOwnership } from '../../api/conversations'
 import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentReadingContext, type AgentScope, type AgentStepEvent } from '../../api/agent'
 import type { TeacherCharacterId } from '../../components/TeacherCharacter'
 import type { Conversation, ConversationMessage } from '../../types'
@@ -18,9 +19,12 @@ import { teacherPersonaMeta } from '../persona/personas'
  */
 
 export type AskScope = {
-  materialId?: string
-  pageNumber?: number
-  learningGoal?: string
+  /** 会话归属：全局可查 / 整门课程 / 锁定笔记 */
+  kind?: 'global' | 'course' | 'note'
+  /** 锁定笔记时的笔记 id（kind === 'note'） */
+  targetId?: string
+  /** 锁定笔记时的笔记标题，用于历史分组与标签 */
+  targetTitle?: string
 }
 
 /** agent 执行中的实时状态：步骤时间线 + 流式文本 + 最终事件 */
@@ -29,6 +33,8 @@ export type AgentRunState = {
   streamingText: string
   notice?: string
   final?: AgentFinalEvent
+  /** 用户主动中断：保留已收到的正文，实时块改渲染成「已中断」而不是一直「执行中」 */
+  aborted?: boolean
 }
 
 export type AgentAskOptions = {
@@ -42,6 +48,9 @@ export type ConversationState = {
   conversationId?: string
   /** 可直接渲染的消息列表；会话为空时给当前老师的开场白（本地注入，不入库） */
   messages: ConversationMessage[]
+  /** 会话是否已有真实问答（不含本地开场白）。范围锁定等「是否已开始对话」的判断用这个，
+      不能用 messages——空会话会被注入开场白而恒为非空 */
+  hasMessages: boolean
   busy: boolean
   /** 会话与历史是否已就绪。首条问题宜等到就绪，避免与建会话竞态 */
   ready: boolean
@@ -49,12 +58,18 @@ export type ConversationState = {
   /** agent 执行中的实时状态；非 agent 提问时为 null */
   agentRun: AgentRunState | null
   selectConversation: (id: string) => Promise<void>
+  /** 重命名会话（右键菜单）；成功更新本地列表标题，返回是否成功 */
+  renameConversation: (id: string, title: string) => Promise<boolean>
+  /** 删除整段会话（右键菜单）；删的是当前会话时切换到剩余最近一条，或清空等待下次新建 */
+  deleteConversation: (id: string) => Promise<boolean>
   /** 开一段新对话（悬浮坞的「新建对话」）。后端没有删除接口，所以用新建代替清空 */
-  startNewConversation: () => Promise<void>
+  startNewConversation: (ownership?: ConversationOwnership) => Promise<void>
   /** 发送提问；返回 false 表示未发出（调用方可把文本还回输入框） */
   ask: (text: string, scope?: AskScope) => Promise<boolean>
   /** agent 流式提问（悬浮坞专用）；成功把回答追加入历史时返回 true */
   askAgent: (text: string, options: AgentAskOptions) => Promise<boolean>
+  /** 中断正在进行的 agent 回答：中止本次请求，保留已收到的正文（标记「已中断」） */
+  stopAgent: () => void
 }
 
 function greetingMessage(conversationId: string | undefined, content: string): ConversationMessage {
@@ -92,6 +107,16 @@ export function useConversation(
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
   const historyRequestRef = useRef(0)
+  /** 当前 agent 请求的中断器：用户点「停止」时 abort 掉它 */
+  const abortRef = useRef<AbortController | null>(null)
+
+  /** fetch 被 abort 时抛的是 AbortError（DOMException）；部分实现把它包在 cause 里 */
+  function isAbortError(cause: unknown): boolean {
+    if (!cause || typeof cause !== 'object') return false
+    if ((cause as { name?: unknown }).name === 'AbortError') return true
+    const inner = (cause as { cause?: unknown }).cause
+    return Boolean(inner && typeof inner === 'object' && (inner as { name?: unknown }).name === 'AbortError')
+  }
 
   /* 切换课程：重建会话上下文。空课程建立首个会话，保证后续提问总有落点 */
   useEffect(() => {
@@ -109,7 +134,8 @@ export function useConversation(
       return () => { active = false }
     }
     void api.listConversations(courseId).then(async (items) => {
-      const next = items.length > 0 ? items : [await api.createConversation(courseId)]
+      /* 课程没有历史时先建一段空会话；范围默认「全局可查」，用户可在首条消息前改 */
+      const next = items.length > 0 ? items : [await api.createConversation(courseId, '新对话', { scope: 'global' })]
       if (!active || historyRequestRef.current !== request) return
       setConversations(next)
       setConversationId(next[0].id)
@@ -147,16 +173,51 @@ export function useConversation(
     }
   }, [])
 
+  const renameConversation = useCallback(async (id: string, title: string): Promise<boolean> => {
+    const trimmed = title.trim()
+    if (!trimmed) return false
+    try {
+      const updated = await api.renameConversation(id, trimmed)
+      if (courseRef.current === courseId) {
+        setConversations((current) => current.map((item) => (item.id === id ? { ...item, title: updated.title } : item)))
+      }
+      return true
+    } catch (cause) {
+      if (courseRef.current === courseId) setError(cause instanceof Error ? cause.message : '重命名失败')
+      return false
+    }
+  }, [courseId])
+
+  const deleteConversation = useCallback(async (id: string): Promise<boolean> => {
+    const requestCourseId = courseId
+    if (!requestCourseId) return false
+    try {
+      await api.deleteConversation(id)
+      if (courseRef.current !== requestCourseId) return true
+      setConversations((current) => current.filter((item) => item.id !== id))
+      // 删的是当前会话：切到剩余最近一条，或清空（下次提问时 ensureConversation 会新建）
+      if (id === conversationId) {
+        const remaining = conversations.filter((item) => item.id !== id)
+        if (remaining.length > 0) await selectConversation(remaining[0].id)
+        else { setConversationId(undefined); setHistory([]) }
+      }
+      return true
+    } catch (cause) {
+      if (courseRef.current === requestCourseId) setError(cause instanceof Error ? cause.message : '删除失败')
+      return false
+    }
+  }, [courseId, conversationId, conversations, selectConversation])
+
   /* 悬浮坞的「新建对话」：后端只有会话级接口，没有单条消息删除，
      因此「清空」等价于开一段新会话，旧会话仍可在答疑页的历史里找回 */
-  const startNewConversation = useCallback(async (): Promise<void> => {
+  const startNewConversation = useCallback(async (ownership?: ConversationOwnership): Promise<void> => {
     const requestCourseId = courseId
     if (!requestCourseId || busyRef.current) return
     busyRef.current = true
     setBusy(true)
     setError(undefined)
     try {
-      const created = await api.createConversation(requestCourseId)
+      const created = await api.createConversation(requestCourseId, '新对话', ownership)
       if (courseRef.current !== requestCourseId) return
       historyRequestRef.current += 1
       setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)])
@@ -173,11 +234,11 @@ export function useConversation(
   }, [courseId])
 
   /* 会话尚未建立就发问时补建一个（悬浮坞可能在异步建会话完成前就提交） */
-  const ensureConversation = useCallback(async (): Promise<string | undefined> => {
+  const ensureConversation = useCallback(async (ownership?: ConversationOwnership): Promise<string | undefined> => {
     if (!courseId) return undefined
     if (conversationId) return conversationId
     if (creatingRef.current) return creatingRef.current
-    const pending = api.createConversation(courseId).then((created) => {
+    const pending = api.createConversation(courseId, '新对话', ownership).then((created) => {
       if (courseRef.current === courseId) {
         setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)])
         setConversationId(created.id)
@@ -199,8 +260,15 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
+    /* 范围是会话级属性：建会话时定，首条消息落库，之后锁定。
+       course 也显式传，避免与「未指定」混淆（未指定时由调用方决定默认值）。 */
+    const ownership = scope.kind === 'global'
+      ? { scope: 'global' as const }
+      : scope.kind === 'note'
+        ? { scope: 'note' as const, noteId: scope.targetId ?? null, noteTitle: scope.targetTitle ?? null }
+        : { scope: 'course' as const }
     try {
-      const targetId = await ensureConversation()
+      const targetId = await ensureConversation(ownership)
       if (!targetId || courseRef.current !== requestCourseId) return false
       const askedAt = Date.now()
       setHistory((current) => [...current, {
@@ -208,7 +276,7 @@ export function useConversation(
         conversation_id: targetId,
         role: 'user',
         content: question,
-        learning_goal: scope.learningGoal ?? null,
+        learning_goal: null,
         status: 'completed',
         model_version: null,
         failure_type: null,
@@ -220,14 +288,34 @@ export function useConversation(
       const answer = await api.sendConversationMessage(targetId, {
         question,
         teacher_persona: teacherPersona,
-        material_id: scope.materialId,
-        page_number: scope.pageNumber,
-        learning_goal: scope.learningGoal,
+        /* 刻意不传 learning_goal：留空后由后端 discipline.infer_context 按问题关键词
+           推断（怎么做→解决练习、区别→比较方法…）。此前界面恒定发送「理解概念」，
+           会把这条推断分支短路掉，反而更差。 */
         allow_web: true,
+        scope: ownership?.scope,
+        note_id: ownership?.noteId ?? null,
+        note_title: ownership?.noteTitle ?? null,
         idempotency_key: `${targetId}-${askedAt}`,
       })
       if (courseRef.current !== requestCourseId) return true
       setHistory((current) => [...current, answer])
+      // 首条问题后端已把标题从「新对话」改写；据此刷新历史列表。
+      // 归属（scope/note 快照）只在首轮生效，故按本次发送的范围同步列表字段；
+      // 非首轮后端会忽略 scope，此处同步的值与列表已有值一致，不会改分组。
+      if (answer.conversation_title) {
+        const renamed = answer.conversation_title
+        setConversations((current) => current.map((item) => {
+          if (item.id !== targetId) return item
+          const next = { ...item, title: renamed }
+          if (ownership?.scope) {
+            next.scope = ownership.scope
+            next.default_scope = ownership.scope
+            next.note_id = ownership.scope === 'note' ? (ownership.noteId ?? null) : null
+            next.note_title = ownership.scope === 'note' ? (ownership.noteTitle ?? null) : null
+          }
+          return next
+        }))
+      }
       return true
     } catch (cause) {
       if (courseRef.current === requestCourseId) {
@@ -251,6 +339,9 @@ export function useConversation(
     setAgentRun({ steps: [], streamingText: '' })
     let targetId = ''
     const historyRequest = historyRequestRef.current
+    /* 中断器：用户点「停止」时 abort 本次请求（signal 铺在 fetch 上，见 api/agent.ts） */
+    const controller = new AbortController()
+    abortRef.current = controller
     try {
       targetId = await ensureConversation() ?? ''
       if (!targetId || courseRef.current !== requestCourseId) return false
@@ -299,8 +390,14 @@ export function useConversation(
             mode: final.mode,
             sources: final.sources ?? [],
           }])
+          // 同步后端回写的标题（仅标题；scope 分组字段不在流里回传，且只在首轮生效，
+          // 避免把中途改范围错误反映成分组迁移——下次载入会话列表会自洽）。
+          if (final.conversation_title) {
+            const renamed = final.conversation_title
+            setConversations((current) => current.map((item) => (item.id === targetId ? { ...item, title: renamed } : item)))
+          }
         },
-      })
+      }, controller.signal)
       if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
         try {
           const loaded = await api.listConversationMessages(targetId)
@@ -309,6 +406,14 @@ export function useConversation(
       }
       return true
     } catch (cause) {
+      /* 用户中断：不是错误。保留已收到的正文并打「已中断」标记；
+         不弹错误、不重载历史（重载会把这段本地正文冲掉）。提问本身已落库，照常留在历史里。 */
+      if (isAbortError(cause)) {
+        if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
+          setAgentRun((current) => current ? { ...current, aborted: true } : current)
+        }
+        return true
+      }
       if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
         setError(cause instanceof Error ? cause.message : '智能问答请求失败')
         setAgentRun(null)
@@ -321,16 +426,26 @@ export function useConversation(
       }
       return false
     } finally {
+      if (abortRef.current === controller) abortRef.current = null
       busyRef.current = false
       if (courseRef.current === requestCourseId) setBusy(false)
     }
   }, [courseId, teacherPersona, ensureConversation])
 
-  /* 会话为空时由前端补一条开场白（不入库）；已有历史则原样展示 */
+  /* 中断正在进行的回答：abort 当前请求，已收到的正文保留（实时块改渲染成「已中断」） */
+  const stopAgent = useCallback(() => {
+    const controller = abortRef.current
+    if (!controller) return
+    controller.abort()
+    setAgentRun((current) => current ? { ...current, aborted: true } : current)
+  }, [])
+
+  /* 会话为空时由前端补一条开场白（不入库）；已有历史则原样展示。
+     注意：messages 因此永远非空，判断「会话是否已有真实问答」必须用 hasMessages。 */
   const messages = useMemo(
     () => (history.length > 0 ? history : [greetingMessage(conversationId, greeting)]),
     [history, conversationId, greeting],
   )
 
-  return { conversations, conversationId, messages, busy, ready, error, agentRun, selectConversation, startNewConversation, ask, askAgent }
+  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, selectConversation, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
 }

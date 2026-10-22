@@ -70,7 +70,7 @@ describe('screen operation dimensions', () => {
   it('keeps the relation hit stroke at 44 screen pixels below 100% zoom', () => {
     const zoom = sceneInitialCamera(2, 390, 720).k
     render(<svg><TreeVines relations={[relation]} endpoints={new Map([['from', { x: 0, y: 0 }], ['to', { x: 300, y: 0 }]])} zoom={zoom} onRelation={vi.fn()} /></svg>)
-    const hit = screen.getByRole('button').querySelector('path[stroke="transparent"]')!
+    const hit = screen.getByRole('button', { name: '查看甲与乙的1条知识联系' }).querySelector('path[stroke="transparent"]')!
     expect(Number(hit.getAttribute('stroke-width')) * zoom).toBeGreaterThanOrEqual(44 - 1e-8)
   })
   it('does not leave microscopic detail controls or giant inverse hits in low zoom overview', () => {

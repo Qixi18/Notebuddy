@@ -277,6 +277,10 @@ export type Conversation = {
   default_scope: string
   created_at: string
   updated_at: string
+  /** 会话归属：course=整门课程 / global=跨课程 / note=锁定笔记（后端 B1 落地后可用） */
+  scope?: 'course' | 'global' | 'note' | null
+  note_id?: string | null
+  note_title?: string | null
 }
 
 export type MessageEvidence = {
@@ -305,6 +309,8 @@ export type ConversationMessage = {
   mode?: string | null
   /** 可点击的来源卡片；由后端从 evidence 反推，与直连回答同结构 */
   sources?: AssistantSource[]
+  /** 首条问题触发后由后端回写的会话标题；用于即时刷新历史列表（替代「新对话」） */
+  conversation_title?: string
 }
 
 export type KnowledgeProposal = {

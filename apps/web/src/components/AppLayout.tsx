@@ -162,7 +162,7 @@ export function AppLayout() {
 
   return (
     <div
-      className={`app-shell${isHome ? ' app-shell-home' : isForest ? ' app-shell-forest' : ''}${showAssistantDock ? ' app-shell-with-assistant' : ''}${sidebarCollapsed ? ' app-shell-sidebar-collapsed' : ''}${dockResizing ? ' app-shell-dock-resizing' : ''}`}
+      className={`app-shell app-shell-garden${isHome ? ' app-shell-home' : isForest ? ' app-shell-forest' : ''}${showAssistantDock ? ' app-shell-with-assistant' : ''}${sidebarCollapsed ? ' app-shell-sidebar-collapsed' : ''}${dockResizing ? ' app-shell-dock-resizing' : ''}`}
       /* 抽屉宽度只在这一处写进 CSS 变量，网格第三列引用它，拖拽即改一格变量 */
       style={{ '--dock-w': `${dockWidth}px` } as CSSProperties}
     >
@@ -195,6 +195,8 @@ export function AppLayout() {
             </button>
           ))}
         </nav>
+
+        {!sidebarCollapsed && <p className="home-sidebar-quote">每一页积累，<br />都在悄悄生长。</p>}
 
         {isHome && !sidebarCollapsed && <svg className="home-sidebar-doodle" viewBox="0 0 220 132" aria-hidden="true">
           <path d="M14 116c47-8 128-9 192 1" fill="none" stroke="#ded7c3" strokeWidth="3" strokeLinecap="round"/>

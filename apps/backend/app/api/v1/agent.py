@@ -36,7 +36,11 @@ from app.db.models import (
 )
 from app.schemas.api import AgentMessageCreate
 from app.services.assistant_sources import sources_from_evidence
-from app.services.conversations import persist_assistant_message
+from app.services.conversations import (
+    DEFAULT_CONVERSATION_TITLE,
+    derive_conversation_title,
+    persist_assistant_message,
+)
 
 router = APIRouter()
 
@@ -77,11 +81,25 @@ def send_agent_message(
         raise HTTPException(status_code=422, detail="锁定当前笔记模式需要先打开一篇笔记")
 
     history = [(message.role, message.content) for message in conversation.messages]
+    is_first_turn = not any(message.role == "user" for message in conversation.messages)
     user = ConversationMessage(
         conversation_id=conversation_id, role="user", content=payload.question.strip(),
         learning_goal=payload.learning_goal, status="completed", idempotency_key=payload.idempotency_key,
     )
     db.add(user)
+    # 范围是会话级属性：仅首轮落库，之后沿用建会话时的范围（与 /messages 一致）
+    if is_first_turn:
+        new_scope = payload.scope or "course"
+        conversation.default_scope = new_scope
+        conversation.scope = new_scope
+        if new_scope == "note":
+            conversation.note_id = reading_note_id
+            conversation.note_title = (reading.note_title if reading else None) or conversation.note_title
+        else:
+            conversation.note_id = None
+            conversation.note_title = None
+    if conversation.title.strip() == DEFAULT_CONVERSATION_TITLE:
+        conversation.title = derive_conversation_title(payload.question, conversation.scope, conversation.note_title)
     conversation.updated_at = datetime.now(UTC)
     db.commit()
 
@@ -146,6 +164,7 @@ def send_agent_message(
                 "sources": sources_from_evidence(db, assistant),
                 "suggestions": final_event.get("suggestions") or [],
                 "message_id": assistant.id,
+                "conversation_title": conversation.title,
             })
             return
 
@@ -183,6 +202,7 @@ def send_agent_message(
                 "message_id": assistant.id,
                 "fallback": True,
                 "reason": error_message,
+                "conversation_title": conversation.title,
             })
         except Exception as exc:
             db.rollback()
