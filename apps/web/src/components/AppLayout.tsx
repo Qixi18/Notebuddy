@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Outlet, useBlocker, useLocation, useNavigate } from 'react-router-dom'
 
 import type {
@@ -104,6 +104,12 @@ export function featurePath(courseId: string, feature: Feature): string {
   return `/courses/${courseId}/${feature}`
 }
 
+function SidebarIcon({ id, fallback }: { id: SidebarNavId; fallback: string }) {
+  if (id === 'forest') return <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 5 12l3 2-5 6 4 3h10l4-3-5-6 3-2-7-9ZM12 23v6M23 12l-3 4 2 2-2 3 2 3h6l2-3-3-3 2-2-6-4ZM25 24v5"/></svg>
+  if (id === 'recycle') return <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 9h22M12 9V5h8v4M8 9l1 19h14l1-19M13 14v9M19 14v9"/></svg>
+  return <span aria-hidden="true">{fallback}</span>
+}
+
 export function AppLayout() {
   const { courseId, courses, error, setError, noteDirty, documentDirty, setDocumentDirty, setEditingNote } = useWorkspace()
   const navigate = useNavigate()
@@ -114,6 +120,8 @@ export function AppLayout() {
   const activeNav = resolveActiveNav(location.pathname)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('notebuddy.sidebar-collapsed') === 'true')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const createAreaRef = useRef<HTMLDivElement>(null)
   /* 抽屉开合与宽度都由外壳持有：宽度要写进 CSS 变量驱动网格列，正文才能跟着让位 */
   const [dockOpen, setDockOpen] = useState(() => resolveDockOpen(localStorage.getItem(DOCK_STORAGE.open)))
   const [dockWidth, setDockWidth] = useState(() => resolveDockWidth(localStorage.getItem(DOCK_STORAGE.width)))
@@ -134,6 +142,17 @@ export function AppLayout() {
   useEffect(() => {
     localStorage.setItem('notebuddy.sidebar-collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
+
+  useEffect(() => {
+    if (!createOpen) return
+    const closeOutside = (event: PointerEvent) => {
+      if (!createAreaRef.current?.contains(event.target as Node)) setCreateOpen(false)
+    }
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setCreateOpen(false) }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeEscape)
+    return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeEscape) }
+  }, [createOpen])
 
   useEffect(() => {
     localStorage.setItem(DOCK_STORAGE.open, String(dockOpen))
@@ -168,7 +187,7 @@ export function AppLayout() {
     >
       <aside className={`app-sidebar${isHome ? ' app-sidebar-home' : ''}`}>
         <div className="sidebar-header">
-          <button className="brand-lockup" onClick={() => navigate('/')} aria-label="返回首页">
+          <button className="brand-lockup" onClick={() => navigate('/')} aria-label="返回首页" title={sidebarCollapsed ? '返回首页' : undefined}>
             <span className="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.7 3.8c-7 .3-12.4 2.4-14.6 6.8-1.5 3 .1 6.1 3.2 6.4 4.9.5 9.1-4.7 11.4-13.2Z"/><path d="M4.6 21c1.9-5.4 5.3-8.9 10.4-11.8"/></svg></span>
             <span><strong>NoteBuddy</strong><small>课程学习空间</small></span>
           </button>
@@ -179,7 +198,15 @@ export function AppLayout() {
           </button>
         </div>
 
-        <div className="sidebar-section-label">学习空间</div>
+        <div className="sidebar-create-area" ref={createAreaRef}>
+          <button className="sidebar-create-button" type="button" title={sidebarCollapsed ? '新建' : undefined} aria-expanded={createOpen} aria-controls={createOpen ? 'sidebar-create-menu' : undefined} onClick={() => setCreateOpen((open) => !open)}>
+            <span aria-hidden="true">＋</span><span className="sidebar-create-label">新建</span>
+          </button>
+          {createOpen && <div className="sidebar-create-menu" id="sidebar-create-menu" aria-label="新建内容">
+            <button type="button" onClick={() => { setCreateOpen(false); navigate('/courses', { state: { openCreateCourse: true } }) }}>新建课程</button>
+            <button type="button" onClick={() => { setCreateOpen(false); navigate('/courses', { state: { openCreateNote: true } }) }}>新建笔记</button>
+          </div>}
+        </div>
         <nav className="sidebar-nav" aria-label="主导航">
           {primaryNavItems.map((item) => (
             <button
@@ -190,7 +217,7 @@ export function AppLayout() {
               title={sidebarCollapsed ? item.label : undefined}
               onClick={() => handleNav(item.id)}
             >
-              <span className="sidebar-link-icon" aria-hidden="true">{item.icon}</span>
+              <span className="sidebar-link-icon" aria-hidden="true"><SidebarIcon id={item.id} fallback={item.icon} /></span>
               <span>{item.label}</span>
             </button>
           ))}

@@ -47,12 +47,20 @@ export function CourseLibraryPage() {
   const [bindError, setBindError] = useState<string>()
   const createAreaRef = useRef<HTMLDivElement>(null)
 
-  // 继续承接侧边栏已有的「新建课程」入口。
+  // 承接侧边栏快捷新建入口。
   useEffect(() => {
-    const state = location.state as { openCreateCourse?: boolean } | null
-    if (!state?.openCreateCourse) return
-    setCreateError(undefined)
-    setCoursePopoverOpen(true)
+    const state = location.state as { openCreateCourse?: boolean; openCreateNote?: boolean } | null
+    if (!state?.openCreateCourse && !state?.openCreateNote) return
+    if (state.openCreateNote) {
+      setCoursePopoverOpen(false)
+      setNoteName('')
+      setNoteError(undefined)
+      setNotePopoverOpen(true)
+    } else {
+      setNotePopoverOpen(false)
+      setCreateError(undefined)
+      setCoursePopoverOpen(true)
+    }
     navigate('/courses', { replace: true, state: null })
   }, [location.state, navigate])
 

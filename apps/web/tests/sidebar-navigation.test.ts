@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { footerNavItems, primaryNavItems, resolveActiveNav } from '../src/features/navigation/sidebarNav.ts'
 
 test('primary navigation keeps the agreed order', () => {
-  assert.deepEqual(primaryNavItems.map((item) => item.label), ['首页', '新建', '课程', '知识森林', '回收站', '答疑桌宠'])
+  assert.deepEqual(primaryNavItems.map((item) => item.label), ['首页', '课程', '知识森林', '答疑桌宠', '回收站'])
 })
 
 test('settings is pinned to the footer instead of the primary list', () => {
