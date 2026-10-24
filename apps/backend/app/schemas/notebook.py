@@ -41,6 +41,7 @@ class NotebookSummary(BaseModel):
     is_default: bool
     created_at: datetime
     updated_at: datetime
+    cover_url: str | None = None
 
 
 UnboundNotebookSummary = NotebookSummary
@@ -54,6 +55,16 @@ class NotebookBindRequest(BaseModel):
 class NotebookTitleUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
+
+
+class NotebookMoveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    course_id: str = Field(min_length=1, max_length=36)
+
+
+class NotebookRestoreDeletedRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    course_id: str = Field(min_length=1, max_length=36)
 
 
 class DocumentBlock(BaseModel):

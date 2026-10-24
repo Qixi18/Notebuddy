@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { UnboundNotebookSummary } from '../api/notebook'
@@ -8,39 +9,37 @@ import './CourseLibraryPage.css'
 
 type CourseNotes = { course: Course; notes: NotebookSummary[]; error?: string }
 
-function NoteCover({ variant, courseName }: { variant: number; courseName: string }) {
+function serverDate(value: string): Date {
+  return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`)
+}
+
+function noteUpdatedLabel(value: string): string {
+  return serverDate(value).toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function NoteCover({ variant, coverUrl }: { variant: number; coverUrl?: string | null }) {
   const kind = variant % 5
-  const coverLabel = /数学|微积分|代数/.test(courseName) ? 'MATHEMATICS' : /物理|力学|光学/.test(courseName) ? 'PHYSICS' : 'COURSE NOTE'
   return (
     <span className={`course-note-cover course-note-cover-${kind}`} aria-hidden="true">
-      <span className="course-note-cover-label">{coverLabel}</span>
-      <svg viewBox="0 0 180 200" fill="none" focusable="false">
+      {coverUrl && <img className="course-note-cover-image" src={coverUrl} alt="" />}
+      {!coverUrl && <svg viewBox="0 0 180 200" fill="none" focusable="false">
         {kind === 0 && <><path d="M24 158h132M42 173V42" stroke="#a1b5a0" strokeWidth="1.5" /><path d="M25 151c26-5 30-79 59-84 29-5 30 69 69 64" stroke="#2f5d45" strokeWidth="3" strokeLinecap="round" /><text x="141" y="58" fill="#2f5d45" fontFamily="serif" fontSize="28">∫</text></>}
         {kind === 1 && <><path d="M24 155h132" stroke="#c7bca9" strokeWidth="1.5" /><path d="M28 125c17 0 27-48 49-48 19 0 25 59 44 59 13 0 20-23 37-23" stroke="#b2684a" strokeWidth="3" strokeLinecap="round" /><circle cx="77" cy="77" r="4" fill="#b2684a" /><circle cx="121" cy="136" r="4" fill="#b2684a" /></>}
         {kind === 2 && <><path d="M24 158h132M42 173V42" stroke="#a3bab5" strokeWidth="1.5" /><path d="M43 148c26 0 30-70 57-70s32-17 54-17" stroke="#3d7265" strokeWidth="3" strokeLinecap="round" /><path d="M100 72v77" stroke="#3d7265" strokeWidth="1.5" strokeDasharray="5 5" /></>}
         {kind === 3 && <><path d="M24 119c27-31 53-31 80 0s53 31 80 0M24 132c27-31 53-31 80 0s53 31 80 0" stroke="#4a7b71" strokeWidth="2.5" /><text x="137" y="164" fill="#2f5d45" fontFamily="serif" fontSize="28">λ</text></>}
         {kind === 4 && <><path d="M24 143h132" stroke="#b5ab97" strokeWidth="2" /><path d="M43 143c10-63 84-63 94 0" stroke="#9f7755" strokeWidth="3" /><circle cx="43" cy="143" r="5" fill="#9f7755" /><circle cx="137" cy="143" r="5" fill="#9f7755" /></>}
-      </svg>
+      </svg>}
     </span>
   )
 }
 
-// A restrained, pointer-following adaptation of React Bits' SpotlightCard for existing note links.
-function SpotlightNoteLink({ to, title, children }: { to: string; title: string; children: ReactNode }) {
+function NoteLink({ to, title, children }: { to: string; title: string; children: ReactNode }) {
   return <Link
     className="course-note-card"
     to={to}
     aria-label={`打开笔记：${title}`}
-    onPointerMove={(event) => {
-      if (event.pointerType === 'touch') return
-      const bounds = event.currentTarget.getBoundingClientRect()
-      event.currentTarget.style.setProperty('--spotlight-x', `${event.clientX - bounds.left}px`)
-      event.currentTarget.style.setProperty('--spotlight-y', `${event.clientY - bounds.top}px`)
-    }}
-    onPointerLeave={(event) => {
-      event.currentTarget.style.removeProperty('--spotlight-x')
-      event.currentTarget.style.removeProperty('--spotlight-y')
-    }}
   >{children}</Link>
 }
 
@@ -65,9 +64,62 @@ export function CourseLibraryPage() {
   const [bindingNote, setBindingNote] = useState(false)
   const [bindError, setBindError] = useState<string>()
   const [libraryError, setLibraryError] = useState<string>()
+  const [activeMenu, setActiveMenu] = useState<string>()
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number }>()
+  const [actionNote, setActionNote] = useState<NotebookSummary>()
+  const [actionKind, setActionKind] = useState<'rename' | 'move' | 'delete'>()
+  const [actionValue, setActionValue] = useState('')
+  const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState<string>()
+  const coverInputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+  const coverNoteRef = useRef<NotebookSummary | undefined>(undefined)
   const createAreaRef = useRef<HTMLDivElement>(null)
   const courseTriggerRef = useRef<HTMLButtonElement>(null)
   const noteTriggerRef = useRef<HTMLButtonElement>(null)
+
+  function toggleCardMenu(event: React.MouseEvent<HTMLButtonElement>, noteId: string) {
+    if (activeMenu === noteId) { setActiveMenu(undefined); return }
+    const card = event.currentTarget.closest('.course-note-card-menuable')?.getBoundingClientRect()
+    if (!card) return
+    const menuWidth = 164
+    const menuHeight = 158
+    const gap = 8
+    const margin = 12
+    const left = window.innerWidth - card.right >= menuWidth + gap + margin
+      ? card.right + gap
+      : card.left >= menuWidth + gap + margin
+        ? card.left - menuWidth - gap
+        : Math.min(window.innerWidth - menuWidth - margin, Math.max(margin, card.right - menuWidth))
+    const top = Math.min(window.innerHeight - menuHeight - margin, Math.max(margin, card.bottom - menuHeight))
+    menuTriggerRef.current = event.currentTarget
+    setMenuPosition({ left, top })
+    setActiveMenu(noteId)
+  }
+
+  useEffect(() => {
+    if (!activeMenu) return
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node
+      if (menuRef.current?.contains(target) || menuTriggerRef.current?.contains(target)) return
+      setActiveMenu(undefined)
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') { setActiveMenu(undefined); menuTriggerRef.current?.focus() }
+    }
+    function closeMenu() { setActiveMenu(undefined) }
+    document.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('scroll', closeMenu, true)
+    window.addEventListener('resize', closeMenu)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('scroll', closeMenu, true)
+      window.removeEventListener('resize', closeMenu)
+    }
+  }, [activeMenu])
 
   // 承接侧边栏快捷新建入口。
   useEffect(() => {
@@ -203,17 +255,52 @@ export function CourseLibraryPage() {
     } finally { setBindingNote(false) }
   }
 
-  async function handleUnbindNote(note: NotebookSummary) {
+  async function createBlankNotebook(courseId: string) {
     setLibraryError(undefined)
     try {
-      const unbound = await api.unbindNotebook(note.id)
-      setGroups((current) => current.map((group) => group.course.id === note.course_id
-        ? { ...group, notes: group.notes.filter((item) => item.id !== note.id) }
-        : group))
-      setUnboundNotes((current) => [unbound, ...current])
-    } catch (cause) {
-      setLibraryError(cause instanceof Error ? cause.message : '移出课程失败')
-    }
+      const notebook = await api.createNotebook(courseId, '未命名笔记')
+      navigate(`/courses/${courseId}/notebooks/${notebook.id}`)
+    } catch (cause) { setLibraryError(cause instanceof Error ? cause.message : '笔记创建失败') }
+  }
+
+  async function submitCardAction(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+    if (!actionNote || !actionKind || actionBusy) return
+    setActionBusy(true); setActionError(undefined)
+    try {
+      if (actionKind === 'rename') await api.renameNotebook(actionNote.course_id, actionNote.id, actionValue.trim())
+      else if (actionKind === 'move') await api.moveNotebook(actionNote.id, actionValue)
+      else {
+        await api.deleteNotebook(actionNote.course_id, actionNote.id)
+        setGroups((current) => current.map((group) => ({ ...group, notes: group.notes.filter((note) => note.id !== actionNote.id) })))
+        setActionNote(undefined); setActionKind(undefined)
+        return
+      }
+      if (actionKind === 'move') {
+        setGroups((current) => current.map((group) => ({ ...group, notes: group.notes.filter((note) => note.id !== actionNote.id) })))
+      } else {
+        setGroups((current) => current.map((group) => ({ ...group, notes: group.notes.map((note) => note.id === actionNote.id ? { ...note, title: actionValue.trim() } : note) })))
+      }
+      setActionNote(undefined); setActionKind(undefined)
+    } catch (cause) { setActionError(cause instanceof Error ? cause.message : '操作失败') }
+    finally { setActionBusy(false) }
+  }
+
+  async function handleCoverChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    const selectedNote = coverNoteRef.current
+    if (!file || !selectedNote) return
+    try {
+      await api.uploadNotebookCover(selectedNote.id, file)
+      setGroups((current) => current.map((group) => ({ ...group, notes: group.notes.map((note) => note.id === selectedNote.id ? { ...note, cover_url: `/api/v1/notebooks/${selectedNote.id}/cover?v=${Date.now()}` } : note) })))
+    } catch (cause) { setLibraryError(cause instanceof Error ? cause.message : '封面上传失败') }
+    coverNoteRef.current = undefined
+  }
+
+  function chooseCover(note: NotebookSummary) {
+    coverNoteRef.current = note
+    if (coverInputRef.current) { coverInputRef.current.value = ''; coverInputRef.current.click() }
   }
 
   return (
@@ -250,7 +337,7 @@ export function CourseLibraryPage() {
       ) : visibleGroups.length === 0 && visibleUnboundNotes.length === 0 && query.trim() ? (
         <div className="course-notes-empty"><h2>没有找到相关笔记</h2><p>试试其他笔记名称或课程名称。</p></div>
       ) : visibleGroups.length === 0 && visibleUnboundNotes.length === 0 ? (
-        <div className="course-notes-empty"><h2>还没有笔记</h2><p>先写一篇笔记，之后可以再归入课程文件夹。</p><button type="button" onClick={openCreateNote}>新建笔记</button><button type="button" onClick={openCreateCourse}>新建课程文件夹</button></div>
+        <div className="course-notes-empty"><h2>还没有课程</h2><p>先新建课程文件夹，再在课程中创建空白笔记。</p><button type="button" onClick={openCreateCourse}>新建课程文件夹</button></div>
       ) : (
         <div className="course-notes-groups">
           {visibleGroups.map(({ course, notes, error }, groupIndex) => (
@@ -259,29 +346,41 @@ export function CourseLibraryPage() {
                 <h2 id={`course-notes-${course.id}`}>{course.name}</h2>
                 <span>{notes.length} 篇笔记</span>
               </div>
-              {error ? <p className="course-notes-error" role="alert">{course.name}的笔记读取失败：{error}</p> : notes.length ? (
-                <div className="course-notes-grid">
-                  {notes.map((note, noteIndex) => (
-                    <article className="course-note-card-unbound" key={note.id}>
-                      <SpotlightNoteLink to={`/courses/${course.id}/notebooks/${note.id}`} title={note.title}>
-                        <NoteCover variant={groupIndex * 3 + noteIndex} courseName={course.name} />
-                        <strong>{note.title}</strong>
-                      </SpotlightNoteLink>
-                      <button type="button" onClick={() => void handleUnbindNote(note)} aria-label={`将“${note.title}”移到未分类`}>移到未分类</button>
-                    </article>
-                  ))}
-                </div>
-              ) : <p className="course-notes-group-empty">这门课程还没有笔记。</p>}
+              {error && <p className="course-notes-error" role="alert">{course.name}的笔记读取失败：{error}</p>}
+              {!error && notes.length > 0 && <div className="course-notes-grid">
+                {notes.map((note, noteIndex) => (
+                  <article className={`course-note-card-unbound course-note-card-menuable${activeMenu === note.id ? ' is-menu-open' : ''}`} key={note.id}>
+                    <NoteLink to={`/courses/${course.id}/notebooks/${note.id}`} title={note.title}>
+                      <NoteCover variant={groupIndex * 3 + noteIndex} coverUrl={note.cover_url} />
+                      <strong title={note.title}>{note.title}</strong>
+                    </NoteLink>
+                    <div className="course-note-card-footer">
+                      <time className="course-note-card-date" dateTime={note.updated_at}>{noteUpdatedLabel(note.updated_at)}</time>
+                      <button className="course-note-menu-trigger" type="button" aria-label={`“${note.title}”的更多操作`} aria-expanded={activeMenu === note.id} aria-controls={activeMenu === note.id ? 'course-note-menu' : undefined} onClick={(event) => toggleCardMenu(event, note.id)}>
+                        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+                      </button>
+                    </div>
+                    {activeMenu === note.id && menuPosition && createPortal(<div id="course-note-menu" className="course-note-menu" role="menu" ref={menuRef} style={menuPosition}>
+                      <button type="button" role="menuitem" onClick={() => { setActionNote(note); setActionKind('rename'); setActionValue(note.title); setActionError(undefined); setActiveMenu(undefined) }}>重命名</button>
+                      <button type="button" role="menuitem" onClick={() => { setActionNote(note); setActionKind('move'); setActionValue(''); setActionError(undefined); setActiveMenu(undefined) }}>移动到其他课程</button>
+                      <button type="button" role="menuitem" onClick={() => { chooseCover(note); setActiveMenu(undefined) }}>添加封面</button>
+                      <button type="button" role="menuitem" className="course-note-menu-danger" onClick={() => { setActionNote(note); setActionKind('delete'); setActionError(undefined); setActiveMenu(undefined) }}>删除</button>
+                    </div>, document.body)}
+                  </article>
+                ))}
+                <button className="course-note-create-card" type="button" onClick={() => void createBlankNotebook(course.id)} aria-label={`在${course.name}中新建空白笔记`}><span aria-hidden="true">＋</span><strong>新建空白笔记</strong></button>
+              </div>}
+              {notes.length === 0 && !error && <div className="course-notes-grid"><button className="course-note-create-card" type="button" onClick={() => void createBlankNotebook(course.id)} aria-label={`在${course.name}中新建空白笔记`}><span aria-hidden="true">＋</span><strong>新建空白笔记</strong></button></div>}
             </section>
           ))}
           {visibleUnboundNotes.length > 0 && <section className="course-notes-group" aria-labelledby="course-notes-unbound">
             <div className="course-notes-group-heading"><h2 id="course-notes-unbound">未分类</h2><span>{visibleUnboundNotes.length} 篇笔记</span></div>
             <div className="course-notes-grid">
               {visibleUnboundNotes.map((note, noteIndex) => <article className="course-note-card-unbound" key={note.id}>
-                <SpotlightNoteLink to={`/notebooks/unbound/${note.id}`} title={note.title}>
-                  <NoteCover variant={noteIndex} courseName="" />
+                <NoteLink to={`/notebooks/unbound/${note.id}`} title={note.title}>
+                  <NoteCover variant={noteIndex} coverUrl={note.cover_url} />
                   <strong title={note.title}>{note.title}</strong>
-                </SpotlightNoteLink>
+                </NoteLink>
                 <button type="button" onClick={() => { setBindNote(note); setBindCourseId(courses[0]?.id ?? ''); setBindError(undefined) }} disabled={!courses.length} aria-label={`将“${note.title}”归入课程`}>移入课程</button>
               </article>)}
             </div>
@@ -305,6 +404,20 @@ export function CourseLibraryPage() {
           </section>
         </div>
       )}
+      <input ref={coverInputRef} className="course-note-cover-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleCoverChange(event)} />
+      {actionNote && actionKind && actionKind !== 'delete' && <div className="course-notes-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !actionBusy) setActionNote(undefined) }}>
+        <section className="course-notes-dialog" role="dialog" aria-modal="true" aria-labelledby="course-note-action-title">
+          <button className="course-notes-dialog-close" type="button" onClick={() => setActionNote(undefined)} disabled={actionBusy} aria-label="关闭">×</button>
+          <h2 id="course-note-action-title">{actionKind === 'rename' ? '重命名笔记' : '移动到其他课程'}</h2>
+          <p>{actionNote.title}</p>
+          <form onSubmit={(event) => void submitCardAction(event)}>
+            {actionKind === 'rename' ? <><label htmlFor="course-note-action-value">笔记名称</label><input id="course-note-action-value" autoFocus maxLength={200} value={actionValue} onChange={(event) => setActionValue(event.target.value)} /></> : <><label htmlFor="course-note-action-value">目标课程</label><select id="course-note-action-value" autoFocus value={actionValue} onChange={(event) => setActionValue(event.target.value)}><option value="">请选择课程</option>{courses.filter((course) => course.id !== actionNote.course_id).map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}</select></>}
+            {actionError && <p className="course-notes-error" role="alert">{actionError}</p>}
+            <button className="course-notes-dialog-submit" type="submit" disabled={actionBusy || (actionKind === 'rename' ? !actionValue.trim() : !actionValue)}>{actionBusy ? '正在保存…' : '确认'}</button>
+          </form>
+        </section>
+      </div>}
+      {actionNote && actionKind === 'delete' && <div className="course-notes-dialog-backdrop"><section className="course-notes-dialog" role="alertdialog" aria-modal="true" aria-labelledby="course-note-delete-title"><h2 id="course-note-delete-title">删除这篇笔记？</h2><p>“{actionNote.title}”会移到回收站，正文、历史版本、封面和关联资料都会保留。可在回收站恢复。</p>{actionError && <p className="course-notes-error" role="alert">{actionError}</p>}<div className="course-note-delete-actions"><button type="button" onClick={() => { setActionNote(undefined); setActionKind(undefined) }} disabled={actionBusy}>取消</button><button type="button" className="course-note-delete-confirm" onClick={() => void submitCardAction()} disabled={actionBusy}>{actionBusy ? '正在删除…' : '确认删除'}</button></div></section></div>}
     </section>
   )
 }

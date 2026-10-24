@@ -196,7 +196,7 @@ export type NotebookRead = Omit<Notebook, 'chapters' | 'historical_sections' | '
 export type NotebookSummary = {
   id: string; course_id: string; title: string; tree_slot: number
   display_order: number; order_revision: number; is_default: boolean
-  created_at: string; updated_at: string
+    created_at: string; updated_at: string; cover_url?: string | null
 }
 export type NotebookDocumentBlock = { id: string; type: 'h1' | 'h2' | 'p' | 'bullet'; text: string }
 export type NotebookDocument = { blocks: NotebookDocumentBlock[]; revision: number; updated_at: string }

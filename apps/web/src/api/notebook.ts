@@ -5,7 +5,7 @@ import type {
 import { request } from './http'
 
 export type UnboundNotebookSummary = {
-  id: string; title: string; created_at: string; updated_at: string
+  id: string; title: string; created_at: string; updated_at: string; cover_url?: string | null
 }
 
 export const notebookApi = {
@@ -33,6 +33,19 @@ export const notebookApi = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: expectedRevision }),
   }),
   bindNotebook: (notebookId: string, courseId: string) => request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/bind`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ course_id: courseId }),
+  }),
+  moveNotebook: (notebookId: string, courseId: string) => request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/move`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ course_id: courseId }),
+  }),
+  uploadNotebookCover: (notebookId: string, file: File) => {
+    const body = new FormData(); body.append('file', file)
+    return request<{ cover_url: string }>(`/api/v1/notebooks/${notebookId}/cover`, { method: 'PUT', body })
+  },
+  deleteNotebookCover: (notebookId: string) => request<void>(`/api/v1/notebooks/${notebookId}/cover`, { method: 'DELETE' }),
+  deleteNotebook: (courseId: string, notebookId: string) => request<void>(`/api/v1/courses/${courseId}/notebooks/${notebookId}`, { method: 'DELETE' }),
+  listDeletedNotebooks: () => request<NotebookSummary[]>('/api/v1/notebooks/deleted'),
+  restoreDeletedNotebook: (notebookId: string, courseId: string) => request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/restore`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ course_id: courseId }),
   }),
   unbindNotebook: (notebookId: string) => request<UnboundNotebookSummary>(`/api/v1/notebooks/${notebookId}/unbind`, { method: 'POST' }),

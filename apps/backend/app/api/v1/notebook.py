@@ -13,6 +13,7 @@ from app.db.models import (
     Notebook,
     NotebookAttachment,
     NotebookReadingPosition,
+    ProcessingJob,
     utc_now,
 )
 from app.notes.attachments import (
@@ -40,8 +41,10 @@ from app.schemas.notebook import (
     NotebookBindRequest,
     NotebookDocumentRead,
     NotebookDocumentUpdate,
+    NotebookMoveRequest,
     NotebookOrderUpdate,
     NotebookRead,
+    NotebookRestoreDeletedRequest,
     NotebookRestoreRequest,
     NotebookRevisionRead,
     NotebookRevisionSummary,
@@ -55,10 +58,23 @@ from app.schemas.notebook import (
 router = APIRouter()
 
 
+def _cover_url(book: Notebook) -> str | None:
+    return f"/api/v1/notebooks/{book.id}/cover" if book.cover_filename else None
+
+
+def _summary(book: Notebook) -> dict:
+    return {"id": book.id, "course_id": book.course_id, "title": book.title,
+            "tree_slot": book.tree_slot, "display_order": book.display_order,
+            "order_revision": book.order_revision, "is_default": book.is_default,
+            "created_at": book.created_at, "updated_at": book.updated_at,
+            "cover_url": _cover_url(book)}
+
+
 @router.get("/notebooks/unbound", response_model=list[UnboundNotebookSummary])
 def list_unbound_notebooks(db: Session = Depends(get_db)):
-    return db.scalars(select(Notebook).where(Notebook.course_id.is_(None)).order_by(
+    books = db.scalars(select(Notebook).where(Notebook.course_id.is_(None), Notebook.deleted_at.is_(None)).order_by(
         Notebook.created_at.desc(), Notebook.id)).all()
+    return [_summary(book) for book in books]
 
 
 @router.post("/notebooks/unbound", response_model=UnboundNotebookSummary, status_code=201)
@@ -70,33 +86,33 @@ def create_unbound_notebook(payload: NotebookTitleUpdate, db: Session = Depends(
     db.add(book)
     db.commit()
     db.refresh(book)
-    return book
+    return _summary(book)
 
 
 @router.get("/notebooks/unbound/{notebook_id}", response_model=UnboundNotebookSummary)
 def get_unbound_notebook(notebook_id: str, db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未绑定的笔记不存在")
-    return book
+    return _summary(book)
 
 
 @router.patch("/notebooks/unbound/{notebook_id}", response_model=UnboundNotebookSummary)
 def rename_unbound_notebook(notebook_id: str, payload: NotebookTitleUpdate,
                             db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未绑定的笔记不存在")
     book.title = payload.title.strip()
     db.commit()
     db.refresh(book)
-    return book
+    return _summary(book)
 
 
 @router.get("/notebooks/unbound/{notebook_id}/document", response_model=NotebookDocumentRead)
 def get_unbound_document(notebook_id: str, db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未绑定的笔记不存在")
     stored = load_document(book.document_json)
     return {"schema_version": 2, "content": stored.content,
@@ -109,7 +125,7 @@ def get_unbound_document(notebook_id: str, db: Session = Depends(get_db)):
 def put_unbound_document(notebook_id: str, payload: NotebookDocumentUpdate,
                          db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未绑定的笔记不存在")
     try:
         content = validate_document(normalize_document(payload.content)) if payload.content is not None else \
@@ -142,7 +158,7 @@ def put_unbound_document(notebook_id: str, payload: NotebookDocumentUpdate,
             response_model=list[NotebookRevisionSummary])
 def list_unbound_revisions(notebook_id: str, db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未分类笔记不存在")
     return list_snapshots(db, notebook_id)
 
@@ -152,7 +168,7 @@ def list_unbound_revisions(notebook_id: str, db: Session = Depends(get_db)):
 def read_unbound_revision(notebook_id: str, revision: int,
                           db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未分类笔记不存在")
     snapshot = get_snapshot(db, notebook_id, revision)
     if snapshot is None:
@@ -169,7 +185,7 @@ def restore_unbound_revision(notebook_id: str, revision: int,
                              payload: NotebookRestoreRequest,
                              db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未分类笔记不存在")
     snapshot = get_snapshot(db, notebook_id, revision)
     if snapshot is None:
@@ -201,11 +217,11 @@ def bind_notebook(notebook_id: str, payload: NotebookBindRequest, db: Session = 
     course_id = payload.course_id
     course = ensure_course(db, course_id)
     claimed = db.execute(update(Notebook).where(
-        Notebook.id == notebook_id, Notebook.course_id.is_(None)).values(title=Notebook.title))
+        Notebook.id == notebook_id, Notebook.course_id.is_(None), Notebook.deleted_at.is_(None)).values(title=Notebook.title))
     if claimed.rowcount != 1:
         raise HTTPException(404, "未绑定的笔记不存在")
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未绑定的笔记不存在")
     # Lock the course row before assigning the next permanent branch slot.
     next_order_revision = course.notebook_order_revision + 1
@@ -224,13 +240,13 @@ def bind_notebook(notebook_id: str, payload: NotebookBindRequest, db: Session = 
     bound_book = book
     db.commit()
     db.refresh(bound_book)
-    return bound_book
+    return _summary(bound_book)
 
 
 @router.post("/notebooks/{notebook_id}/unbind", response_model=UnboundNotebookSummary)
 def unbind_notebook(notebook_id: str, db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None:
+    if book is None or book.deleted_at is not None:
         raise HTTPException(404, "笔记不存在")
     if book.course_id is None:
         return book
@@ -247,13 +263,13 @@ def unbind_notebook(notebook_id: str, db: Session = Depends(get_db)):
     ).values(course_id=None))
     db.commit()
     db.refresh(book)
-    return book
+    return _summary(book)
 
 
 def ensure_notebook(db: Session, course_id: str, notebook_id: str) -> Notebook:
     ensure_course(db, course_id)
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id != course_id:
+    if book is None or book.course_id != course_id or book.deleted_at is not None:
         raise HTTPException(404, "该课程中的笔记本不存在")
     return book
 
@@ -261,7 +277,8 @@ def ensure_notebook(db: Session, course_id: str, notebook_id: str) -> Notebook:
 @router.get("/courses/{course_id}/notebooks", response_model=list[NotebookSummary])
 def list_notebooks(course_id: str, db: Session = Depends(get_db)):
     ensure_course(db, course_id)
-    return list_course_notebooks(db, course_id)
+    return [_summary(book) for book in list_course_notebooks(db, course_id)
+            if book.deleted_at is None]
 
 
 @router.post("/courses/{course_id}/notebooks", response_model=NotebookSummary, status_code=201)
@@ -279,7 +296,141 @@ def create_notebook(course_id: str, payload: NotebookTitleUpdate, db: Session = 
     db.add(book)
     db.commit()
     db.refresh(book)
-    return book
+    return _summary(book)
+
+
+@router.put("/notebooks/{notebook_id}/cover")
+async def upload_notebook_cover(notebook_id: str, file: UploadFile = File(...),
+                                db: Session = Depends(get_db)):
+    import uuid
+
+    from app.core.config import settings
+    from app.notes.attachments import MAX_ATTACHMENT_BYTES, sniff_image_mime
+
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    data = await file.read(MAX_ATTACHMENT_BYTES + 1)
+    mime = sniff_image_mime(data)
+    if not data or len(data) > MAX_ATTACHMENT_BYTES or mime is None:
+        raise HTTPException(413 if len(data) > MAX_ATTACHMENT_BYTES else 422,
+                            "封面需为不超过 10 MB 的 PNG、JPEG、WebP 或 GIF 图片")
+    extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}[mime]
+    directory = settings.data_dir / "notebook-covers"
+    directory.mkdir(parents=True, exist_ok=True)
+    name = f"{notebook_id}-{uuid.uuid4().hex}{extension}"
+    (directory / name).write_bytes(data)
+    old_name = book.cover_filename
+    book.cover_filename, book.cover_mime = name, mime
+    db.commit()
+    if old_name:
+        (directory / old_name).unlink(missing_ok=True)
+    return {"cover_url": _cover_url(book)}
+
+
+@router.get("/notebooks/{notebook_id}/cover")
+def get_notebook_cover(notebook_id: str, db: Session = Depends(get_db)):
+    from app.core.config import settings
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None or book.cover_filename is None:
+        raise HTTPException(404, "笔记封面不存在")
+    path = (settings.data_dir / "notebook-covers" / book.cover_filename).resolve()
+    if not path.is_relative_to((settings.data_dir / "notebook-covers").resolve()) or not path.is_file():
+        raise HTTPException(404, "笔记封面不存在")
+    return FileResponse(path, media_type=book.cover_mime or "application/octet-stream",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.delete("/notebooks/{notebook_id}/cover", status_code=204)
+def delete_notebook_cover(notebook_id: str, db: Session = Depends(get_db)):
+    from app.core.config import settings
+    book = db.get(Notebook, notebook_id)
+    if book is None:
+        raise HTTPException(404, "笔记不存在")
+    if book.cover_filename:
+        (settings.data_dir / "notebook-covers" / book.cover_filename).unlink(missing_ok=True)
+    book.cover_filename = book.cover_mime = None
+    db.commit()
+
+
+@router.post("/notebooks/{notebook_id}/move", response_model=NotebookSummary)
+def move_notebook(notebook_id: str, payload: NotebookMoveRequest, db: Session = Depends(get_db)):
+    course = ensure_course(db, payload.course_id)
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    if book.course_id == course.id:
+        raise HTTPException(409, "笔记已经属于该课程")
+    db.execute(update(Course).where(Course.id == course.id).values(
+        notebook_order_revision=Course.notebook_order_revision + 1))
+    slot = db.scalar(select(func.max(Notebook.tree_slot)).where(Notebook.course_id == course.id))
+    book.course_id = course.id
+    book.tree_slot = 0 if slot is None else slot + 1
+    book.display_order = book.tree_slot
+    book.order_revision = course.notebook_order_revision + 1
+    book.is_default = slot is None
+    db.execute(update(NotebookAttachment).where(NotebookAttachment.notebook_id == book.id).values(course_id=course.id))
+    db.commit()
+    db.refresh(book)
+    return _summary(book)
+
+
+@router.delete("/courses/{course_id}/notebooks/{notebook_id}", status_code=204)
+def delete_course_notebook(course_id: str, notebook_id: str, db: Session = Depends(get_db)):
+    book = ensure_notebook(db, course_id, notebook_id)
+    if book.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    active_jobs = db.scalar(select(func.count()).select_from(ProcessingJob).join(
+        Material, ProcessingJob.material_id == Material.id).where(
+        Material.notebook_id == notebook_id,
+        ProcessingJob.status.in_(["pending", "processing"]))) or 0
+    if active_jobs:
+        raise HTTPException(409, "笔记本仍有资料处理任务，完成或取消后再删除")
+    from datetime import UTC, datetime
+
+    from app.services.deletion import _checkpoint
+    _checkpoint()
+    book.deleted_at = datetime.now(UTC)
+    book.is_default = False
+    if db.scalar(select(func.count()).select_from(Notebook).where(
+            Notebook.course_id == course_id, Notebook.deleted_at.is_(None))) == 0:
+        replacement = db.scalar(select(Notebook).where(
+            Notebook.course_id == course_id, Notebook.deleted_at.is_(None),
+            Notebook.id != notebook_id).order_by(Notebook.display_order, Notebook.id))
+        if replacement:
+            replacement.is_default = True
+    db.execute(update(Course).where(Course.id == course_id).values(
+        notebook_order_revision=Course.notebook_order_revision + 1))
+    db.commit()
+
+
+@router.get("/notebooks/deleted", response_model=list[NotebookSummary])
+def list_deleted_notebooks(db: Session = Depends(get_db)):
+    return [_summary(book) for book in db.scalars(select(Notebook).where(
+        Notebook.deleted_at.is_not(None)).order_by(Notebook.deleted_at.desc())).all()]
+
+
+@router.post("/notebooks/{notebook_id}/restore", response_model=NotebookSummary)
+def restore_deleted_notebook(notebook_id: str, payload: NotebookRestoreDeletedRequest,
+                             db: Session = Depends(get_db)):
+    course = ensure_course(db, payload.course_id)
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is None:
+        raise HTTPException(404, "待恢复笔记不存在")
+    slot = db.scalar(select(func.max(Notebook.tree_slot)).where(
+        Notebook.course_id == course.id, Notebook.deleted_at.is_(None)))
+    book.course_id = course.id
+    book.tree_slot = 0 if slot is None else slot + 1
+    book.display_order = book.tree_slot
+    book.order_revision = course.notebook_order_revision + 1
+    book.is_default = slot is None
+    book.deleted_at = None
+    db.execute(update(Course).where(Course.id == course.id).values(
+        notebook_order_revision=Course.notebook_order_revision + 1))
+    db.execute(update(NotebookAttachment).where(NotebookAttachment.notebook_id == book.id).values(
+        course_id=course.id))
+    db.commit(); db.refresh(book)
+    return _summary(book)
 
 
 @router.get("/courses/{course_id}/notebooks/{notebook_id}", response_model=NotebookRead)
@@ -424,7 +575,7 @@ async def upload_unbound_notebook_attachment(notebook_id: str,
                                              file: UploadFile = File(...),
                                              db: Session = Depends(get_db)):
     book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id is not None:
+    if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未分类笔记不存在")
     data = await file.read(MAX_ATTACHMENT_BYTES + 1)
     try:

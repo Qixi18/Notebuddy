@@ -166,10 +166,26 @@
 
 .course-notes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(158px, 180px));
-  gap: 42px 44px;
+  grid-template-columns: repeat(auto-fill, minmax(198px, 214px));
+  gap: 24px 20px;
 }
 
+.course-note-card-unbound.course-note-card-menuable {
+  position: relative;
+  z-index: 0;
+  min-height: 270px;
+  gap: 0;
+  overflow: visible;
+  border: 1px solid rgba(38, 66, 49, .07);
+  border-radius: 16px;
+  padding: 8px 8px 4px;
+  background: #fff;
+  box-shadow: 0 7px 20px rgba(36, 62, 44, .075);
+  transition: box-shadow 180ms ease, transform 180ms ease;
+}
+.course-note-card-unbound.course-note-card-menuable:hover { z-index: 2; transform: translateY(-2px); box-shadow: 0 12px 26px rgba(36, 62, 44, .12); }
+.course-note-card-unbound.course-note-card-menuable.is-menu-open { z-index: 30; }
+.course-note-card-menuable .course-note-card { gap: 8px; }
 .course-note-card {
   display: flex;
   min-width: 0;
@@ -184,29 +200,11 @@
   position: relative;
   display: block;
   width: 100%;
-  aspect-ratio: 3 / 4;
+  aspect-ratio: 1.12 / 1;
   overflow: hidden;
-  border-radius: 14px;
-  box-shadow: 0 9px 22px rgba(36, 62, 44, .085);
+  border-radius: 11px;
+  box-shadow: none;
   transition: box-shadow 180ms ease, transform 180ms ease;
-}
-
-/* A quiet pointer and focus glow adapted from React Bits' SpotlightCard interaction. */
-.course-note-cover::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(circle 130px at var(--spotlight-x, 50%) var(--spotlight-y, 0%), #d6e6d1 0, transparent 100%);
-  opacity: 0;
-  transition: opacity 180ms ease;
-}
-.course-note-card:hover .course-note-cover::after,
-.course-note-card:focus-visible .course-note-cover::after { opacity: .55; }
-
-.course-note-card:hover .course-note-cover {
-  transform: translateY(-3px);
-  box-shadow: 0 14px 28px rgba(36, 62, 44, .13);
 }
 
 .course-note-card:active .course-note-cover { transform: translateY(-1px); }
@@ -217,22 +215,8 @@
 .course-note-cover-3 { background: #eaf0ed; }
 .course-note-cover-4 { background: #f0eee8; }
 
-.course-note-cover-label {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  left: 24px;
-  border-top: 1px solid rgba(255, 255, 255, .82);
-  padding-top: 14px;
-  color: #2f5d45;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .11em;
-}
-
-.course-note-cover-1 .course-note-cover-label,
-.course-note-cover-4 .course-note-cover-label { color: #a85f43; }
 .course-note-cover svg { position: absolute; inset: 58px 0 0; width: 100%; height: calc(100% - 58px); }
+.course-note-cover-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
 .course-note-card strong {
   overflow: hidden;
@@ -246,7 +230,7 @@
 
 .course-note-card-unbound { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; gap: 14px; }
 .course-note-card-unbound .course-note-card { width: 100%; }
-.course-note-card-unbound button {
+.course-note-card-unbound > button:not(.course-note-menu-trigger) {
   min-height: 36px;
   border: 1px solid #dce4da;
   border-radius: 9px;
@@ -257,9 +241,29 @@
   font-size: 13px;
   cursor: pointer;
 }
-.course-note-card-unbound button:hover { border-color: #2f5d45; background: #f7f8f5; }
-.course-note-card-unbound button:focus-visible { outline: 2px solid #75947d; outline-offset: 2px; }
-.course-note-card-unbound button:disabled { cursor: not-allowed; opacity: .55; }
+.course-note-card-unbound > button:not(.course-note-menu-trigger):hover { border-color: #2f5d45; background: #f7f8f5; }
+.course-note-card-unbound > button:not(.course-note-menu-trigger):focus-visible { outline: 2px solid #75947d; outline-offset: 2px; }
+.course-note-card-unbound > button:not(.course-note-menu-trigger):disabled { cursor: not-allowed; opacity: .55; }
+
+.course-note-card-footer { display: flex; width: 100%; min-height: 34px; align-items: center; margin-top: auto; padding-right: 36px; }
+.course-note-card-date { min-width: 0; overflow: hidden; color: #637365; font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.course-note-menu-trigger { position: absolute; right: 4px; bottom: 4px; display: grid; width: 34px; height: 32px; place-items: center; border: 0; border-radius: 50%; color: #234d3a; background: transparent; cursor: pointer; }
+.course-note-menu-trigger svg { display: block; width: 20px; height: 20px; fill: currentColor; }
+.course-note-menu-trigger:hover,.course-note-menu-trigger[aria-expanded="true"] { background: #e9efe8; }
+.course-note-menu-trigger:focus-visible { outline: 2px solid #75947d; outline-offset: 2px; }
+.course-note-menu { position: fixed; z-index: 200; width: 164px; padding: 6px; border: 1px solid #e6ebe4; border-radius: 13px; background: #fff; box-shadow: 0 12px 30px rgba(31,42,34,.16); }
+.course-note-menu button { display: block; width: 100%; min-height: 36px; border: 0; border-radius: 8px; padding: 0 10px; color: #344b3c; background: transparent; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
+.course-note-menu button:hover,.course-note-menu button:focus-visible { background: #f1f5ee; outline: none; }
+.course-note-menu .course-note-menu-danger { color: #a3483d; }
+.course-note-create-card { display: flex; min-width: 0; min-height: 270px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; border: 1px dashed #aebfae; border-radius: 16px; color: #27523e; background: transparent; font: inherit; cursor: pointer; }
+.course-note-create-card:hover { border-color: #2f5d45; background: #f4f7f1; }
+.course-note-create-card:focus-visible { outline: 2px solid #75947d; outline-offset: 3px; }
+.course-note-create-card span { font-size: 42px; font-weight: 300; line-height: 1; }
+.course-note-create-card strong { font-size: 14px; font-weight: 600; }
+.course-note-cover-input { display: none; }
+.course-note-delete-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.course-note-delete-actions button { min-height: 42px; border: 1px solid #dce4da; border-radius: 9px; padding: 0 16px; color: #405348; background: #fff; font: inherit; cursor: pointer; }
+.course-note-delete-actions .course-note-delete-confirm { border-color: #a3483d; color: #fff; background: #a3483d; }
 
 .course-notes-group-empty,
 .course-notes-error {
@@ -352,9 +356,10 @@
   .course-notes-search { height: 52px; padding: 0 14px; }
   .course-notes-search input { font-size: 14px; }
   .course-notes-create-trigger { min-width: 112px; min-height: 52px; padding: 0 14px; font-size: 14px; }
-  .course-notes-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 28px 18px; }
+  .course-notes-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 20px 16px; }
   .course-notes-groups { gap: 52px; }
   .course-notes-loading-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .course-note-card-unbound.course-note-card-menuable { min-height: 248px; }
 }
 
 @media (max-width: 440px) {
@@ -362,14 +367,13 @@
   .course-notes-search { flex: 0 0 100%; }
   .course-notes-create { width: 100%; gap: 8px; }
   .course-notes-create-trigger { flex: 1; min-width: 0; padding: 0 10px; }
-  .course-notes-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .course-notes-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
   .course-note-card strong { font-size: 15px; }
+  .course-note-card-date { font-size: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .course-note-cover::after { background: radial-gradient(circle at 50% 0, #d6e6d1 0, transparent 68%); }
   .course-note-cover,
-  .course-note-cover::after,
   .course-notes-create-trigger,
   .course-notes-dialog-submit,
   .course-notes-search { transition: none; }
