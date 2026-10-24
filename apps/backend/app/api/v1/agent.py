@@ -33,10 +33,15 @@ from app.db.models import (
     ConversationMessage,
     Material,
     Note,
+    Notebook,
 )
 from app.schemas.api import AgentMessageCreate
 from app.services.assistant_sources import sources_from_evidence
-from app.services.conversations import persist_assistant_message
+from app.services.conversations import (
+    DEFAULT_CONVERSATION_TITLE,
+    derive_conversation_title,
+    persist_assistant_message,
+)
 
 router = APIRouter()
 
@@ -76,12 +81,41 @@ def send_agent_message(
     if payload.scope == "note" and not reading_note_id:
         raise HTTPException(status_code=422, detail="锁定当前笔记模式需要先打开一篇笔记")
 
+    notebook_context = payload.notebook_context
+    notebook_title = ""
+    if notebook_context is not None:
+        if reading is not None:
+            raise HTTPException(status_code=422, detail="整篇笔记上下文不能与分节笔记上下文同时提交")
+        if payload.scope == "note":
+            raise HTTPException(status_code=422, detail="整篇笔记暂不支持“锁定当前小节”范围")
+        book = db.get(Notebook, notebook_context.notebook_id)
+        if (book is None or (book.course_id is not None and book.course_id != conversation.course_id)
+                or notebook_context.course_id != conversation.course_id):
+            raise HTTPException(status_code=404, detail="正在编辑的笔记不存在或无法访问")
+        if book.document_revision != notebook_context.revision:
+            raise HTTPException(status_code=409, detail="笔记正文已更新，请刷新上下文后重新提问")
+        notebook_title = (notebook_context.title or book.title or "未命名笔记")[:200]
+
     history = [(message.role, message.content) for message in conversation.messages]
+    is_first_turn = not any(message.role == "user" for message in conversation.messages)
     user = ConversationMessage(
         conversation_id=conversation_id, role="user", content=payload.question.strip(),
         learning_goal=payload.learning_goal, status="completed", idempotency_key=payload.idempotency_key,
     )
     db.add(user)
+    # 范围是会话级属性：仅首轮落库，之后沿用建会话时的范围（与 /messages 一致）
+    if is_first_turn:
+        new_scope = payload.scope or "course"
+        conversation.default_scope = new_scope
+        conversation.scope = new_scope
+        if new_scope == "note":
+            conversation.note_id = reading_note_id
+            conversation.note_title = (reading.note_title if reading else None) or conversation.note_title
+        else:
+            conversation.note_id = None
+            conversation.note_title = None
+    if conversation.title.strip() == DEFAULT_CONVERSATION_TITLE:
+        conversation.title = derive_conversation_title(payload.question, conversation.scope, conversation.note_title)
     conversation.updated_at = datetime.now(UTC)
     db.commit()
 
@@ -92,6 +126,15 @@ def send_agent_message(
             parts.append(f"当前小节：{reading.section_title}")
         if reading.excerpt:
             parts.append(f"正文节选：\n{reading.excerpt}")
+        reading_section = "\n".join(parts)
+    elif notebook_context is not None:
+        parts = [f"《{notebook_title}》（整篇课程笔记，revision {notebook_context.revision}）"]
+        if notebook_context.selection:
+            parts.append(f"用户选中的原文：\n{notebook_context.selection}")
+        if notebook_context.excerpt:
+            parts.append(f"选区附近的正文：\n{notebook_context.excerpt}")
+        parts.append("这段内容来自用户正在编辑的文档。回答只作为建议，用户会决定是否插入；"
+                     "不要声称已经修改了笔记，也不要编造未提供的上下文。")
         reading_section = "\n".join(parts)
 
     def event_stream() -> Iterator[str]:
@@ -146,17 +189,21 @@ def send_agent_message(
                 "sources": sources_from_evidence(db, assistant),
                 "suggestions": final_event.get("suggestions") or [],
                 "message_id": assistant.id,
+                "conversation_title": conversation.title,
             })
             return
 
         # agent 链路失败：回退旧问答管线（无 key / 模型异常 / 轮次超限时用户无感）
         yield _sse({"type": "notice", "text": "智能模式暂不可用，已切换到标准问答。"})
+        fallback_question = payload.question
+        if reading_section:
+            fallback_question = f"{fallback_question}\n\n【当前上下文】\n{reading_section}"
         try:
             result = run_answer(
                 db,
                 course_id=conversation.course_id,
                 course_name=course.name,
-                question=payload.question,
+                question=fallback_question,
                 material_id=payload.material_id,
                 allow_web=payload.allow_web,
                 learning_goal=payload.learning_goal,
@@ -183,6 +230,7 @@ def send_agent_message(
                 "message_id": assistant.id,
                 "fallback": True,
                 "reason": error_message,
+                "conversation_title": conversation.title,
             })
         except Exception as exc:
             db.rollback()

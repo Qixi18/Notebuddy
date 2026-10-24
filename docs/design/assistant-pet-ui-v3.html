@@ -1,0 +1,1080 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>答疑桌宠 · 界面方案 v3（简化版）</title>
+<style>
+  /* ============================================================
+     设计令牌：同色深绿，字号上调一级，结构做减法
+     ============================================================ */
+  :root {
+    --g900: #12382a;
+    --g800: #174534;
+    --g700: #1e5a44;
+    --g600: #2c6b52;
+    --g500: #3f8064;
+    --g300: #a8c4b5;
+    --g200: #cfe0d6;
+    --g100: #e8f0e9;
+    --g50:  #f2f8f4;
+
+    --bg: #f4f6f3;
+    --surface: #ffffff;
+    --ink: #1b2a22;
+    --muted: #55635a;
+    --faint: #6b7a6e;
+    --line: #e6eae4;
+    --line-strong: #d8dfd7;
+    --fill: #f1f4f0;
+
+    --serif: "Songti SC", "SimSun", "Noto Serif SC", "Source Han Serif SC", serif;
+    --sans: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+    --mono: "Cascadia Mono", "Consolas", monospace;
+
+    --r-shell: 16px;
+    --r-card: 14px;
+    --r-panel: 12px;
+    --r-item: 10px;
+    --r-ctl: 9px;
+    --r-pill: 999px;
+
+    --shadow-shell: 0 1px 2px rgba(18, 56, 42, .04), 0 18px 44px rgba(18, 56, 42, .07);
+    --shadow-card: 0 1px 2px rgba(18, 56, 42, .04);
+    --shadow-lift: 0 8px 22px rgba(18, 56, 42, .10);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font-family: inherit; cursor: pointer; }
+  a { color: inherit; }
+
+  .page-head {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 24px 34px 12px;
+    display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap;
+  }
+  .page-head h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 22px; font-weight: 600; letter-spacing: -.01em;
+  }
+  .page-head p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+  .head-meta { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .head-btn {
+    height: 28px; padding: 0 11px;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: #fff; color: var(--muted); font-size: 11px;
+  }
+  .head-btn:hover { border-color: var(--g300); color: var(--g700); background: var(--g50); }
+  .head-btn.on { border-color: var(--g200); background: var(--g100); color: var(--g700); font-weight: 600; }
+
+  .board { display: flex; justify-content: center; padding: 0 34px 26px; }
+  .frame { position: relative; }
+  .canvas {
+    width: 1440px; height: 920px;
+    padding: 14px;
+    background: var(--bg);
+    transform-origin: top left;
+    position: relative;
+  }
+
+  .shell {
+    width: 100%; height: 100%;
+    display: grid;
+    grid-template-columns: 188px minmax(0, 1fr);
+    background: var(--surface);
+    border: 1px solid #eef1ec;
+    border-radius: var(--r-shell);
+    box-shadow: var(--shadow-shell);
+    overflow: hidden;
+  }
+
+  /* ============ 侧边栏 ============ */
+  .sidebar {
+    display: flex; flex-direction: column;
+    padding: 20px 12px 14px;
+    border-right: 1px solid #f0f2ee;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 2px 8px 26px; }
+  .brand-mark {
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border-radius: 9px;
+    background: var(--g700);
+    color: #fff;
+    box-shadow: 0 4px 10px rgba(30, 90, 68, .22);
+  }
+  .brand-name { font-family: var(--serif); font-size: 16px; font-weight: 600; letter-spacing: .01em; }
+  .nav-label { padding: 0 10px 8px; color: var(--faint); font-size: 10.5px; letter-spacing: .12em; }
+  .nav { display: grid; gap: 3px; }
+  .nav a {
+    display: flex; align-items: center; gap: 10px;
+    height: 38px; padding: 0 10px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 13px;
+    text-decoration: none;
+  }
+  .nav a:hover { background: #f6f8f5; color: var(--g700); }
+  .nav a.active { background: var(--g100); color: var(--g700); font-weight: 600; }
+  .nav a .ic { width: 16px; display: grid; place-items: center; opacity: .85; }
+  .sidebar-foot {
+    margin-top: auto;
+    display: flex; align-items: center; gap: 9px;
+    padding: 10px 8px 2px;
+    border-top: 1px solid #f0f2ee;
+    color: var(--muted); font-size: 11.5px;
+  }
+  .me {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--g100); color: var(--g700);
+    font-size: 11px; font-weight: 600;
+  }
+
+  /* ============ 内容区 ============ */
+  .content {
+    display: flex; flex-direction: column;
+    min-width: 0; min-height: 0;
+    padding: 18px 24px 20px;
+  }
+
+  .head {
+    flex: none;
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; max-width: 1176px;
+    margin: 0 auto;
+    padding: 4px 2px 14px;
+  }
+  .head h2 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 26px; font-weight: 600; letter-spacing: -.01em;
+    color: var(--g800);
+  }
+  .head .course { color: var(--faint); font-size: 14px; font-weight: 400; }
+
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 40px; padding: 0 16px;
+    border: 0; border-radius: var(--r-ctl);
+    background: var(--g700); color: #fff;
+    font-size: 13px; font-weight: 600;
+    box-shadow: 0 6px 14px rgba(30, 90, 68, .16);
+    transition: background 140ms ease, transform 140ms ease;
+  }
+  .btn-primary:hover { background: var(--g800); transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+
+  .workspace {
+    flex: 1; min-height: 0;
+    width: 100%; max-width: 1176px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr) auto;
+    gap: 24px;
+  }
+
+  .main-col {
+    display: flex; flex-direction: column;
+    min-height: 0; min-width: 0;
+    width: 100%; max-width: 760px;
+    margin: 0 auto;
+  }
+
+  /* ---- 左栏 ---- */
+  .rail { display: flex; flex-direction: column; min-height: 0; }
+
+  .pet-block {
+    flex: none;
+    padding: 2px 4px 4px;
+  }
+  .pet-stage {
+    position: relative;
+    height: 156px;
+    display: flex; justify-content: center; align-items: flex-end;
+    margin-bottom: 12px;
+  }
+  .pet-stage::before {
+    content: "";
+    position: absolute;
+    bottom: 4px; left: 50%; transform: translateX(-50%);
+    width: 144px; height: 144px;
+    border-radius: 50%;
+    background: #edf4ef;
+    box-shadow: inset 0 0 0 1px #e0ebe3;
+  }
+  .pet-stage::after {
+    content: "";
+    position: absolute;
+    bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 110px; height: 15px;
+    border: 1px solid #dce7df;
+    border-radius: 50%;
+  }
+  .pet-sprite {
+    position: relative; z-index: 1;
+    height: 148px;
+    aspect-ratio: 720 / 960;
+    background-image: url("../../apps/web/public/assets/teacher/teacher-idle-sheet.webp");
+    background-size: 1000% 600%;
+    background-position: 0 0;
+    background-repeat: no-repeat;
+    filter: drop-shadow(0 8px 10px rgba(30, 90, 68, .10));
+  }
+  .pet-id h3 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: 21px; font-weight: 600;
+    letter-spacing: .02em;
+    color: var(--g800);
+  }
+  .pet-id .status {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 4px;
+    color: #4a5a50;
+    font-size: 11.5px;
+  }
+  .pet-id .status i {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--g500);
+    box-shadow: 0 0 0 3px rgba(63, 128, 100, .12);
+  }
+  .pet-hint {
+    display: block;
+    margin-top: 6px;
+    color: var(--faint);
+    font-size: 10px;
+  }
+
+  .convos { flex: 1; min-height: 0; overflow: auto; padding-top: 22px; }
+  .convos-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 6px 6px;
+    color: var(--g600); font-size: 10.5px; letter-spacing: .1em; font-weight: 600;
+  }
+  .convos-head button { border: 0; background: none; color: var(--g600); font-size: 11px; }
+
+  .course-group { margin-bottom: 6px; }
+  .course-head {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 8px 4px;
+    border: 0; border-radius: 8px;
+    background: none; text-align: left;
+  }
+  .course-head:hover { background: #f8fbf8; }
+  .scope-icon {
+    width: 22px; height: 22px; flex: none;
+    display: grid; place-items: center;
+    border-radius: 6px;
+    background: var(--g100); color: var(--g700);
+  }
+  .scope-name { min-width: 0; }
+  .scope-name b {
+    display: block;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 13px; font-weight: 600; color: #2b3a31;
+  }
+  .scope-name small { display: block; color: var(--faint); font-size: 10px; }
+
+  .chevron {
+    margin-left: auto; flex: none;
+    color: var(--g300); font-size: 9px;
+    transition: transform 160ms ease;
+  }
+  .chevron.sm { font-size: 8px; margin-left: 0; }
+  .collapsed > .course-head .chevron,
+  .collapsed > .sub-head .chevron { transform: rotate(-90deg); }
+  .course-group.collapsed > .course-body,
+  .sub-group.collapsed > .sub-list { display: none; }
+
+  .course-body { padding-left: 14px; }
+  .course-body.flat { padding-left: 30px; }
+
+  .sub-group { margin-top: 1px; }
+  .sub-head {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; padding: 5px 6px;
+    border: 0; border-radius: 6px;
+    background: none; text-align: left;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  .sub-head:hover { background: #f8fbf8; }
+  .note-icon { flex: none; color: var(--g500); display: grid; place-items: center; }
+  .sub-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub-head.is-note .sub-title { color: #2b3a31; font-weight: 600; font-size: 12px; }
+  .sub-head.is-note { color: var(--g600); }
+  .sub-count { margin-left: auto; color: #a3ada3; font-size: 9.5px; }
+
+  .sub-list { padding: 1px 0 5px 14px; }
+  .sub-list.note { padding-left: 20px; }
+
+  .convo {
+    display: flex; align-items: baseline; gap: 8px;
+    width: 100%; padding: 6px 7px;
+    border: 0; border-radius: 6px;
+    background: none; text-align: left;
+    color: #3b473d;
+    font-size: 12.5px; line-height: 1.5;
+  }
+  .convo:hover { background: #f6f8f5; }
+  .convo.active {
+    background: var(--g100); color: var(--g700);
+    font-weight: 600;
+    box-shadow: inset 2px 0 0 var(--g700);
+  }
+  .convo .t { margin-left: auto; color: #a3ada3; font-size: 10px; font-variant-numeric: tabular-nums; }
+
+  /* ---- 中栏 ---- */
+  .chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+  .ctxbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 0 0 12px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 30px; padding: 0 12px;
+    border: 1px solid var(--g200);
+    border-radius: var(--r-pill);
+    background: var(--g50);
+    color: var(--g700);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .chip b { font-weight: 600; }
+  .chip .caret { color: var(--g300); font-size: 8px; }
+  .ctxbar .btn-sm { margin-left: auto; }
+  .btn-sm { height: 32px; padding: 0 12px; font-size: 12px; }
+
+  .thread {
+    flex: 1; min-height: 0;
+    overflow: auto;
+    display: flex; flex-direction: column; gap: 22px;
+    padding: 6px 4px 18px 0;
+    scrollbar-width: thin;
+  }
+
+  .msg-user {
+    align-self: flex-end;
+    max-width: 80%;
+    padding: 11px 15px;
+    border-radius: 14px 14px 4px 14px;
+    background: var(--g100);
+    color: #1f3329;
+    font-size: 14.5px; line-height: 1.75;
+  }
+
+  .answer-card {
+    padding: 16px 18px 10px;
+    border: 1px solid #e4efe7;
+    border-radius: 12px;
+    background: #fff;
+  }
+  .mark {
+    width: 24px; height: 24px;
+    display: grid; place-items: center;
+    border-radius: 50%;
+    background: var(--g50);
+    border: 1px solid var(--g200);
+    color: var(--g700);
+  }
+  .meta {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px;
+    color: var(--faint); font-size: 11px;
+  }
+  .meta b { color: var(--ink); font-size: 12px; font-weight: 600; }
+
+  .answer { font-size: 14.5px; line-height: 1.85; color: #26332b; }
+  .answer p { margin: 0 0 12px; }
+  .answer p:last-child { margin-bottom: 0; }
+  .answer ul { margin: 0 0 14px; padding: 0; list-style: none; display: grid; gap: 9px; }
+  .answer li { position: relative; padding-left: 16px; }
+  .answer li::before {
+    content: "";
+    position: absolute; left: 3px; top: .74em;
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--g300);
+  }
+  .answer em { font-style: normal; color: var(--g700); font-weight: 600; }
+  .answer h4 {
+    margin: 12px 0 6px;
+    font-family: var(--serif);
+    font-size: 16.5px; font-weight: 600; color: var(--g800);
+  }
+
+  .cite {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 17px; height: 17px;
+    margin-left: 2px; padding: 0 4px;
+    border: 1px solid var(--g200);
+    border-radius: 5px;
+    background: var(--g100);
+    color: var(--g700);
+    font-family: var(--mono); font-size: 9.5px; line-height: 1;
+    vertical-align: 1px;
+    cursor: pointer;
+    transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+  }
+  .cite:hover, .cite.on { background: var(--g700); border-color: var(--g700); color: #fff; }
+
+  .callout {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--g700);
+    border-radius: 0 10px 10px 0;
+    background: var(--g50);
+  }
+  .callout ol { margin: 0; padding-left: 17px; display: grid; gap: 2px; font-size: 13px; }
+  .callout li::marker { color: var(--g500); font-family: var(--mono); font-size: 10px; }
+  .callout .note { display: block; margin-top: 6px; color: var(--muted); font-size: 11.5px; }
+  .term {
+    border: 0; padding: 0 0 1px;
+    background: none;
+    border-bottom: 1px dashed var(--g300);
+    color: var(--g700);
+    font: inherit;
+  }
+
+  .acts {
+    display: flex; align-items: center; gap: 14px;
+    margin-top: 12px;
+    color: var(--faint); font-size: 11px;
+  }
+  .acts button { border: 0; background: none; padding: 3px 0; color: var(--faint); font-size: 11px; }
+  .acts button:hover { color: var(--g700); }
+  .acts .sep { width: 1px; height: 11px; background: var(--line); }
+  .acts .push { margin-left: auto; }
+  .acts .link { color: var(--g600); font-weight: 600; }
+
+  .composer {
+    flex: none;
+    margin-top: 6px;
+    padding: 12px 14px 10px;
+    border: 1px solid var(--g200);
+    border-radius: var(--r-panel);
+    background: #fff;
+    box-shadow: var(--shadow-card);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+  }
+  .composer:focus-within {
+    border-color: var(--g300);
+    box-shadow: 0 0 0 3px rgba(30, 90, 68, .07), var(--shadow-card);
+  }
+  .composer textarea {
+    width: 100%; min-height: 52px;
+    border: 0; outline: 0; resize: none;
+    padding: 2px;
+    background: transparent;
+    font-family: inherit; font-size: 14.5px; line-height: 1.7;
+    color: var(--ink);
+  }
+  .composer textarea::placeholder { color: #9aa59a; }
+  .composer .foot { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+  .composer .hint { color: #9aa59a; font-size: 10.5px; }
+  .composer .hint kbd {
+    padding: 0 3px; border: 1px solid var(--line); border-radius: 3px;
+    background: var(--fill); font-family: var(--mono); font-size: 10px; color: var(--muted);
+  }
+  .send {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 32px; padding: 0 15px;
+    border: 0; border-radius: 8px;
+    background: var(--g700); color: #fff;
+    font-size: 12.5px; font-weight: 600;
+  }
+  .send:hover { background: var(--g800); }
+
+  /* ---- 卡内依据条 ---- */
+  .sources {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 14px; padding-top: 12px;
+    border-top: 1px solid #eef5f0;
+  }
+  .sources-label { color: var(--g600); font-size: 10.5px; white-space: nowrap; }
+  .sources-label b { font-family: var(--mono); font-weight: 600; }
+  .source-row { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+  .source-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 26px; padding: 0 9px;
+    border: 1px solid #e3ede6;
+    border-radius: var(--r-pill);
+    background: #f7fbf8;
+    color: #3d4a3f;
+    font-size: 10.5px;
+    white-space: nowrap;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  .source-chip:hover { border-color: var(--g300); }
+  .source-chip.on { border-color: var(--g700); background: #fff; color: var(--g700); font-weight: 600; }
+  .source-chip i {
+    width: 15px; height: 15px; flex: none;
+    display: grid; place-items: center;
+    border-radius: 4px;
+    background: var(--g100); color: var(--g700);
+    font-family: var(--mono); font-size: 8.5px; font-style: normal; font-weight: 400;
+  }
+  .source-chip.on i { background: var(--g700); color: #fff; }
+  .source-chip .dot { width: 4px; height: 4px; border-radius: 50%; background: var(--g500); }
+  .source-chip .dot.part { background: transparent; box-shadow: inset 0 0 0 1px #6b756b; }
+  .sources-more {
+    margin-left: auto;
+    border: 0; background: none; padding: 2px 0;
+    color: var(--g600); font-size: 10.5px; white-space: nowrap;
+  }
+  .sources-more:hover { text-decoration: underline; }
+
+  /* ---- 右侧：本次改动 ---- */
+  .changes {
+    display: flex; flex-direction: column;
+    width: 280px; min-height: 0;
+    padding-left: 18px;
+    border-left: 1px solid #eef3ef;
+    transition: width 180ms ease, padding 180ms ease;
+  }
+  .changes.collapsed { width: 44px; padding-left: 6px; }
+  .changes.collapsed .chg-head,
+  .changes.collapsed .chg-list,
+  .changes.collapsed .chg-foot { display: none; }
+  .changes.collapsed .chg-rail { display: flex; }
+
+  .chg-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 2px 10px;
+  }
+  .chg-head strong { font-size: 12.5px; font-weight: 600; color: var(--g800); }
+  .chg-head .n {
+    min-width: 17px; height: 17px; padding: 0 4px;
+    display: grid; place-items: center;
+    border-radius: 5px;
+    background: var(--g100); color: var(--g700);
+    font-family: var(--mono); font-size: 8.5px;
+  }
+  .chg-head .icon {
+    width: 22px; height: 22px;
+    display: grid; place-items: center;
+    border: 0; border-radius: 6px;
+    background: none; color: var(--faint);
+  }
+  .chg-head .icon:hover { background: #f2f6f2; color: var(--g700); }
+  .chg-head .icon:first-of-type { margin-left: auto; }
+
+  .chg-list { flex: 1; min-height: 0; overflow: auto; }
+
+  .chg-row {
+    display: flex; align-items: flex-start; gap: 9px;
+    width: 100%; padding: 9px 4px;
+    border: 0; border-bottom: 1px solid #f2f6f2;
+    background: none; text-align: left;
+  }
+  .chg-row:hover { background: #f8fbf8; }
+  .chg-row.on { background: #f6faf7; }
+  .chg-file {
+    width: 17px; height: 17px; flex: none;
+    margin-top: 1px;
+    display: grid; place-items: center;
+    border-radius: 4px;
+    background: var(--g100); color: var(--g700);
+    font-size: 9px;
+  }
+  .chg-main { min-width: 0; }
+  .chg-main b {
+    display: block;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12.5px; font-weight: 600; color: #2b3a31;
+  }
+  .chg-main small { color: var(--faint); font-size: 10px; }
+  .chg-diff {
+    margin-left: auto; flex: none;
+    display: flex; gap: 5px;
+    font-family: var(--mono); font-size: 9.5px;
+  }
+  .chg-diff i { font-style: normal; color: var(--g600); }
+  .chg-diff em { font-style: normal; color: #a95d4c; }
+
+  .chg-preview {
+    margin: 2px 0 8px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    background: #f6faf7;
+  }
+  .chg-preview .cap {
+    display: flex; justify-content: space-between;
+    margin-bottom: 6px;
+    color: var(--faint); font-size: 9px; letter-spacing: .06em;
+  }
+  .dp-line {
+    font-size: 10.5px; line-height: 1.65;
+    padding: 1px 4px;
+    border-radius: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dp-line.del { background: #fbefef; color: #8a4b3f; }
+  .dp-line.add { background: #e8f2ec; color: #1e5a44; }
+  .dp-line.ctx { color: #5a675b; }
+  .dp-open {
+    margin-top: 7px;
+    border: 0; background: none; padding: 2px 0;
+    color: var(--g600); font-size: 10px;
+  }
+  .dp-open:hover { text-decoration: underline; }
+
+  .chg-foot { flex: none; padding: 10px 2px 2px; border-top: 1px solid #f2f6f2; }
+  .chg-apply {
+    width: 100%; height: 32px;
+    border: 1px solid var(--g200);
+    border-radius: 8px;
+    background: var(--g100);
+    color: var(--g700);
+    font-size: 11.5px; font-weight: 600;
+  }
+  .chg-apply:hover { background: #e0ece5; }
+
+  .chg-rail {
+    display: none; flex-direction: column; align-items: center; gap: 10px;
+    padding-top: 6px;
+  }
+  .chg-rail .icon {
+    width: 26px; height: 26px;
+    display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: #fff; color: var(--g700);
+  }
+  .chg-rail span {
+    writing-mode: vertical-rl;
+    letter-spacing: .16em;
+    font-size: 10px; color: var(--g600);
+  }
+
+  /* 标注 */
+  .zone-tag {
+    display: none;
+    position: absolute; z-index: 60;
+    top: -7px; left: -7px;
+    width: 15px; height: 15px;
+    align-items: center; justify-content: center;
+    border: 1px solid #fff;
+    border-radius: 50%;
+    background: var(--g700); color: #fff;
+    font-family: var(--mono); font-size: 8px;
+    box-shadow: 0 2px 6px rgba(18, 56, 42, .18);
+  }
+  .annotate [data-zone] { position: relative; outline: 1px dashed rgba(30, 90, 68, .35); outline-offset: -2px; }
+  .annotate .zone-tag { display: flex; }
+
+  .legend {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 34px 34px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .legend div {
+    display: grid; gap: 4px;
+    padding: 12px 13px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+  }
+  .legend span { color: var(--g600); font-family: var(--mono); font-size: 9px; letter-spacing: .1em; }
+  .legend strong { font-size: 12px; font-weight: 600; }
+  .legend p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+  body.shot { background: #fff; }
+  body.shot .page-head, body.shot .legend { display: none; }
+  body.shot .board { padding: 0; }
+  body.shot .shell { box-shadow: none; }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <div>
+    <h1>答疑桌宠 · 界面方案 v3</h1>
+    <p>卡片版：回答、依据、输入统一为 12px 圆角卡片；无渐变；绿色只做文字与浅底面。</p>
+  </div>
+  <div class="head-meta">
+    <button class="head-btn" id="btn-anno">布局标注</button>
+    <button class="head-btn" id="btn-zoom">100% 查看</button>
+  </div>
+</header>
+
+<div class="board">
+  <div class="frame" id="frame">
+    <div class="canvas" id="canvas">
+      <div class="shell">
+
+        <aside class="sidebar">
+          <div class="brand">
+            <span class="brand-mark">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 5.5c3.6-1 7-.4 10 1.8 1 .8 1.9 1.8 2.6 3-3.5.6-7 .3-10.4-.9C5.2 9 4.5 7.3 4 5.5Z"/>
+                <path d="M17 10.5c2 .2 3.6 1.1 5 2.6-2.2.9-4.4.8-6.5-.2"/>
+              </svg>
+            </span>
+            <span class="brand-name">NoteBuddy</span>
+          </div>
+
+          <div class="nav-label">学习空间</div>
+          <nav class="nav">
+            <a href="#"><span class="ic">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/></svg>
+            </span>首页</a>
+            <a href="#"><span class="ic">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></svg>
+            </span>课程</a>
+            <a href="#"><span class="ic">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 7h14M5 12h14M5 17h9"/></svg>
+            </span>笔记</a>
+            <a href="#" class="active"><span class="ic">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3.5c.5 4 2 5.5 6 6-4 .5-5.5 2-6 6-.5-4-2-5.5-6-6 4-.5 5.5-2 6-6Z"/><path d="M18.5 15.5c.2 1.7.9 2.4 2.5 2.7-1.6.3-2.3 1-2.5 2.7-.2-1.7-.9-2.4-2.5-2.7 1.6-.3 2.3-1 2.5-2.7Z"/></svg>
+            </span>答疑桌宠</a>
+            <a href="#"><span class="ic">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20c0-4 0-7 3.5-9.5S20 4 20 4s-1 5-4 7-4 3-4 9Z"/><path d="M12 20c0-4-1-7-4-9"/></svg>
+            </span>知识森林</a>
+          </nav>
+
+          <div class="sidebar-foot">
+            <span class="me">我</span>
+            <span>我的学习空间</span>
+          </div>
+        </aside>
+
+        <div class="content">
+
+          <header class="head" data-zone>
+            <span class="zone-tag">1</span>
+            <h2>答疑桌宠 <span class="course">· 数据结构</span></h2>
+          </header>
+
+          <div class="workspace">
+
+            <!-- ---------- 左栏 ---------- -->
+            <aside class="rail" data-zone>
+              <span class="zone-tag">2</span>
+
+              <div class="pet-block">
+                <div class="pet-stage"><div class="pet-sprite"></div></div>
+                <div class="pet-id">
+                  <h3>莉艾尔</h3>
+                  <span class="status"><i></i>正在读第 4 讲 · 可打断</span>
+                  <span class="pet-hint">轻点说话 · 拖出可浮动</span>
+                </div>
+              </div>
+
+              <div class="convos">
+                <div class="convos-head"><span>会话</span><button>全部 →</button></div>
+
+                <!-- 全局 -->
+                <section class="course-group">
+                  <button class="course-head" type="button" aria-expanded="true">
+                    <span class="scope-icon">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.5 2.6 2.5 13.4 0 16M12 4c-2.5 2.6-2.5 13.4 0 16"/></svg>
+                    </span>
+                    <span class="scope-name"><b>全局可查</b><small>跨课程 · 2</small></span>
+                    <span class="chevron">▾</span>
+                  </button>
+                  <div class="course-body flat">
+                    <button class="convo" type="button"><span>跨课程对比红黑树与 AVL</span><span class="t">14:02</span></button>
+                    <button class="convo" type="button"><span>图算法出现在哪些课程</span><span class="t">10-16</span></button>
+                  </div>
+                </section>
+
+                <!-- 数据结构 -->
+                <section class="course-group">
+                  <button class="course-head" type="button" aria-expanded="true">
+                    <span class="scope-icon">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></svg>
+                    </span>
+                    <span class="scope-name"><b>数据结构</b><small>6 段会话</small></span>
+                    <span class="chevron">▾</span>
+                  </button>
+
+                  <div class="course-body">
+                    <div class="sub-group">
+                      <button class="sub-head" type="button" aria-expanded="true">
+                        <span class="sub-title">整门课程</span>
+                        <span class="sub-count">3</span>
+                        <span class="chevron sm">▾</span>
+                      </button>
+                      <div class="sub-list">
+                        <button class="convo active" type="button"><span>红黑树的旋转规则</span><span class="t">14:02</span></button>
+                        <button class="convo" type="button"><span>B+ 树与磁盘 IO</span><span class="t">10:31</span></button>
+                        <button class="convo" type="button"><span>最短路径复习</span><span class="t">09:12</span></button>
+                      </div>
+                    </div>
+
+                    <div class="sub-group">
+                      <button class="sub-head is-note" type="button" aria-expanded="true">
+                        <span class="note-icon">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h7l4 4v12H7z"/><path d="M14 4v4h4"/></svg>
+                        </span>
+                        <span class="sub-title">红黑树的五个不变量</span>
+                        <span class="sub-count">2</span>
+                        <span class="chevron sm">▾</span>
+                      </button>
+                      <div class="sub-list note">
+                        <button class="convo" type="button"><span>黑高定义是不是写错了</span><span class="t">昨天</span></button>
+                        <button class="convo" type="button"><span>这节的四条性质</span><span class="t">10-17</span></button>
+                      </div>
+                    </div>
+
+                    <div class="sub-group collapsed">
+                      <button class="sub-head is-note" type="button" aria-expanded="false">
+                        <span class="note-icon">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h7l4 4v12H7z"/><path d="M14 4v4h4"/></svg>
+                        </span>
+                        <span class="sub-title">树的遍历</span>
+                        <span class="sub-count">1</span>
+                        <span class="chevron sm">▾</span>
+                      </button>
+                      <div class="sub-list note">
+                        <button class="convo" type="button"><span>遍历顺序</span><span class="t">10-17</span></button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- 计算机网络 -->
+                <section class="course-group collapsed">
+                  <button class="course-head" type="button" aria-expanded="false">
+                    <span class="scope-icon">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="4" width="7" height="7" rx="1.6"/><rect x="13" y="4" width="7" height="7" rx="1.6"/><rect x="4" y="13" width="7" height="7" rx="1.6"/><rect x="13" y="13" width="7" height="7" rx="1.6"/></svg>
+                    </span>
+                    <span class="scope-name"><b>计算机网络</b><small>2 段会话</small></span>
+                    <span class="chevron">▾</span>
+                  </button>
+                  <div class="course-body">
+                    <div class="sub-group">
+                      <button class="sub-head" type="button" aria-expanded="true">
+                        <span class="sub-title">整门课程</span>
+                        <span class="sub-count">2</span>
+                        <span class="chevron sm">▾</span>
+                      </button>
+                      <div class="sub-list">
+                        <button class="convo" type="button"><span>三次握手为什么是三次</span><span class="t">10-16</span></button>
+                        <button class="convo" type="button"><span>TCP 拥塞控制</span><span class="t">10-15</span></button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </aside>
+
+            <!-- ---------- 主列（居中阅读） ---------- -->
+            <section class="main-col" data-zone>
+              <span class="zone-tag">3</span>
+
+              <div class="ctxbar">
+                <button class="chip">范围 <b>整门课程</b><span class="caret">▼</span></button>
+                <button class="chip">目标 <b>理解概念</b><span class="caret">▼</span></button>
+                <button class="btn-primary btn-sm">＋ 新对话</button>
+              </div>
+
+              <div class="thread">
+                <div class="msg-user">为什么红黑树插入后最多只需要两次旋转就能恢复平衡？</div>
+
+                <article class="answer-card">
+                  <header class="meta">
+                    <span class="mark" aria-hidden="true">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 5.5c3.6-1 7-.4 10 1.8 1 .8 1.9 1.8 2.6 3-3.5.6-7 .3-10.4-.9C5.2 9 4.5 7.3 4 5.5Z"/>
+                        <path d="M17 10.5c2 .2 3.6 1.1 5 2.6-2.2.9-4.4.8-6.5-.2"/>
+                        <circle cx="7.4" cy="7.1" r=".8" fill="currentColor" stroke="none"/>
+                      </svg>
+                    </span>
+                    <b>莉艾尔</b><span>14:02</span>
+                  </header>
+
+                  <div class="answer">
+                    <p>先说结论：插入只会破坏「性质 4：红节点的孩子必须是黑」这一条。修复时冲突每次向上移动两层：叔节点为红只变色、不旋转；叔节点为黑才需要旋转，且最多两次就能终止。<sup class="cite on">1</sup></p>
+                    <ul>
+                      <li>叔节点为红：父与叔变黑、祖父变红，冲突上移两层，<em>不产生旋转</em>。这种情形可以连续出现，但每轮上升两层，最多 O(log n) 轮。<sup class="cite">2</sup></li>
+                      <li>叔节点为黑：三点成折线时先旋转拉直，再做一次旋转并重新着色。完成后子树根为黑，冲突消失、循环结束 —— 这就是「最多两次」的来源。<sup class="cite">3</sup></li>
+                    </ul>
+
+                    <h4>红黑树的四条性质</h4>
+                    <div class="callout">
+                      <ol>
+                        <li>每个节点非红即黑，根为黑，叶子（NIL）为黑。</li>
+                        <li>红节点的两个孩子都是黑。</li>
+                        <li>任一节点到其所有叶子的路径上<button class="term">黑高</button>相同。</li>
+                        <li>新节点插入时染红，因此不改变黑高。</li>
+                      </ol>
+                      <span class="note">插入只会破坏第 2 条，所以修复只需要沿一条路径向上走。</span>
+                    </div>
+                  </div>
+
+                  <section class="sources">
+                    <span class="sources-label">依据 <b>3</b> 段</span>
+                    <div class="source-row">
+                      <button class="source-chip on" type="button"><i>1</i>第 3 讲 · p.18<span class="dot"></span></button>
+                      <button class="source-chip" type="button"><i>2</i>第 3 讲 · p.19<span class="dot"></span></button>
+                      <button class="source-chip" type="button"><i>3</i>第 4 讲 · p.6<span class="dot part"></span></button>
+                    </div>
+                    <button class="sources-more" type="button">查看原文 →</button>
+                  </section>
+
+                  <div class="acts">
+                    <button>有帮助</button>
+                    <button>需改进</button>
+                    <span class="push"></span>
+                    <button class="link">复制回答</button>
+                  </div>
+                </article>
+              </div>
+
+              <div class="composer" data-zone>
+                <span class="zone-tag">4</span>
+                <textarea rows="2" placeholder="追问莉艾尔，或把课件页面拖进来…" aria-label="追问"></textarea>
+                <div class="foot">
+                  <span class="hint"><kbd>Enter</kbd> 发送 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 换行</span>
+                  <button class="send">发送 ↑</button>
+                </div>
+              </div>
+            </section>
+
+            <!-- ---------- 右侧：本次改动 ---------- -->
+            <aside class="changes" id="changes" data-zone>
+              <span class="zone-tag">5</span>
+
+              <div class="chg-head">
+                <strong>本次改动</strong><span class="n">3</span>
+                <button class="icon" type="button" title="刷新" aria-label="刷新改动">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4.5h-4.5"/></svg>
+                </button>
+                <button class="icon" type="button" id="chgToggle" title="收起" aria-label="收起改动栏" aria-expanded="true">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m9 5 7 7-7 7"/></svg>
+                </button>
+              </div>
+
+              <div class="chg-list">
+                <button class="chg-row on" type="button">
+                  <span class="chg-file">◧</span>
+                  <span class="chg-main"><b>红黑树的五个不变量</b><small>第 3 章 · 树</small></span>
+                  <span class="chg-diff"><i>+12</i><em>−4</em></span>
+                </button>
+
+                <div class="chg-preview">
+                  <div class="cap"><span>预览 · 第 3 节</span><span>待确认</span></div>
+                  <div class="dp-line del">− 五条不变量：节点非红即黑、根为黑、叶子为黑…</div>
+                  <div class="dp-line add">+ 四条性质：节点非红即黑、红孩子为黑、黑高相同…</div>
+                  <div class="dp-line ctx"> 插入只会破坏第 4 条，沿一条路径向上修复。</div>
+                  <button class="dp-open" type="button">打开笔记 →</button>
+                </div>
+
+                <button class="chg-row" type="button">
+                  <span class="chg-file">◧</span>
+                  <span class="chg-main"><b>AVL 与红黑树对比</b><small>第 4 章 · 平衡树</small></span>
+                  <span class="chg-diff"><i>+6</i><em>−1</em></span>
+                </button>
+
+                <button class="chg-row" type="button">
+                  <span class="chg-file">◧</span>
+                  <span class="chg-main"><b>树的遍历笔记</b><small>第 3 章 · 遍历</small></span>
+                  <span class="chg-diff"><i>+3</i></span>
+                </button>
+              </div>
+
+              <div class="chg-foot">
+                <button class="chg-apply" type="button">全部写入笔记</button>
+              </div>
+
+              <div class="chg-rail">
+                <button class="icon" type="button" id="chgExpand" title="展开改动" aria-label="展开改动栏">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m15 5-7 7 7 7"/></svg>
+                </button>
+                <span>改动 3</span>
+              </div>
+            </aside>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <div><span>01 · 52px</span><strong>只有标题</strong><p>「新对话」移到上下文条右侧，页面右上角不再有孤立的主按钮。</p></div>
+  <div><span>02 · 240px</span><strong>课程可展开，笔记内缩进</strong><p>课程为一级；「整门课程」与各篇笔记是二级，笔记再缩进一格。</p></div>
+  <div><span>03 · 736px</span><strong>一条阅读列</strong><p>回答卡里连依据一起读完：卡底一行来源 chips，点角标即高亮。</p></div>
+  <div><span>04 · 同宽</span><strong>输入卡</strong><p>与回答卡同宽、同圆角、同描边；聚焦时描边转绿。</p></div>
+  <div><span>05 · 280px</span><strong>改动栏</strong><p>列本次会话改过的笔记，带 +/− 行数；点开就地预览，可整体收起。</p></div>
+</div>
+
+<script>
+  var canvas = document.getElementById('canvas');
+  var frame = document.getElementById('frame');
+  var btnAnno = document.getElementById('btn-anno');
+  var btnZoom = document.getElementById('btn-zoom');
+  var zoom = 'fit';
+
+  function fit() {
+    var gap = 76;
+    var s = zoom === 'fit' ? Math.min(1, (document.documentElement.clientWidth - gap) / 1440) : 1;
+    canvas.style.transform = 'scale(' + s + ')';
+    frame.style.width = (1440 * s) + 'px';
+    frame.style.height = (920 * s) + 'px';
+    btnZoom.textContent = zoom === 'fit' ? '100% 查看' : '适应窗口';
+    btnZoom.classList.toggle('on', zoom !== 'fit');
+  }
+
+  btnAnno.addEventListener('click', function () {
+    var on = canvas.classList.toggle('annotate');
+    btnAnno.classList.toggle('on', on);
+  });
+  btnZoom.addEventListener('click', function () {
+    zoom = zoom === 'fit' ? 'full' : 'fit';
+    fit();
+  });
+
+  document.querySelectorAll('.cite').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      document.querySelectorAll('.cite').forEach(function (c) { c.classList.remove('on'); });
+      document.querySelectorAll('.source-chip').forEach(function (s) { s.classList.remove('on'); });
+      chip.classList.add('on');
+      var id = Number(chip.textContent.trim());
+      var card = document.querySelectorAll('.source-chip')[id - 1];
+      if (card) { card.classList.add('on'); card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+    });
+  });
+
+  if (location.hash.indexOf('shot') >= 0) { document.body.classList.add('shot'); zoom = 'full'; }
+  if (location.hash.indexOf('anno') >= 0) { canvas.classList.add('annotate'); btnAnno.classList.add('on'); }
+
+
+  var changes = document.getElementById('changes');
+  var chgToggle = document.getElementById('chgToggle');
+  var chgExpand = document.getElementById('chgExpand');
+  function setCollapsed(v) {
+    changes.classList.toggle('collapsed', v);
+    if (chgToggle) chgToggle.setAttribute('aria-expanded', String(!v));
+  }
+  if (chgToggle) chgToggle.addEventListener('click', function () { setCollapsed(true); });
+  if (chgExpand) chgExpand.addEventListener('click', function () { setCollapsed(false); });
+
+
+  document.querySelectorAll('.course-head, .sub-head').forEach(function (head) {
+    head.addEventListener('click', function () {
+      var box = head.closest('.sub-group') || head.closest('.course-group');
+      var collapsed = box.classList.toggle('collapsed');
+      head.setAttribute('aria-expanded', String(!collapsed));
+    });
+  });
+
+  window.addEventListener('resize', fit);
+  fit();
+  if (location.hash.indexOf('shot') >= 0) { zoom = 'full'; fit(); }
+</script>
+</body>
+</html>

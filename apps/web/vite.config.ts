@@ -6,6 +6,11 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 5173,
+    watch: {
+      // The editing tool writes atomic temp dirs next to source files on Windows.
+      // Watching those transient paths can crash Vite with EBUSY.
+      ignored: ['**/.*.tmpdir/**', '**/*.tmpdir/**'],
+    },
     proxy: {
       '/api': 'http://127.0.0.1:8000',
     },

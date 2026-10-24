@@ -1,6 +1,6 @@
 import type { ForestCourse } from '../forest/types'
 
-export type TreePosition = { course: ForestCourse; x: number; y: number; seed: number }
+export type TreePosition = { course: ForestCourse; x: number; y: number; seed: number; grove?: number; captionY?: number }
 export type SavedSlot = { x: number; signature: string }
 export const TREE_SPACING = 470
 export function hashId(id: string): number {

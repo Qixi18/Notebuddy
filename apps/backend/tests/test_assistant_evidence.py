@@ -51,3 +51,43 @@ def test_answer_categories_keep_unverified_explanations_distinct():
     assert claims[0].support_level == "unverified"
     assert claims[0].chunk_indexes == () and claims[0].web_indexes == ()
     assert claims[1].support_level == "direct"
+
+
+def test_multi_page_marker_links_every_listed_page():
+    """模型常在一个标记里列多页（第 2、3、5 页），必须逐个命中。"""
+    chunks = [
+        RetrievedChunk(
+            material_id="material-1", lecture_title="第一讲", page_number=2,
+            text="页 2", score=1.0, page_block_id="block-1", direct_support=True,
+        ),
+        RetrievedChunk(
+            material_id="material-1", lecture_title="第一讲", page_number=3,
+            text="页 3", score=1.0, page_block_id="block-2", direct_support=True,
+        ),
+        RetrievedChunk(
+            material_id="material-1", lecture_title="第一讲", page_number=5,
+            text="页 5", score=1.0, page_block_id="block-3", direct_support=True,
+        ),
+    ]
+    claims = extract_claims("结论。[课程资料：第一讲 | 第 2、3、5 页]", chunks, [])
+    assert claims[0].chunk_indexes == (0, 1, 2)
+    assert claims[0].evidence_type == "course_direct"
+
+
+def test_multi_page_marker_accepts_ranges_and_ignores_unknown_pages():
+    chunks = [
+        RetrievedChunk(
+            material_id="material-1", lecture_title="第一讲", page_number=2,
+            text="页 2", score=1.0, page_block_id="block-1", direct_support=False,
+        ),
+        RetrievedChunk(
+            material_id="material-1", lecture_title="第一讲", page_number=3,
+            text="页 3", score=1.0, page_block_id="block-2", direct_support=False,
+        ),
+    ]
+    # 区间写法：第 2-3 页
+    claims = extract_claims("区间。[课程资料：第一讲 | 第 2-3 页]", chunks, [])
+    assert claims[0].chunk_indexes == (0, 1)
+    # 页码超出实际来源的只标命中的，不虚标
+    claims = extract_claims("越界。[课程资料：第一讲 | 第 2、99 页]", chunks, [])
+    assert claims[0].chunk_indexes == (0,)

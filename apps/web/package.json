@@ -14,6 +14,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/noto-sans-sc": "^5.3.1",
+    "@tiptap/extension-drag-handle-react": "^3.32.0",
+    "@tiptap/extension-image": "^3.32.0",
+    "@tiptap/extension-list": "^3.32.0",
+    "@tiptap/extension-mathematics": "^3.32.0",
+    "@tiptap/extension-table": "^3.32.0",
+    "@tiptap/extensions": "^3.32.0",
+    "@tiptap/pm": "^3.32.0",
+    "@tiptap/react": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
     "d3-selection": "^3.0.0",
     "d3-shape": "^3.2.0",
     "d3-zoom": "^3.0.0",

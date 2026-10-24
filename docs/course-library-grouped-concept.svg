@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1100" viewBox="0 0 1440 1100" role="img" aria-labelledby="title desc">
+  <title id="title">NoteBuddy 按课程分组的笔记页设计方案</title>
+  <desc id="desc">顶部搜索框与新建笔记按钮并排，下面按数学分析和大学物理分组展示五篇笔记。</desc>
+  <defs>
+    <style>
+      .sans{font-family:'Microsoft YaHei','Noto Sans SC',sans-serif}.serif{font-family:'Songti SC','Noto Serif SC',serif}
+      .ink{fill:#1f2a22}.muted{fill:#667568}.green{fill:#2f5d45}.clay{fill:#a85f43}
+    </style>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="9" stdDeviation="11" flood-color="#243e2c" flood-opacity=".085"/></filter>
+  </defs>
+  <rect width="1440" height="1100" fill="#f7f8f5"/>
+  <rect x="28" y="24" width="1384" height="1052" rx="24" fill="#fff" filter="url(#shadow)"/>
+  <path d="M244 24v1052" stroke="#e6eae3"/>
+  <g class="sans">
+    <rect x="58" y="58" width="40" height="40" rx="12" fill="#2f5d45"/>
+    <path d="M67 81c5-8 10-8 15 0 4-8 9-8 14 0M81 71v20" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="110" y="84" font-size="20" font-weight="700" class="ink">NoteBuddy</text>
+    <text x="58" y="152" font-size="11" letter-spacing="2" class="muted">学习空间</text>
+    <text x="78" y="203" font-size="16" class="muted">⌂</text><text x="112" y="203" font-size="14" class="muted">首页</text>
+    <rect x="49" y="220" width="173" height="48" rx="11" fill="#e9f0e8"/>
+    <path d="M66 236h12v16H66zM80 236h12v16H80z" fill="none" stroke="#2f5d45" stroke-width="1.5" stroke-linejoin="round"/>
+    <text x="112" y="249" font-size="14" font-weight="700" class="green">课程</text>
+    <path d="M67 291h25M67 297h20M67 303h23" stroke="#667568" stroke-width="1.5" stroke-linecap="round"/>
+    <text x="112" y="303" font-size="14" class="muted">笔记</text>
+    <circle cx="79" cy="351" r="10" fill="none" stroke="#667568" stroke-width="1.5"/><path d="M79 344v14M72 351h14" stroke="#667568" stroke-width="1.5"/>
+    <text x="112" y="355" font-size="14" class="muted">知识结构</text>
+    <path d="M50 1008h172" stroke="#e6eae3"/>
+    <circle cx="78" cy="1036" r="14" fill="#d9e6d7"/><text x="73" y="1041" font-size="12" class="green">我</text>
+    <text x="108" y="1041" font-size="13" class="ink">我的学习空间</text>
+  </g>
+  <g class="sans">
+    <rect x="302" y="78" width="878" height="64" rx="14" fill="#f7f8f5" stroke="#dce4da"/>
+    <circle cx="333" cy="109" r="10" fill="none" stroke="#2f5d45" stroke-width="2"/><path d="m340 116 8 8" stroke="#2f5d45" stroke-width="2" stroke-linecap="round"/>
+    <text x="363" y="117" font-size="16" class="muted">搜索笔记或课程…</text>
+    <rect x="1203" y="86" width="163" height="48" rx="12" fill="#2f5d45"/>
+    <path d="M1227 110h14M1234 103v14" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    <text x="1251" y="115" font-size="15" font-weight="700" fill="#fff">新建笔记</text>
+    <text x="302" y="217" font-size="25" font-weight="700" class="ink">数学分析</text>
+    <path d="M302 232h1064" stroke="#e1e7df"/>
+    <text x="1324" y="213" font-size="13" class="muted">3 篇笔记</text>
+  </g>
+  <!-- Mathematics covers -->
+  <g transform="translate(0 -116)">
+  <g filter="url(#shadow)">
+    <rect x="302" y="376" width="180" height="240" rx="14" fill="#f1f5ee"/>
+    <rect x="526" y="376" width="180" height="240" rx="14" fill="#f6f1e9"/>
+    <rect x="750" y="376" width="180" height="240" rx="14" fill="#eef3f3"/>
+  </g>
+  <path d="M326 401h132M550 401h132M774 401h132" stroke="#fff" stroke-opacity=".7"/>
+  <text x="326" y="422" class="sans green" font-size="10" letter-spacing="1.1">MATHEMATICS</text>
+  <text x="550" y="422" class="sans clay" font-size="10" letter-spacing="1.1">MATHEMATICS</text>
+  <text x="774" y="422" class="sans green" font-size="10" letter-spacing="1.1">MATHEMATICS</text>
+  <path d="M328 565h128M346 581V461" stroke="#a1b5a0" stroke-width="1.5"/>
+  <path d="M330 557c25-5 29-77 57-82 28-5 29 68 66 63" fill="none" stroke="#2f5d45" stroke-width="3" stroke-linecap="round"/>
+  <text x="439" y="470" class="serif green" font-size="25">∫</text>
+  <path d="M550 561h132" stroke="#c7bca9" stroke-width="1.5"/>
+  <path d="M554 531c17 0 27-47 48-47 19 0 25 58 43 58 12 0 20-22 37-22" fill="none" stroke="#b2684a" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="602" cy="484" r="4" fill="#b2684a"/><circle cx="645" cy="542" r="4" fill="#b2684a"/>
+  <path d="M774 565h132M792 581V461" stroke="#a3bab5" stroke-width="1.5"/>
+  <path d="M794 555c25 0 29-69 55-69s31-16 53-16" fill="none" stroke="#3d7265" stroke-width="3" stroke-linecap="round"/>
+  <path d="M849 480v72" stroke="#3d7265" stroke-width="1.5" stroke-dasharray="5 5"/>
+  <text x="302" y="660" class="sans ink" font-size="19" font-weight="700">一元微积分</text>
+  <text x="526" y="660" class="sans ink" font-size="19" font-weight="700">连续和间断</text>
+  <text x="750" y="660" class="sans ink" font-size="19" font-weight="700">导数</text>
+  </g>
+  <g class="sans">
+    <text x="302" y="640" font-size="25" font-weight="700" class="ink">大学物理</text>
+    <path d="M302 655h1064" stroke="#e1e7df"/>
+    <text x="1324" y="636" font-size="13" class="muted">2 篇笔记</text>
+  </g>
+  <g filter="url(#shadow)"><rect x="302" y="683" width="180" height="240" rx="14" fill="#eaf0ed"/><rect x="526" y="683" width="180" height="240" rx="14" fill="#f0eee8"/></g>
+  <path d="M326 708h132M550 708h132" stroke="#fff" stroke-opacity=".7"/>
+  <text x="326" y="729" class="sans green" font-size="10" letter-spacing="1.1">PHYSICS</text>
+  <text x="550" y="729" class="sans clay" font-size="10" letter-spacing="1.1">PHYSICS</text>
+  <path d="M328 842c25-30 51-30 76 0s51 30 76 0" fill="none" stroke="#4a7b71" stroke-width="3"/>
+  <path d="M328 855c25-30 51-30 76 0s51 30 76 0" fill="none" stroke="#8eaca0" stroke-width="2"/>
+  <text x="445" y="883" class="serif green" font-size="27">λ</text>
+  <path d="M550 846h132" stroke="#b5ab97" stroke-width="2"/>
+  <path d="M568 846c9-58 77-58 87 0" fill="none" stroke="#9f7755" stroke-width="3"/>
+  <circle cx="568" cy="846" r="5" fill="#9f7755"/><circle cx="655" cy="846" r="5" fill="#9f7755"/>
+  <text x="302" y="966" class="sans ink" font-size="19" font-weight="700">波动光学</text>
+  <text x="526" y="966" class="sans ink" font-size="19" font-weight="700">力学</text>
+  <text x="1314" y="1046" text-anchor="end" class="sans muted" font-size="12">课程页视觉方案 · 桌面版</text>
+</svg>

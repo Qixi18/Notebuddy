@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { footerNavItems, primaryNavItems, resolveActiveNav } from '../src/features/navigation/sidebarNav.ts'
 
 test('primary navigation keeps the agreed order', () => {
-  assert.deepEqual(primaryNavItems.map((item) => item.label), ['首页', '新建', '课程', '知识森林', '回收站', '答疑桌宠'])
+  assert.deepEqual(primaryNavItems.map((item) => item.label), ['首页', '课程', '知识森林', '答疑桌宠', '回收站'])
 })
 
 test('settings is pinned to the footer instead of the primary list', () => {
@@ -25,7 +25,7 @@ test('the assistant page wins over the course area that hosts it', () => {
 })
 
 test('command entries never become the current item', () => {
-  const samples = ['/', '/courses', '/courses/c1', '/courses/c1/materials', '/courses/c1/assistant', '/forest', '/recycle', '/notes']
+  const samples = ['/', '/courses', '/courses/c1', '/courses/c1/materials', '/courses/c1/assistant', '/forest', '/recycle']
   for (const pathname of samples) {
     const active = resolveActiveNav(pathname)
     assert.notEqual(active, 'create', `${pathname} must not activate 新建`)
@@ -34,7 +34,6 @@ test('command entries never become the current item', () => {
 })
 
 test('routes without a navigation entry highlight nothing', () => {
-  assert.equal(resolveActiveNav('/notes'), undefined)
   assert.equal(resolveActiveNav('/courses/c1/notes/n1'), 'courses')
   assert.equal(resolveActiveNav('/unknown'), undefined)
 })

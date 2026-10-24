@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react'
 import type { CourseTree, SectionRead } from '../../types'
 import type { Camera, CrossCourseRelation, ForestCourse } from '../forest/types'
 import type { SavedSlot } from './layout'
 
 export type KnowledgeTreeView = {
+  layoutVersion?: string
   camera: Camera
   viewport: { width: number; height: number }
   slots: Record<string, SavedSlot>
@@ -29,4 +31,8 @@ export type KnowledgeTreeSceneProps = {
   onNote: (courseId: string, notebookId: string, section: SectionRead) => void
   onRelation: (relation: CrossCourseRelation) => void
   className?: string
+  toolbar?: ReactNode
+  backdrop?: ReactNode
+  onToggleHome?: (courseId: string) => void
+  homeBusyCourseId?: string
 }

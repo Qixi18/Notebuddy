@@ -267,3 +267,52 @@ test('方向键可以微调宽度，外壳宽度变量随之更新', () => {
   fireEvent.keyDown(grip(), { key: 'ArrowRight' })
   expect(dockWidthVar()).toBe('340px')
 })
+
+/* ---- P1 中断：坞内也有停止入口 ---- */
+
+test('回答进行中：坞里的发送键变「停止」，点它就中断', () => {
+  localStorage.setItem(DOCK_STORAGE.open, 'true')
+  const stopAgent = vi.fn()
+  renderShell('/courses/c1/notebook', {
+    conversation: { ...idleConversation, busy: true, stopAgent },
+  })
+
+  expect(screen.queryByRole('button', { name: '发送' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '停止' }))
+  expect(stopAgent).toHaveBeenCalled()
+})
+
+/* ---- P5b 悬浮坞锁定对齐 ---- */
+
+test('会话已提问后：范围三档禁用（后端不再改 scope），课件收窄仍可选', () => {
+  localStorage.setItem(DOCK_STORAGE.open, 'true')
+  renderShell('/courses/c1/notebook', {
+    conversation: { ...idleConversation, hasMessages: true, messages: [
+      { id: 'u1', conversation_id: 'v1', role: 'user', content: '什么是依赖注入？', evidence: [], status: 'completed', created_at: '' },
+    ] },
+    materials: [{ id: 'm1', course_id: 'c1', lecture_title: '第 3 讲 · 设计模式' }],
+  })
+
+  const select = screen.getByRole('combobox', { name: '本次提问的作用范围' }) as HTMLSelectElement
+  const options = Array.from(select.options)
+  /* 范围三档：首条消息后后端不再写 scope，继续可选就是「标签变了、回答范围没变」 */
+  expect(options.find((option) => option.value === '')?.disabled).toBe(true)
+  expect(options.find((option) => option.value === '__global__')?.disabled).toBe(true)
+  /* 课件收窄是消息级参数（material_id 只校验不锁定），必须还能选 */
+  expect(options.find((option) => option.value === 'm1')?.disabled).toBe(false)
+  expect(screen.getByText(/范围已锁定/)).toBeTruthy()
+})
+
+test('还没提问时：范围三档都能选', () => {
+  localStorage.setItem(DOCK_STORAGE.open, 'true')
+  renderShell('/courses/c1/notebook', {
+    conversation: { ...idleConversation, hasMessages: false },
+    materials: [{ id: 'm1', course_id: 'c1', lecture_title: '第 3 讲 · 设计模式' }],
+  })
+
+  const select = screen.getByRole('combobox', { name: '本次提问的作用范围' }) as HTMLSelectElement
+  const options = Array.from(select.options)
+  expect(options.find((option) => option.value === '')?.disabled).toBe(false)
+  expect(options.find((option) => option.value === '__global__')?.disabled).toBe(false)
+  expect(screen.queryByText(/范围已锁定/)).toBeNull()
+})

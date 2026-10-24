@@ -1,0 +1,149 @@
+/* Shared learning-garden theme. Layout and business states remain page-owned. */
+:root {
+  --garden-paper: #f7f5ea;
+  --garden-green: #284b39;
+  --garden-muted: #65745c;
+  --garden-line: #d9dcc9;
+  --nb-white: #fdfbf3;
+  --nb-mist: #eeeedf;
+  --nb-ink: #284535;
+  --nb-muted: #65745c;
+  --nb-muted-strong: #52634d;
+  --nb-line: #d9dcc9;
+  --nb-forest: #284b39;
+  --nb-forest-deep: #1f3e2e;
+  --nb-sage: #7b916b;
+  --nb-clay: #966345;
+  --nb-clay-ink: #885137;
+  --blue-soft: #e5ead7;
+  --blue-light: #ecefdf;
+  --blue-pale: #f3f2e5;
+  --shadow: 0 16px 40px #284b390c;
+  --shadow-soft: 0 6px 20px #284b3908;
+  --garden-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.04' filter='url(%23p)'/%3E%3C/svg%3E");
+}
+html, body, #root { background: var(--garden-paper); }
+.app-shell.app-shell-garden { grid-template-columns: 212px minmax(0, 1fr); background: var(--garden-paper); }
+.app-shell-garden.app-shell-with-assistant { grid-template-columns: 212px minmax(0, 1fr) var(--dock-w, 340px); }
+.app-shell-garden.app-shell-sidebar-collapsed { grid-template-columns: 76px minmax(0, 1fr); }
+.app-shell-garden.app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0, 1fr) var(--dock-w, 340px); }
+.app-shell-garden .app-sidebar { padding: 32px 17px 24px; border: 0; color: #f7f5ea; background: #284b39; }
+.app-shell-garden .brand-lockup { gap: 8px; padding: 0; }
+.app-shell-garden .brand-lockup strong { color: #fcfaed; font: 500 22px Georgia, 'Times New Roman', serif; letter-spacing: -.7px; }
+.app-shell-garden .brand-lockup small { margin-top: 3px; color: #c2ccb3; font-size: 10px; letter-spacing: 1px; }
+.app-shell-garden .brand-mark { width: 27px; height: 32px; flex: 0 0 27px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.app-shell-garden .brand-mark svg { width: 25px; fill: #c5d19c; stroke: #dae0b7; stroke-width: 1.7; }
+.app-shell-garden .sidebar-collapse-toggle { width: 24px; height: 32px; border-color: #f7f5ea26; color: #d1d9c1; background: transparent; }
+.app-shell-garden .sidebar-collapse-toggle:hover { color: #fff; background: #ffffff12; }
+.app-shell-garden .sidebar-create-area { position: relative; margin: 38px 0 17px; padding-bottom: 18px; border-bottom: 1px solid #f7f5ea25; }
+.app-shell-garden .sidebar-create-button { display: flex; width: 100%; min-height: 50px; align-items: center; justify-content: center; gap: 11px; border: 1.5px solid #c8d3a5; border-radius: 9px; color: #f7f5ea; background: #ffffff10; font: 500 17px var(--nb-sans); cursor: pointer; }
+.app-shell-garden .sidebar-create-button:hover { background: #ffffff20; }
+.app-shell-garden .sidebar-create-menu { position: absolute; z-index: 10; top: 55px; left: 0; width: max(100%, 160px); padding: 5px; border: 1px solid #d9dcc9; border-radius: 9px; background: #fdfbf3; box-shadow: 0 10px 26px #142d2280; }
+.app-shell-garden .sidebar-create-menu button { display: block; width: 100%; min-height: 38px; border: 0; border-radius: 5px; padding: 7px 10px; color: #284b39; background: transparent; text-align: left; cursor: pointer; }
+.app-shell-garden .sidebar-create-menu button:hover { background: #e9eddb; }
+.app-shell-garden .sidebar-create-button > span:first-child { font: 300 30px/1 var(--nb-sans); }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-header { position: relative; display: block; min-height: 38px; }
+.app-shell-garden.app-shell-sidebar-collapsed .brand-lockup { width: 100%; min-height: 38px; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-collapse-toggle { position: absolute; inset: 0; width: 100%; height: 38px; opacity: 0; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-header:hover .sidebar-collapse-toggle,
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-collapse-toggle:focus-visible { opacity: 1; background: #284b39; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-create-area { margin-top: 38px; padding-bottom: 18px; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-create-button { height: 50px; padding: 0; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-create-label { display: none; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-link { width: 100%; min-height: 50px; justify-content: center; padding-inline: 0; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-link-icon { width: 28px; }
+.app-shell-garden .sidebar-link-icon svg { display: block; width: 25px; height: 25px; }
+.app-shell-garden .sidebar-section-label { margin: 66px 12px 14px; font-size: 10px; letter-spacing: 2px; color: #bfccb5; }
+.app-shell-garden .sidebar-nav { gap: 8px; }
+.app-shell-garden .sidebar-link { min-height: 47px; padding: 10px 14px; border-radius: 7px; color: #e1e5d7; font-size: 14px; gap: 12px; }
+.app-shell-garden .sidebar-link-icon { width: 20px; color: #c4d1b9; font-size: 21px; }
+.app-shell-garden .sidebar-link:hover { color: #fffdf0; background: #ffffff0e; }
+.app-shell-garden .sidebar-link-active { color: #fffbea; background: #ffffff15; box-shadow: inset 3px 0 #c2cb94; }
+.app-shell-garden .sidebar-link-active .sidebar-link-icon { color: #d6dfa9; }
+.app-shell-garden .home-sidebar-quote { margin: auto 12px 28px; padding-top: 40px; color: #c4ceb5; font: 15px/1.9 var(--nb-serif); letter-spacing: 1px; }
+.app-shell-garden .sidebar-footer { margin-top: 0; padding: 17px 12px 0; border-color: #f7f5ea25; color: #e0e5d4; }
+.app-shell-garden.app-shell-sidebar-collapsed .sidebar-footer { margin-top: auto; }
+.app-shell-garden .sidebar-settings-button { min-height: 44px; color: #d5deca; }
+.app-shell-garden .sidebar-settings-icon { color: inherit; }
+.app-shell-garden .sidebar-settings-button:hover { color: #fffce9; }
+.app-shell-garden .app-sidebar button:focus-visible { outline-color: #e2d48e; }
+.app-shell-garden .app-main { min-width: 0; background-color: var(--garden-paper); background-image: var(--garden-grain); }
+.app-shell-garden :is(h1, h2, h3) { color: var(--garden-green); }
+.app-shell-garden .modal-danger-title { color: var(--danger); }
+.app-shell-garden :is(.page-heading-block, .course-index-head, .course-library-heading, .notes-library-heading, .course-workspace-heading, .notebook-header, .note-detail-heading) h1 { font-weight: 500; letter-spacing: .02em; }
+.app-shell-garden :is(.course-index, .course-library, .course-workspace, .notebook-page, .notes-library, .note-detail-page, .pet-page, .pet-studio) { background: transparent; }
+.app-shell-garden :is(.course-index-head, .course-library-heading, .notes-library-heading, .course-workspace-heading, .page-heading-block) { border-bottom: 1px solid var(--garden-line); padding-bottom: 24px; margin-bottom: 26px; }
+.app-shell-garden :is(.primary-button, .secondary-button, .ghost-button) { min-height: 44px; border-radius: 8px; padding-inline: 16px; font-size: 14px; line-height: 1.4; }
+.app-shell-garden .primary-button { border-color: var(--garden-green); background: var(--garden-green); color: #fdfbed; box-shadow: none; }
+.app-shell-garden .primary-button:hover:not(:disabled) { background: #365d44; }
+.app-shell-garden :is(.secondary-button, .ghost-button) { border: 1px solid var(--garden-line); background: var(--nb-white); color: var(--garden-green); }
+.app-shell-garden :is(.secondary-button, .ghost-button):hover:not(:disabled) { background: #e9ecd9; }
+.app-shell-garden :is(.primary-button, .secondary-button, .ghost-button):active:not(:disabled) { transform: translateY(1px); }
+.app-shell-garden :is(.primary-button, .secondary-button, .ghost-button):focus-visible { outline: 2px solid #5d7958; outline-offset: 3px; }
+.app-shell-garden .text-button { font-size: 13px; }
+.app-shell-garden .course-tabs button { font-size: 14px; }
+.app-shell-garden .settings-section .actions-row .secondary-button { min-height: 40px; font-size: 13px; }
+.app-shell-garden .assistant-dock-quick button { min-height: 36px; font-size: 13px; }
+.app-shell-garden .material-upload-fields .material-file-field { font-size: 13px; }
+.app-shell-garden .material-upload-fields .material-file-field:hover { border-color: #8fa98c; background: #f6f8f0; }
+.app-shell-garden .material-upload-fields .material-file-field:focus-within { outline: 2px solid #5d7958; outline-offset: 3px; }
+.app-shell-garden :is(input, select, textarea) { border-color: #cdd2bc; border-radius: 6px; color: var(--nb-ink); background-color: #fdfbf3; }
+.app-shell-garden :is(input:not([type=checkbox]):not([type=radio]):not([type=range]), select) { min-height: 40px; }
+.app-shell-garden textarea { line-height: 1.8; }
+.app-shell-garden :is(.summary-card, .course-next-step, .course-tool-card, .course-library-card, .course-library-empty, .note-detail-panel, .material-upload-card, .materials-browser, .material-pages-panel, .source-card, .note-source-panel, .note-revision-panel) { border-color: var(--garden-line); background: var(--nb-white); box-shadow: none; border-radius: 8px; }
+.app-shell-garden .course-next-step { background: #eff0e1; }
+.app-shell-garden :is(.course-ledger, .course-ledger-row, .course-index-empty, .notes-library-toolbar, .notes-book-row, .deleted-course-row) { border-color: var(--garden-line); }
+.app-shell-garden :is(.course-ledger-row, .notes-book-row):hover { background: #ecefdf; }
+.app-shell-garden :is(.course-ledger-head, .panel-heading, .settings-header, .settings-footer) { background: #f1f0e3; border-color: var(--garden-line); }
+.app-shell-garden .notebook-page { padding: 0 0 40px; }
+.app-shell-garden .notebook-header { padding-bottom: 23px; margin-bottom: 24px; border-color: var(--garden-line); }
+.app-shell-garden .notebook-layout { gap: 28px; }
+.app-shell-garden .notebook-outline { padding: 18px; border: 1px solid var(--garden-line); border-radius: 8px; background: #f0f0e2; }
+.app-shell-garden .notebook-outline h2 { margin-bottom: 14px; font-size: 19px; }
+.app-shell-garden .notebook-outline button { min-height: 40px; border: 0; border-radius: 5px; padding: 8px 10px; background: transparent; color: #455b40; font-family: var(--nb-sans); font-size: 13px; text-align: left; }
+.app-shell-garden .notebook-outline .notebook-chapter-title > button { font-weight: 600; }
+.app-shell-garden .notebook-outline button:hover { background: #e1e6d1; }
+.app-shell-garden .notebook-outline .notebook-section-link.active { background: #dde5cc; color: #24452e; box-shadow: inset 2px 0 #6f8650; }
+.app-shell-garden .notebook-content { padding-inline: 0; }
+.app-shell-garden :is(.markdown-preview, .note-editor) { color: var(--nb-ink); font-size: 14px; }
+.app-shell-garden .markdown-preview pre { border: 1px solid var(--garden-line); background: #eeefdf; color: #284535; }
+.app-shell-garden .markdown-preview code { background-color: #eeefdf; color: #3d5738; }
+.app-shell-garden .markdown-preview :is(h1, h2, h3) { border-color: var(--garden-line); font-weight: 500; }
+.app-shell-garden :is(.source-card-meta, .evidence-empty, .source-card small) { color: #64725c; }
+.app-shell-garden .source-card-icon { color: #4d6b44; background: #e9eddb; }
+.app-shell-garden :is(.source-card-open, .revision-item strong) { color: #43623b; }
+.app-shell-garden :is(.revision-item small, .revision-item time) { color: #68775e; }
+.app-shell-garden .revision-item { background: #f8f7ec; border-color: var(--garden-line); }
+.app-shell-garden .source-card:hover { background: #eff1e1; border-color: #bac8a4; }
+.app-shell-garden :is(.material-list-item-active, .material-page-item-active) { background: #e8edd8; }
+.app-shell-garden :is(.material-page-detail, .page-block-item) { background: #f7f6ea; border-color: var(--garden-line); }
+.app-shell-garden :is(.material-dropzone, .job-progress-card) { background: #f1f2e4; border-color: #b9c5a4; }
+.app-shell-garden :is(.pet-nook, .pet-thread, .assistant-dock, .settings-panel, .course-gate-modal, .confirm-dialog, .course-create-drawer) { background: var(--nb-white); border-color: var(--garden-line); }
+.app-shell-garden :is(.pet-course, .pet-composer, .pet-thread-header, .assistant-dock-header, .assistant-dock-footer) { background: #f3f2e6; border-color: var(--garden-line); }
+.app-shell-garden :is(.settings-section, .status-card, .settings-details, .pet-message-bubble) { border-color: var(--garden-line); }
+.app-shell-garden .assistant-fab { right: 28px; bottom: 24px; border-color: #c6cfb5; color: #284b39; background: #f9f7ed; box-shadow: 0 6px 20px #284b3912; }
+.app-shell-garden :is(.forest-page, .home-canvas) { background-color: var(--garden-paper); }
+.app-shell-garden :is(.forest-header, .forest-bottom-bar) { background: #f7f5eaf2; border-color: var(--garden-line); }
+.app-shell-garden .kt-contents { background: #fdfbf3; }
+@media (max-width: 900px) {
+  .app-shell.app-shell-garden, .app-shell-garden.app-shell-with-assistant, .app-shell-garden.app-shell-sidebar-collapsed, .app-shell-garden.app-shell-sidebar-collapsed.app-shell-with-assistant { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .app-shell-garden .app-sidebar { padding: 12px 18px 10px; background: #284b39; }
+  .app-shell-garden .home-sidebar-quote { display: none; }
+  .app-shell-garden .app-sidebar .sidebar-footer { display: flex; margin: 0; padding: 0; border: 0; }
+  .app-shell-garden .sidebar-nav { gap: 5px; }
+  .app-shell-garden .sidebar-create-area, .app-shell-garden.app-shell-sidebar-collapsed .sidebar-create-area { flex: none; margin: 0; padding: 0; border: 0; }
+  .app-shell-garden .sidebar-create-button, .app-shell-garden.app-shell-sidebar-collapsed .sidebar-create-button { width: 64px; height: 38px; min-height: 38px; font-size: 12px; }
+  .app-shell-garden .sidebar-create-button > span:first-child { font-size: 21px; }
+  .app-shell-garden .sidebar-link, .app-shell-garden.app-shell-sidebar-collapsed .sidebar-link { min-width: 72px; width: auto; gap: 0; padding: 4px 10px; font-size: 12px; border-radius: 4px; }
+  .app-shell-garden .sidebar-link-icon { font-size: 20px; }
+  .app-shell-garden .brand-lockup strong { font-size: 20px; }
+  .app-shell-garden .sidebar-section-label { display: none; }
+  .app-shell-garden .app-main { padding: 28px 24px 60px; }
+  .app-shell-garden .app-main-home, .app-shell-garden .app-main-forest { padding: 0; }
+  .app-shell-garden .assistant-fab { right: 16px; bottom: 16px; }
+}
+@media (max-width: 600px) {
+  .app-shell-garden .app-main { padding: 24px 18px 64px; }
+  .app-shell-garden .app-main-home, .app-shell-garden .app-main-forest { padding: 0; }
+  .app-shell-garden .notebook-outline { padding: 12px; }
+}

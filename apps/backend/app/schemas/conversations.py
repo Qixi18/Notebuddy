@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.assistant import AssistantSource
 
@@ -12,7 +12,13 @@ TeacherPersonaId = Literal["elf", "doubao", "feiyu"]
 
 class ConversationCreate(BaseModel):
     title: str = Field(default="新对话", min_length=1, max_length=300)
-    default_scope: str = Field(default="course", pattern="^(course|material|page)$")
+    # 归属词表统一为 course / global / note。material、page 是旧词，等价于「整门课程」，
+    # 仍接受但会被归一成 course，避免老客户端直接 422。
+    default_scope: str = Field(default="course", pattern="^(course|global|note|material|page)$")
+    scope: Literal["course", "global", "note"] | None = None
+    # 仅在 scope='note' 时使用；存标题快照，笔记改名不回溯历史。
+    note_id: str | None = Field(default=None, max_length=36)
+    note_title: str | None = Field(default=None, max_length=300)
 
 
 class ConversationRead(BaseModel):
@@ -22,8 +28,25 @@ class ConversationRead(BaseModel):
     course_id: str
     title: str
     default_scope: str
+    scope: str | None = None
+    note_id: str | None = None
+    note_title: str | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ConversationTitleUpdate(BaseModel):
+    """重命名会话：仅改标题。手动改名后不会被首条问题的自动命名覆盖（自动命名只在标题仍为默认值时触发）。"""
+
+    title: str = Field(min_length=1, max_length=300)
+
+    @field_validator("title")
+    @classmethod
+    def _strip_and_reject_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("标题不能为空白")
+        return stripped
 
 
 class MessageEvidenceRead(BaseModel):
@@ -54,6 +77,8 @@ class ConversationMessageRead(BaseModel):
     # 会话消息落库时只存了 evidence，这里在读取时从 evidence 反推，避免加表字段与迁移。
     mode: str = ""
     sources: list[AssistantSource] = Field(default_factory=list)
+    # 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表，避免仍显示「新对话」。
+    conversation_title: str = "新对话"
 
 
 class ConversationMessageCreate(BaseModel):
@@ -65,6 +90,11 @@ class ConversationMessageCreate(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=120)
     # 本次回答使用哪一位 AI 教师的人设；未知取值由 app.ai.personas 回落到默认角色的做法保持一致
     teacher_persona: TeacherPersonaId = "elf"
+    # 会话归属：仅在会话尚无任何用户消息（首轮）时落库，之后忽略——范围是会话级属性。
+    # 用于把答疑页自动建的「整门课程」空会话，在首轮改写成用户实际选择的范围。
+    scope: Literal["course", "global", "note"] | None = None
+    note_id: str | None = Field(default=None, max_length=36)
+    note_title: str | None = Field(default=None, max_length=300)
 
 
 class ReadingContext(BaseModel):
@@ -74,6 +104,18 @@ class ReadingContext(BaseModel):
     note_title: str | None = Field(default=None, max_length=300)
     section_title: str | None = Field(default=None, max_length=300)
     excerpt: str | None = Field(default=None, max_length=1200)
+
+
+class NotebookDocumentContext(BaseModel):
+    """整篇 Notebook 编辑器的上下文，与分节 Note 的 ReadingContext 互斥。"""
+
+    model_config = ConfigDict(extra="forbid")
+    course_id: str = Field(min_length=1, max_length=36)
+    notebook_id: str = Field(min_length=1, max_length=36)
+    revision: int = Field(ge=0)
+    title: str | None = Field(default=None, max_length=200)
+    selection: str | None = Field(default=None, max_length=4000)
+    excerpt: str | None = Field(default=None, max_length=2000)
 
 
 class AgentMessageCreate(BaseModel):
@@ -88,3 +130,4 @@ class AgentMessageCreate(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=120)
     teacher_persona: TeacherPersonaId = "elf"
     reading_context: ReadingContext | None = None
+    notebook_context: NotebookDocumentContext | None = None

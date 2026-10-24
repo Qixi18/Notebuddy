@@ -6,7 +6,7 @@ afterEach(() => { cleanup(); localStorage.clear() })
 function Page() { const navigate = useNavigate(), location = useLocation(); return <><p>{location.pathname}{location.search}</p><button onClick={() => navigate('/courses/c/notebooks/second?section=n2')}>打开另一本叶子</button></> }
 test('multi-book leaf navigation keeps an unsaved draft until the user chooses to leave', async () => {
   localStorage.setItem('notebuddy.assistant.open', 'false')
-  const workspace = { courses: [], noteDirty: true, setEditingNote: vi.fn(), setError: vi.fn() } as unknown as WorkspaceContextValue
+  const workspace = { courses: [], noteDirty: true, documentDirty: false, setDocumentDirty: vi.fn(), setEditingNote: vi.fn(), setError: vi.fn() } as unknown as WorkspaceContextValue
   const router = createMemoryRouter([{ element: <AppLayout />, children: [{ path: '/courses/:courseId/notebooks/:notebookId', element: <Page /> }] }], { initialEntries: ['/courses/c/notebooks/first?section=n1'] })
   render(<WorkspaceProvider value={workspace}><RouterProvider router={router} /></WorkspaceProvider>)
   fireEvent.click(screen.getByRole('button', { name: '打开另一本叶子' }))

@@ -59,12 +59,6 @@ export function setTeacherCharacter(next: TeacherCharacterId) {
   write(next)
 }
 
-/** 首页 ⇄ 按钮：在三位老师之间循环切换 */
-export function cycleTeacherCharacter() {
-  const index = TEACHER_PERSONA_ORDER.indexOf(current)
-  write(TEACHER_PERSONA_ORDER[(index + 1) % TEACHER_PERSONA_ORDER.length] ?? DEFAULT_TEACHER_PERSONA)
-}
-
 /**
  * 全局共享的当前 AI 教师。首页、答疑页、悬浮答疑坞读到的是同一份状态，
  * 因此切换后立即对所有提问生效。

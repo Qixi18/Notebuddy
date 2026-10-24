@@ -19,6 +19,27 @@ from app.db.models import (
     WebSource,
 )
 
+DEFAULT_CONVERSATION_TITLE = "新对话"
+
+
+def derive_conversation_title(question: str, scope: str | None, note_title: str | None) -> str:
+    """用首条用户问题生成会话标题，替代默认的「新对话」。
+
+    全局可查 / 锁定笔记加前缀，便于历史列表区分同题不同范围；
+    整门课程最常见，不加前缀。上限沿用 Conversation.title 的 300。
+    """
+    text = " ".join(question.split())
+    limit = 18
+    if len(text) > limit:
+        text = text[:limit] + "…"
+    if scope == "global":
+        prefix = "全局可查 · "
+    elif scope == "note":
+        prefix = f"{note_title or '锁定笔记'} · "
+    else:
+        prefix = ""
+    return (prefix + text)[:300]
+
 
 class ConversationUnavailable(Exception):
     """A conversation or its course is unavailable to the caller."""

@@ -41,6 +41,11 @@ export function CourseOverviewPage() {
   const materialCount = materials.length
   const readyCount = materials.filter((material) => material.status === 'completed').length
 
+  function focusTab(tab: CourseTab) {
+    setActiveTab(tab)
+    document.getElementById(`course-tab-${tab}`)?.focus()
+  }
+
   return (
     <div className="course-overview course-workspace page-enter">
       <header className="course-workspace-heading">
@@ -56,9 +61,13 @@ export function CourseOverviewPage() {
         </div>
       </header>
 
-      <div className="course-tabs" role="tablist" aria-label="课程内容">
-        <button id="course-tab-overview" type="button" role="tab" aria-selected={activeTab === 'overview'} aria-controls="course-panel-overview" className={activeTab === 'overview' ? 'course-tab-active' : ''} onClick={() => setActiveTab('overview')}>课程概览</button>
-        <button id="course-tab-structure" type="button" role="tab" aria-selected={activeTab === 'structure'} aria-controls="course-panel-structure" className={activeTab === 'structure' ? 'course-tab-active' : ''} onClick={() => setActiveTab('structure')}>知识结构</button>
+      <div className="course-tabs" role="tablist" aria-label="课程内容" onKeyDown={(event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+        event.preventDefault()
+        focusTab(event.key === 'Home' ? 'overview' : event.key === 'End' ? 'structure' : activeTab === 'overview' ? 'structure' : 'overview')
+      }}>
+        <button id="course-tab-overview" type="button" role="tab" tabIndex={activeTab === 'overview' ? 0 : -1} aria-selected={activeTab === 'overview'} aria-controls="course-panel-overview" className={activeTab === 'overview' ? 'course-tab-active' : ''} onClick={() => setActiveTab('overview')}>课程概览</button>
+        <button id="course-tab-structure" type="button" role="tab" tabIndex={activeTab === 'structure' ? 0 : -1} aria-selected={activeTab === 'structure'} aria-controls="course-panel-structure" className={activeTab === 'structure' ? 'course-tab-active' : ''} onClick={() => setActiveTab('structure')}>知识结构</button>
       </div>
 
       {activeTab === 'overview' ? (
@@ -80,7 +89,7 @@ export function CourseOverviewPage() {
               <span className="course-entry-copy"><strong>课程笔记</strong><small>{notes.length ? `${notes.length} 条笔记 · 阅读、编辑并核对引用` : '阅读整理内容，或从已解析的资料开始生成'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>
             </Link>
-            <button className="course-entry-row" type="button" onClick={() => setActiveTab('structure')}>
+            <button className="course-entry-row" type="button" onClick={() => focusTab('structure')}>
               <span className="course-entry-icon course-entry-icon-structure" aria-hidden="true">⌘</span>
               <span className="course-entry-copy"><strong>知识结构</strong><small>{graph.nodes.length ? `${graph.nodes.length} 个知识点 · 查看课程脉络与关联` : '从课程资料整理知识点和概念关联'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>

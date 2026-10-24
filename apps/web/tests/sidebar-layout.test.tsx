@@ -32,8 +32,10 @@ test('主导航按约定顺序渲染，设置不在主导航内', () => {
   renderSidebar('/')
   const nav = screen.getByRole('navigation', { name: '主导航' })
   expect(within(nav).getAllByRole('button').map((button) => button.textContent)).toEqual(
-    primaryNavItems.map((item) => `${item.icon}${item.label}`),
+    primaryNavItems.map((item) => `${['forest', 'recycle'].includes(item.id) ? '' : item.icon}${item.label}`),
   )
+  expect(within(nav).queryByRole('button', { name: '新建' })).toBeNull()
+  expect(screen.getByRole('button', { name: '新建' })).toBeTruthy()
   expect(within(nav).queryByRole('button', { name: '打开设置' })).toBeNull()
   expect(screen.getByRole('button', { name: '打开设置' })).toBeTruthy()
 })
@@ -80,8 +82,19 @@ test('新建与设置是命令：设置打开面板但不改变路由，新建�
   expect(router.state.location.pathname).toBe('/')
 
   fireEvent.click(screen.getByRole('button', { name: '新建' }))
+  expect(screen.getByRole('button', { name: '新建课程' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: '新建笔记' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '新建课程' }))
   expect(router.state.location.pathname).toBe('/courses')
   expect(screen.getByRole('button', { name: '新建' }).getAttribute('aria-current')).toBeNull()
+})
+
+test('新建笔记快捷入口传递正确操作', () => {
+  const router = renderSidebar('/')
+  fireEvent.click(screen.getByRole('button', { name: '新建' }))
+  fireEvent.click(screen.getByRole('button', { name: '新建笔记' }))
+  expect(router.state.location.pathname).toBe('/courses')
+  expect(router.state.location.state).toEqual({ openCreateNote: true })
 })
 
 test('侧边栏页脚只剩设置，本地状态说明已移除', () => {

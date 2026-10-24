@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Protocol
 
 PARSER_VERSION = "phase2-1"
 
@@ -49,6 +47,3 @@ class ParsedDocument:
     file_hash: str | None = None
     warnings: list[str] = field(default_factory=list)
 
-
-class DocumentParser(Protocol):
-    def __call__(self, path: Path) -> ParsedDocument: ...

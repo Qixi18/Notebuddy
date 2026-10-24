@@ -18,6 +18,7 @@ from app.schemas.conversations import (
     ConversationMessageCreate,
     ConversationMessageRead,
     ConversationRead,
+    ConversationTitleUpdate,
     MessageEvidenceRead,
     ReadingContext,
 )
@@ -67,6 +68,7 @@ __all__ = [
     'ConversationMessageCreate',
     'ConversationMessageRead',
     'ConversationRead',
+    'ConversationTitleUpdate',
     'CourseCreate',
     'CourseRead',
     'CourseUpdate',

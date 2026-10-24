@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.v1 import agent as agent_endpoint
 from app.db.database import Base, get_db
-from app.db.models import Conversation, ConversationMessage, Course, KnowledgeNode, Note
+from app.db.models import Conversation, ConversationMessage, Course, KnowledgeNode, Note, Notebook
 from app.main import app
 
 
@@ -180,5 +180,66 @@ def test_agent_endpoint_validates_scope_and_note_ownership(tmp_path, monkeypatch
             json={"question": "问题", "scope": "global"},
         )
         assert global_scope.status_code == 200 and "全局回答" in global_scope.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_notebook_context_is_validated_and_forwarded(tmp_path, monkeypatch) -> None:
+    client, factory, ids = _client_with_db(tmp_path)
+    try:
+        with factory() as db:
+            book = Notebook(course_id=ids["course"], title="整篇物理学笔记", tree_slot=99, display_order=99)
+            db.add(book)
+            db.commit()
+            book_id = book.id
+
+        captured: dict = {}
+
+        def fake_agent(db, **kwargs):
+            captured.update(kwargs)
+            yield {"type": "final", "answer": "建议内容", "mode": "agent", "model_version": None,
+                   "chunks": [], "web_results": [], "suggestions": []}
+
+        monkeypatch.setattr(agent_endpoint, "run_agent", fake_agent)
+        response = client.post(
+            f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+            json={
+                "question": "解释这段", "scope": "course",
+                "notebook_context": {
+                    "course_id": ids["course"], "notebook_id": book_id, "revision": 0,
+                    "title": "整篇物理学笔记", "selection": "核心关系是 F = ma",
+                    "excerpt": "物体的质量、加速度与合力之间存在定量关系。",
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert "整篇课程笔记" in captured["reading_context"]
+        assert "F = ma" in captured["reading_context"]
+        assert "物体的质量、加速度" in captured["reading_context"]
+        assert "不要声称已经修改" in captured["reading_context"]
+        assert captured["scope"] == "course"
+        assert captured["editable_note_id"] is None
+
+        stale = client.post(
+            f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+            json={"question": "解释", "scope": "course",
+                  "notebook_context": {"course_id": ids["course"], "notebook_id": book_id, "revision": 3}},
+        )
+        assert stale.status_code == 409
+
+        missing = client.post(
+            f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+            json={"question": "解释", "scope": "course",
+                  "notebook_context": {"course_id": ids["course"], "notebook_id": "missing", "revision": 0}},
+        )
+        assert missing.status_code == 404
+
+        both = client.post(
+            f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+            json={"question": "解释", "scope": "note",
+                  "reading_context": {"note_id": ids["note"]},
+                  "notebook_context": {"course_id": ids["course"], "notebook_id": book_id, "revision": 0}},
+        )
+        assert both.status_code == 422
     finally:
         app.dependency_overrides.clear()

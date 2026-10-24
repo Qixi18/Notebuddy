@@ -10,7 +10,7 @@ from app.db.models import (
     Course,
     utc_now,
 )
-from app.forest.service import ensure_profile
+from app.forest.service import ensure_profile, prepare_course_restore
 from app.schemas.api import (
     CourseCreate,
     CourseRead,
@@ -92,6 +92,7 @@ def restore_course(course_id: str, db: Session = Depends(get_db)) -> Course:
     course = db.get(Course, course_id)
     if course is None or course.deleted_at is None:
         raise HTTPException(status_code=404, detail="待恢复课程不存在")
+    prepare_course_restore(db, course)
     course.deleted_at = None
     db.commit()
     db.refresh(course)

@@ -34,6 +34,8 @@ export type AgentFinalEvent = {
   message_id?: string
   fallback?: boolean
   reason?: string
+  /** 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表 */
+  conversation_title?: string
 }
 
 export type AgentErrorEvent = { type: 'error'; message: string }
@@ -52,6 +54,15 @@ export type AgentReadingContext = {
   excerpt?: string
 }
 
+export type AgentNotebookContext = {
+  course_id: string
+  notebook_id: string
+  revision: number
+  title?: string
+  selection?: string
+  excerpt?: string
+}
+
 export type AgentQuestionPayload = {
   question: string
   scope: AgentScope
@@ -60,6 +71,7 @@ export type AgentQuestionPayload = {
   allow_web?: boolean
   idempotency_key?: string
   reading_context?: AgentReadingContext
+  notebook_context?: AgentNotebookContext
 }
 
 export type AgentStreamHandlers = {

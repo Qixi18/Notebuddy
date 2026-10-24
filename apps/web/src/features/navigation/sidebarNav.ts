@@ -16,11 +16,10 @@ export type SidebarNavItem = {
 /** 主导航：数组顺序即侧边栏从上到下的展示顺序。 */
 export const primaryNavItems: SidebarNavItem[] = [
   { id: 'home', label: '首页', icon: '⌂' },
-  { id: 'create', label: '新建', icon: '＋' },
   { id: 'courses', label: '课程', icon: '▦' },
-  { id: 'forest', label: '知识森林', icon: '❧' },
-  { id: 'recycle', label: '回收站', icon: '⌫' },
+  { id: 'forest', label: '知识森林', icon: 'forest' },
   { id: 'assistant', label: '答疑桌宠', icon: '✧' },
+  { id: 'recycle', label: '回收站', icon: 'recycle' },
 ]
 
 /** 底部固定区：与主导航用分隔线隔开。 */

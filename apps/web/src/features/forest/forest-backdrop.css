@@ -1,0 +1,66 @@
+/* Import after forest.css / garden-theme.css. Scoped opt-in; does not change tree or vine styling. */
+.nb-forest-shell, .nb-forest-stage, .nb-forest-backdrop {
+  --forest-backdrop-paper: #f8f6ed;
+  --forest-backdrop-mist: #c8d0b8;
+  --forest-backdrop-lichen: #abb78f;
+  --forest-toolbar-ink: var(--garden-green, var(--fg, #284b39));
+  --forest-toolbar-muted: var(--garden-muted, var(--muted, #65745c));
+  --forest-toolbar-line: var(--garden-line, var(--border, #d9dcc9));
+}
+.nb-forest-shell { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; }
+.nb-forest-stage { position:relative; isolation:isolate; flex:1 1 0; min-width:0; min-height:0; overflow:hidden; background:var(--forest-backdrop-paper); }
+.nb-forest-backdrop { position:absolute; inset:0; z-index:0; overflow:hidden; pointer-events:none; user-select:none; }
+.nb-forest-backdrop *, .nb-forest-backdrop::after { pointer-events:none!important; }
+.nb-forest-backdrop__art { display:block; width:100%; height:100%; overflow:hidden; }
+.nb-forest-backdrop::after { content:''; position:absolute; inset:0; opacity:.45; background-image:var(--garden-grain, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.04' filter='url(%23p)'/%3E%3C/svg%3E")); }
+.nb-backdrop-mist { fill:var(--forest-backdrop-mist); }
+.nb-backdrop-lichen { fill:var(--forest-backdrop-lichen); }
+.nb-backdrop-wash { opacity:.4; filter:blur(5px); }
+.nb-backdrop-stroke { fill:none; stroke:var(--forest-backdrop-lichen); stroke-width:1.5; stroke-linecap:round; }
+/* A scene wrapper may retain its interaction logic, but its opaque background must be cleared. */
+.nb-forest-stage > .knowledge-tree-scene { position:relative; z-index:1; height:100%; min-height:0; background:transparent; }
+.nb-forest-stage > :is(.kt-canvas, #forest-canvas) { position:relative; z-index:1; background:transparent; }
+
+.nb-forest-toolbar {
+  display:flex; flex-wrap:wrap; align-items:center; gap:12px 18px;
+  flex:0 0 auto; min-width:0; padding:14px 28px;
+  color:var(--forest-toolbar-ink, var(--garden-green, var(--fg, #284b39)));
+  background:var(--forest-backdrop-paper, #f8f6ed);
+  border-bottom:1px solid var(--forest-toolbar-line, var(--garden-line, var(--border, #d9dcc9)));
+}
+.nb-forest-toolbar__search { flex:1 1 17rem; min-width:0; max-width:28rem; }
+.nb-forest-toolbar__legend { display:flex; flex:0 1 auto; min-width:0; }
+.nb-forest-toolbar__controls { flex:0 0 auto; margin-inline-start:auto; max-width:100%; }
+/* Remove the legacy top/left/right offsets only inside the new flow container. */
+.nb-forest-toolbar :is(.forest-search, .forest-legend, .kt-camera-controls, .camera) { position:static; inset:auto; transform:none; width:auto; max-width:100%; margin:0; }
+.nb-forest-toolbar .forest-search { width:100%; }
+.nb-forest-toolbar .forest-legend { display:flex; flex-wrap:wrap; gap:8px 12px; font-size:12px; color:inherit; }
+.nb-forest-toolbar .forest-legend span { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+.nb-forest-toolbar .forest-legend i { display:inline-block; flex:none; width:7px; height:10px; border-radius:7px 1px; transform:rotate(-25deg); }
+.nb-forest-toolbar .forest-state-planned { background:var(--forest-status-planned, #a1aea0); }
+.nb-forest-toolbar .forest-state-learning { background:var(--forest-status-learning, #719565); }
+.nb-forest-toolbar .forest-state-completed { background:var(--forest-status-completed, #326047); }
+.nb-forest-toolbar :is(.kt-camera-controls, .camera) { display:flex; flex-wrap:wrap; align-items:center; box-sizing:border-box; }
+.nb-forest-toolbar :is(.kt-camera-controls, .camera) button { min-width:44px; min-height:44px; }
+.nb-forest-toolbar input { min-width:0; width:100%; min-height:44px; color:inherit; }
+.nb-forest-toolbar :is(input,button):focus-visible { outline:2px solid var(--forest-toolbar-ink, var(--fg, #284b39)); outline-offset:2px; }
+.nb-forest-search-field { display:flex; align-items:center; margin:0; border:1px solid var(--forest-toolbar-line, var(--border)); border-radius:6px; background:oklch(from var(--forest-backdrop-paper, #f8f6ed) calc(l + .012) c h); }
+.nb-forest-search-field input { padding:0 12px; border:0; border-radius:6px; background:transparent; font:inherit; font-size:13px; }
+.nb-forest-search-field input::placeholder { color:var(--forest-toolbar-muted, var(--muted)); opacity:1; }
+.nb-forest-search-field button { display:grid; place-items:center; flex:0 0 44px; padding:0; background:transparent; color:inherit; border:0; border-radius:4px; }
+.nb-forest-search-field button:hover { background:oklch(from var(--forest-backdrop-paper, #f8f6ed) calc(l - .065) c h); }
+.nb-forest-search-field svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.6; }
+.nb-forest-toolbar__controls .camera { box-shadow:none; }
+.canvas-wrap.nb-forest-shell::before { display:none; }
+@media (max-width:640px) {
+  .nb-forest-toolbar { gap:10px 8px; padding:12px 20px; }
+  .nb-forest-toolbar__search { flex-basis:100%; max-width:none; }
+  .nb-forest-toolbar .forest-legend { gap:8px; }
+  .nb-forest-toolbar__controls { margin-inline-start:auto; }
+  .nb-backdrop-distant, .nb-backdrop-moss > g:nth-child(2) { display:none; }
+  .nb-backdrop-hills { opacity:.6; }
+  .nb-backdrop-moss { opacity:.22; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .nb-forest-backdrop, .nb-forest-backdrop * { animation:none!important; transition:none!important; }
+}

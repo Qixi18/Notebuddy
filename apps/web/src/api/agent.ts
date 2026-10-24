@@ -12,6 +12,7 @@ export type {
   AgentEvent,
   AgentFinalEvent,
   AgentNoticeEvent,
+  AgentNotebookContext,
   AgentQuestionPayload,
   AgentReadingContext,
   AgentScope,

@@ -146,21 +146,6 @@ export type WebSource = {
   retrieved_at: string
 }
 
-export type AssistantResponse = {
-  answer: string
-  sources: AssistantSource[]
-  claims: AssistantClaim[]
-  mode: string
-  web_search_status: 'unavailable' | 'failed' | 'no_results' | 'completed' | 'disabled_by_request' | 'daily_limit'
-}
-
-export type AssistantClaim = {
-  claim_key: string
-  evidence_type: string
-  support_level: string
-  source_indexes: number[]
-}
-
 export type TermExplanationSource = {
   material_id: string
   lecture_title: string
@@ -213,13 +198,45 @@ export type NotebookSummary = {
   display_order: number; order_revision: number; is_default: boolean
   created_at: string; updated_at: string
 }
+export type NotebookDocumentBlock = { id: string; type: 'h1' | 'h2' | 'p' | 'bullet'; text: string }
+export type NotebookDocument = { blocks: NotebookDocumentBlock[]; revision: number; updated_at: string }
+
+/** Tiptap / ProseMirror document tree persisted by the notebook editor (schema v2). */
+export type DocMark = {
+  type: 'bold' | 'italic' | 'underline' | 'strike' | 'link' | 'code' | 'highlight' | string
+  attrs?: Record<string, unknown>
+}
+export type DocNode = {
+  type: string
+  attrs?: Record<string, unknown>
+  content?: DocNode[]
+  marks?: DocMark[]
+  text?: string
+}
+export type NotebookDocumentResponse = {
+  schema_version: number
+  content: DocNode
+  blocks: NotebookDocumentBlock[]
+  revision: number
+  updated_at: string
+  warning?: string | null
+}
+export type NotebookAttachment = {
+  id: string
+  url: string
+  original_filename: string
+  mime: string
+  size_bytes: number
+  created_at: string
+}
+export type NotebookRevisionSummary = { revision: number; origin: string; created_at: string }
+export type NotebookRevision = NotebookRevisionSummary & { schema_version: number; content: DocNode }
+export type OutlineItem = { id: string; level: number; text: string }
 export type CourseTree = { course_id: string; notebooks: NotebookRead[] }
 export type NotebookReadingPosition = {
   notebook_id: string; chapter_id: string | null; note_id: string | null
   mode: 'chapter' | 'book'; section_offset: number; revision: number; updated_at: string
 }
-export type ReadingPositionUpdate = Omit<NotebookReadingPosition, 'notebook_id' | 'revision' | 'updated_at'> & { expected_revision: number }
-
 export type NoteRevision = {
   id: string
   note_id: string
@@ -292,6 +309,10 @@ export type Conversation = {
   default_scope: string
   created_at: string
   updated_at: string
+  /** 会话归属：course=整门课程 / global=跨课程 / note=锁定笔记（后端 B1 落地后可用） */
+  scope?: 'course' | 'global' | 'note' | null
+  note_id?: string | null
+  note_title?: string | null
 }
 
 export type MessageEvidence = {
@@ -320,6 +341,8 @@ export type ConversationMessage = {
   mode?: string | null
   /** 可点击的来源卡片；由后端从 evidence 反推，与直连回答同结构 */
   sources?: AssistantSource[]
+  /** 首条问题触发后由后端回写的会话标题；用于即时刷新历史列表（替代「新对话」） */
+  conversation_title?: string
 }
 
 export type KnowledgeProposal = {

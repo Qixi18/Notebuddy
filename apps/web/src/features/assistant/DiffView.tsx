@@ -31,7 +31,12 @@ export function DiffView({ rows, skipped, onToggle }: {
           <div
             key={`${hunkKey ?? 'same'}-${index}`}
             className={`agent-diff-row agent-diff-${row.type}`}
-          >{row.text || ' '}</div>,
+            /* 增删符号用 CSS ::before 画，不进 DOM（行文本保持纯内容），
+               但读屏仍能靠 aria-label 区分增删 */
+            aria-label={row.type === 'added' ? `新增：${row.text}` : row.type === 'removed' ? `删除：${row.text}` : undefined}
+          >
+            {row.text || ' '}
+          </div>,
         )
         return elements
       })}

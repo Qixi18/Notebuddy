@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.notes import NoteRead
 
@@ -33,7 +33,7 @@ class ChapterRead(BaseModel):
 class NotebookSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
-    course_id: str
+    course_id: str | None = None
     title: str
     tree_slot: int
     display_order: int
@@ -43,9 +43,79 @@ class NotebookSummary(BaseModel):
     updated_at: datetime
 
 
+UnboundNotebookSummary = NotebookSummary
+
+
+class NotebookBindRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    course_id: str = Field(min_length=1, max_length=36)
+
+
 class NotebookTitleUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
+
+
+class DocumentBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=64)
+    type: Literal["h1", "h2", "p", "bullet"]
+    text: str = Field(max_length=20000)
+
+
+class NotebookDocumentUpdate(BaseModel):
+    """Accepts the v2 document tree; the legacy ``blocks`` shape stays for a
+    transition period so older tabs can still save simple notes."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: int | None = None
+    content: dict[str, Any] | None = None
+    blocks: list[DocumentBlock] | None = None
+    expected_revision: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if self.schema_version is not None and self.schema_version != 2:
+            raise ValueError("不支持的正文格式版本")
+        if (self.content is None) == (self.blocks is None):
+            raise ValueError("content 与 blocks 必须且只能提供一个")
+        return self
+
+
+class NotebookDocumentRead(BaseModel):
+    schema_version: int = 2
+    content: dict[str, Any]
+    # Transitional projection for older clients; new clients must use content.
+    blocks: list[DocumentBlock] = Field(default_factory=list)
+    revision: int
+    updated_at: datetime
+    warning: str | None = None
+
+
+class NotebookAttachmentRead(BaseModel):
+    id: str
+    url: str
+    original_filename: str
+    mime: str
+    size_bytes: int
+    created_at: datetime
+
+
+class NotebookRevisionSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    revision: int
+    origin: str
+    created_at: datetime
+
+
+class NotebookRevisionRead(NotebookRevisionSummary):
+    schema_version: int
+    content: dict[str, Any]
+
+
+class NotebookRestoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(ge=0)
 
 
 class NotebookRead(BaseModel):
