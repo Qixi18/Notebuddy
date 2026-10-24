@@ -454,9 +454,12 @@ test('自测卷：拉题、作答、交卷判分', async () => {
   })
 
   await waitFor(() => expect(screen.getByText(/行列式为零说明/)).toBeTruthy())
+  /* 点击即判：点选项立即出对错，答案区与题目分离 */
   fireEvent.click(screen.getByRole('radio', { name: /不可逆/ }))
-  fireEvent.click(screen.getByRole('button', { name: '交卷' }))
   await waitFor(() => expect(screen.getByText(/✗ 答错了/)).toBeTruthy())
+  expect(screen.getByText(/正确答案：不可逆/)).toBeTruthy()
   expect(screen.getByText(/得分 0\/1/)).toBeTruthy()
-  expect(screen.getByText(/参考答案：不可逆/)).toBeTruthy()
+  /* 已判选项锁定：正确项高亮、其余淡化 */
+  expect(document.querySelector('.quiz-item-option.is-correct')).toBeTruthy()
+  expect(document.querySelector('.quiz-item-option.is-dim')).toBeTruthy()
 })
