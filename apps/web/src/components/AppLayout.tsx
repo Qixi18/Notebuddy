@@ -11,6 +11,8 @@ import type {
 } from '../types'
 import type { ConversationState } from '../features/conversation/useConversation'
 import { AssistantDock } from '../features/assistant/AssistantDock'
+import { NotebookBridgeProvider } from '../features/notebook-editor/NotebookBridge'
+import type { AIAction } from '../features/notebook-editor/NotebookEditor'
 import { ConfirmDialog } from './ConfirmDialog'
 import type { TeacherCharacterId } from './TeacherCharacter'
 import { SettingsPanel } from './SettingsPanel'
@@ -126,6 +128,17 @@ export function AppLayout() {
   const [dockOpen, setDockOpen] = useState(() => resolveDockOpen(localStorage.getItem(DOCK_STORAGE.open)))
   const [dockWidth, setDockWidth] = useState(() => resolveDockWidth(localStorage.getItem(DOCK_STORAGE.width)))
   const [dockResizing, setDockResizing] = useState(false)
+  const [notebookAction, setNotebookAction] = useState<AIAction | null>(null)
+  /* 笔记页的工具条只负责“请求打开助手”；开合仍由外壳唯一持有，避免第二套侧栏状态 */
+  useEffect(() => {
+    const openAssistant = (event: Event) => {
+      setDockOpen(true)
+      const action = (event as CustomEvent<{ action?: AIAction }>).detail?.action
+      setNotebookAction(action ?? null)
+    }
+    window.addEventListener('notebuddy:open-assistant', openAssistant)
+    return () => window.removeEventListener('notebuddy:open-assistant', openAssistant)
+  }, [])
   /* 答疑页本身就是完整助手，此处再挂一个紧凑抽屉纯属重复，故该页整页不提供悬浮球与抽屉；
      其余页面（含首页、知识森林）全局常驻 */
   const dockSupported = !isAssistantPage
@@ -180,6 +193,7 @@ export function AppLayout() {
   }
 
   return (
+    <NotebookBridgeProvider>
     <div
       className={`app-shell app-shell-garden${isHome ? ' app-shell-home' : isForest ? ' app-shell-forest' : ''}${showAssistantDock ? ' app-shell-with-assistant' : ''}${sidebarCollapsed ? ' app-shell-sidebar-collapsed' : ''}${dockResizing ? ' app-shell-dock-resizing' : ''}`}
       /* 抽屉宽度只在这一处写进 CSS 变量，网格第三列引用它，拖拽即改一格变量 */
@@ -260,6 +274,8 @@ export function AppLayout() {
         onWidthChange={setDockWidth}
         onClose={() => setDockOpen(false)}
         onResizeStateChange={setDockResizing}
+        notebookAction={notebookAction}
+        onNotebookActionConsumed={() => setNotebookAction(null)}
       />}
       {dockSupported && !dockOpen && <button
         className="assistant-fab"
@@ -289,6 +305,7 @@ export function AppLayout() {
         onCancel={() => blocker.reset()}
       />}
     </div>
+    </NotebookBridgeProvider>
   )
 }
 

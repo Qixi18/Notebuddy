@@ -1,63 +1,55 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { api, ApiError } from '../api'
+import { api } from '../api'
 import { useWorkspace } from '../components/AppLayout'
-import type { Note, NotebookDocumentBlock, NotebookRead } from '../types'
+import type { Note, NotebookDocumentResponse, NotebookRead } from '../types'
+import {
+  NotebookEditor, type AIAction, type NotebookEditorHandle, type SelectionAnchor,
+} from '../features/notebook-editor/NotebookEditor'
+import {
+  countText, docToMarkdown, excerptAroundSelection, extractOutline, legacyBlocksToDocument, normalizeDocument, plainText, stableStringify,
+  type DocNode,
+} from '../features/notebook-editor/document'
+import { useNotebookSave } from '../features/notebook-editor/useNotebookSave'
+import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
+import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features/notebook-editor/NotebookBridge'
 import './NotebookPage.css'
 
-type SaveState = 'saved' | 'unsaved' | 'saving' | 'error'
-
-function newBlock(type: NotebookDocumentBlock['type'], text = ''): NotebookDocumentBlock {
-  return { id: crypto.randomUUID(), type, text }
+function serverDate(value: string): Date {
+  return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`)
 }
 
-function BlockField({ block, onChange, onFocus, onEnter }: {
-  block: NotebookDocumentBlock
-  onChange: (text: string) => void
-  onFocus: () => void
-  onEnter: () => void
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => {
-    if (!ref.current) return
-    ref.current.style.height = 'auto'
-    ref.current.style.height = `${Math.max(ref.current.scrollHeight, block.type === 'p' ? 36 : 42)}px`
-  }, [block.text, block.type])
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && (block.type === 'h1' || block.type === 'h2' || event.ctrlKey || event.metaKey)) {
-      event.preventDefault()
-      onEnter()
-    }
-  }
-  return <textarea
-    ref={ref}
-    id={`notebook-block-${block.id}`}
-    className={`notebook-document-block notebook-document-block-${block.type}`}
-    rows={1}
-    value={block.text}
-    onChange={(event) => onChange(event.target.value)}
-    onFocus={onFocus}
-    onKeyDown={handleKeyDown}
-    placeholder={block.type === 'h1' ? '章节标题' : block.type === 'h2' ? '小节标题' : block.type === 'bullet' ? '列表内容' : '写下你的笔记…'}
-    aria-label={block.type === 'h1' ? '章节标题' : block.type === 'h2' ? '小节标题' : '笔记正文'}
-    spellCheck
-  />
+function clock(value?: string): string {
+  if (!value) return ''
+  const date = serverDate(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character] as string))
 }
 
 export function NotebookPage() {
+  const { courseId, notebookId } = useParams<{ courseId: string; notebookId: string }>()
+  return <NotebookPageBody key={`${courseId ?? ''}:${notebookId ?? ''}`} />
+}
+
+function NotebookPageBody() {
   const { courseId, notebookId } = useParams<{ courseId: string; notebookId: string }>()
   const [searchParams] = useSearchParams()
   const linkedSectionId = searchParams.get('section')
   const linkedChapterId = searchParams.get('chapter')
   const { course, materials, busy, uploadMaterial, refreshCurrentMaterials, setDocumentDirty } = useWorkspace()
+
   const [outline, setOutline] = useState<NotebookRead>()
-  const [blocks, setBlocks] = useState<NotebookDocumentBlock[]>([])
   const [title, setTitle] = useState('')
+  const [content, setContent] = useState<DocNode>({ type: 'doc', content: [] })
   const [loaded, setLoaded] = useState(false)
   const [loadError, setLoadError] = useState<string>()
-  const [saveState, setSaveState] = useState<SaveState>('saved')
-  const [saveError, setSaveError] = useState<string>()
+  const [documentWarning, setDocumentWarning] = useState<string>()
   const [uploadError, setUploadError] = useState<string>()
+  const [imageError, setImageError] = useState<string>()
   const [titleError, setTitleError] = useState<string>()
   const [importing, setImporting] = useState(false)
   const [resourcesOpen, setResourcesOpen] = useState(true)
@@ -66,16 +58,55 @@ export function NotebookPage() {
   const [titleSaving, setTitleSaving] = useState(false)
   const [linkedNote, setLinkedNote] = useState<Note>()
   const [linkedNoteError, setLinkedNoteError] = useState<string>()
+  const [selection, setSelection] = useState<SelectionAnchor | null>(null)
+  const [editVersion, setEditVersion] = useState(0)
+  const [draftFound, setDraftFound] = useState<NotebookDraft | null>(null)
+  const [conflictPreview, setConflictPreview] = useState<NotebookDocumentResponse | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [notice, setNotice] = useState<string>()
   const fileInput = useRef<HTMLInputElement>(null)
-  const savedRef = useRef('[]')
-  const revisionRef = useRef(0)
-  const blocksRef = useRef(blocks)
-  const inFlightRef = useRef(false)
-  const conflictRef = useRef(false)
-  const failedRef = useRef(false)
-  const saveNowRef = useRef<() => Promise<void>>(async () => {})
+  const editorRef = useRef<NotebookEditorHandle>(null)
+  const editorReadyRef = useRef(false)
+  const pageActiveRef = useRef(true)
   const lastDeepLinkRef = useRef<string | undefined>(undefined)
-  blocksRef.current = blocks
+
+  const save = useNotebookSave({ courseId, notebookId })
+
+  const insertAI = useCallback((text: string, mode: 'after' | 'replace', anchor: SelectionAnchor | null, expectedRevision?: number, expectedEditVersion?: number) => {
+    const handle = editorRef.current
+    const editor = handle?.editor
+    if (!handle || !editor) return false
+    if (expectedRevision !== undefined && expectedRevision !== save.revision) return false
+    if (expectedEditVersion !== undefined && expectedEditVersion !== editVersion) return false
+    const target = anchor
+    if (!target) return false
+    if (mode === 'replace') {
+      if (!target.text.trim()) return false
+      if (editor.state.doc.textBetween(target.from, target.to, '\n') !== target.text) return false
+      return handle.replaceRange(text, target.from, target.to)
+    }
+    if (target.to > editor.state.doc.content.size) return false
+    if (editor.state.doc.textBetween(target.from, target.to, '\n') !== target.text) return false
+    handle.insertMarkdown(text, target.to)
+    return true
+  }, [editVersion, save.revision])
+
+  const bridgeValue = useMemo<NotebookBridgeValue | null>(() => courseId && notebookId && loaded ? {
+    courseId,
+    notebookId,
+    title,
+    revision: save.revision,
+    editVersion,
+    excerpt: excerptAroundSelection(content, selection?.text),
+    selection,
+    insertAI,
+  } : null, [content, courseId, editVersion, insertAI, loaded, notebookId, save.revision, selection, title])
+  useRegisterNotebookBridge(bridgeValue)
+
+  useEffect(() => {
+    pageActiveRef.current = true
+    return () => { pageActiveRef.current = false }
+  }, [])
 
   useEffect(() => {
     if (!courseId || !notebookId) return
@@ -83,22 +114,28 @@ export function NotebookPage() {
     setLoaded(false)
     setLoadError(undefined)
     setOutline(undefined)
+    setDocumentWarning(undefined)
+    setDraftFound(null)
+    setEditVersion(0)
+    editorReadyRef.current = false
     void Promise.all([api.getNotebookById(courseId, notebookId), api.getNotebookDocument(courseId, notebookId)])
-      .then(([nextOutline, document]) => {
+      .then(async ([nextOutline, document]) => {
         if (!active) return
+        const normalized = normalizeDocument(document.content)
         setOutline(nextOutline)
         setTitle(nextOutline.title)
-        setBlocks(document.blocks)
-        savedRef.current = JSON.stringify(document.blocks)
-        revisionRef.current = document.revision
-        conflictRef.current = false
-        failedRef.current = false
-        setSaveState('saved')
-        setSaveError(undefined)
+        setContent(normalized)
+        setDocumentWarning(document.warning ?? undefined)
+        save.reset(normalized, document.revision, document.updated_at)
         setLoaded(true)
+        const draft = await readDraft(courseId, notebookId)
+        if (active && draft && stableStringify(draft.content) !== stableStringify(normalized)) setDraftFound(draft)
       })
-      .catch((cause: unknown) => { if (active) setLoadError(cause instanceof Error ? cause.message : '笔记读取失败') })
+      .catch((cause: unknown) => {
+        if (active) setLoadError(cause instanceof Error ? cause.message : '笔记读取失败')
+      })
     return () => { active = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, notebookId])
 
   useEffect(() => {
@@ -113,84 +150,49 @@ export function NotebookPage() {
         return
       }
       setLinkedNote(note)
-    }).catch((cause: unknown) => { if (active) setLinkedNoteError(cause instanceof Error ? cause.message : '小节读取失败') })
+    }).catch((cause: unknown) => {
+      if (active) setLinkedNoteError(cause instanceof Error ? cause.message : '小节读取失败')
+    })
     return () => { active = false }
   }, [courseId, linkedSectionId, notebookId])
 
-  const saveNow = useCallback(async () => {
-    if (!courseId || !notebookId || !loaded || inFlightRef.current || conflictRef.current) return
-    const snapshot = JSON.stringify(blocksRef.current)
-    if (snapshot === savedRef.current) return
-    inFlightRef.current = true
-    setSaveState('saving')
-    try {
-      const saved = await api.saveNotebookDocument(courseId, notebookId, JSON.parse(snapshot) as NotebookDocumentBlock[], revisionRef.current)
-      revisionRef.current = saved.revision
-      savedRef.current = snapshot
-      setSaveError(undefined)
-      failedRef.current = false
-      const stillDirty = JSON.stringify(blocksRef.current) !== snapshot
-      setSaveState(stillDirty ? 'unsaved' : 'saved')
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) conflictRef.current = true
-      failedRef.current = true
-      setSaveError(cause instanceof Error ? cause.message : '笔记保存失败，请重试。')
-      setSaveState('error')
-    } finally {
-      inFlightRef.current = false
-      if (!failedRef.current && JSON.stringify(blocksRef.current) !== savedRef.current) {
-        window.setTimeout(() => void saveNowRef.current(), 500)
-      }
-    }
-  }, [courseId, notebookId, loaded])
-  saveNowRef.current = saveNow
-
-  useEffect(() => {
-    if (!loaded) return
-    const dirty = JSON.stringify(blocks) !== savedRef.current
-    if (!dirty || conflictRef.current || failedRef.current) return
-    setSaveState('unsaved')
-    const timer = window.setTimeout(() => void saveNowRef.current(), 850)
-    return () => window.clearTimeout(timer)
-  }, [blocks, loaded])
-  useEffect(() => {
-    if (!loaded) return
-    setDocumentDirty(JSON.stringify(blocks) !== savedRef.current || title !== outline?.title)
-  }, [blocks, loaded, outline?.title, saveState, setDocumentDirty, title])
-  useEffect(() => () => setDocumentDirty(false), [setDocumentDirty])
-
-  const headings = useMemo(() => blocks.filter((block) => (block.type === 'h1' || block.type === 'h2') && block.text.trim()), [blocks])
+  const headings = useMemo(() => extractOutline(content), [content])
+  const canImportExisting = (content.content ?? []).every((node) => node.type === 'paragraph' && !plainText(node).trim())
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
   const hasExistingSections = Boolean(outline?.chapters.some((chapter) => chapter.sections.length) || outline?.historical_sections.length)
   const linkedBlockId = linkedNote ? `source-${linkedNote.id}` : undefined
-  const linkedNoteInDocument = Boolean(linkedBlockId && blocks.some((block) => block.id === linkedBlockId))
+  const linkedNoteInDocument = Boolean(linkedBlockId && headings.some((heading) => heading.id === linkedBlockId))
+  const wordCount = useMemo(() => countText(content), [content])
+  const dirty = save.state !== 'saved' || title !== (outline?.title ?? '')
+
+  useEffect(() => {
+    setDocumentDirty(Boolean(loaded && dirty))
+  }, [dirty, loaded, setDocumentDirty])
+  useEffect(() => () => setDocumentDirty(false), [setDocumentDirty])
 
   useEffect(() => {
     if (!loaded) return
-    const targetId = linkedBlockId && blocks.some((block) => block.id === linkedBlockId)
+    const targetId = linkedBlockId && headings.some((heading) => heading.id === linkedBlockId)
       ? linkedBlockId
-      : !linkedSectionId && linkedChapterId ? blocks.find((block) => block.type === 'h1' && block.text === outline?.chapters.find((chapter) => chapter.id === linkedChapterId)?.title)?.id : undefined
+      : !linkedSectionId && linkedChapterId
+        ? headings.find((heading) => heading.level === 1 && heading.text === outline?.chapters.find((chapter) => chapter.id === linkedChapterId)?.title)?.id
+        : undefined
     if (!targetId) return
-    const deepLinkKey = `${courseId}:${notebookId}:${linkedSectionId ?? linkedChapterId}:${targetId}`
-    if (lastDeepLinkRef.current === deepLinkKey) return
-    lastDeepLinkRef.current = deepLinkKey
-    requestAnimationFrame(() => document.getElementById(`notebook-block-${targetId}`)?.scrollIntoView({ block: 'center' }))
-  }, [blocks, courseId, linkedBlockId, linkedChapterId, linkedSectionId, loaded, notebookId, outline?.chapters])
+    const key = `${courseId}:${notebookId}:${linkedSectionId ?? linkedChapterId}:${targetId}`
+    if (lastDeepLinkRef.current === key) return
+    lastDeepLinkRef.current = key
+    window.setTimeout(() => {
+      editorRef.current?.focusBlock(targetId)
+      setActiveBlockId(targetId)
+    }, 120)
+  }, [courseId, headings, linkedBlockId, linkedChapterId, linkedSectionId, loaded, notebookId, outline?.chapters])
 
-  function addBlock(type: NotebookDocumentBlock['type'] = 'p', afterId?: string) {
-    const block = newBlock(type)
-    setBlocks((current) => {
-      const index = afterId ? current.findIndex((item) => item.id === afterId) : -1
-      const position = index >= 0 ? index + 1 : current.length
-      return [...current.slice(0, position), block, ...current.slice(position)]
-    })
-    setActiveBlockId(block.id)
-    requestAnimationFrame(() => document.getElementById(`notebook-block-${block.id}`)?.focus())
-  }
-
-  function updateBlock(id: string, value: Partial<NotebookDocumentBlock>) {
-    setBlocks((current) => current.map((block) => block.id === id ? { ...block, ...value } : block))
-  }
+  const handleChange = useCallback((doc: DocNode) => {
+    if (!editorReadyRef.current) return
+    setContent(doc)
+    setEditVersion((value) => value + 1)
+    save.markEdited(doc)
+  }, [save])
 
   async function renameTitle() {
     const nextTitle = title.trim()
@@ -203,13 +205,13 @@ export function NotebookPage() {
     try {
       const renamed = await api.renameNotebook(courseId, notebookId, nextTitle)
       setOutline(renamed)
-      setTitle(renamed.title)
+      setTitle((current) => current === nextTitle ? renamed.title : current)
     } catch (cause) {
       setTitleError(cause instanceof Error ? cause.message : '笔记名称保存失败')
     } finally { setTitleSaving(false) }
   }
 
-  async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
+  async function handleUploadMaterial(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file || !courseId || !notebookId) return
@@ -223,30 +225,166 @@ export function NotebookPage() {
     } catch (cause) { setUploadError(cause instanceof Error ? cause.message : '资料上传失败') }
   }
 
+  async function uploadImage(file: File): Promise<{ src: string; attachmentId: string } | null> {
+    if (!courseId || !notebookId) return null
+    setImageError(undefined)
+    try {
+      const attachment = await api.uploadNotebookAttachment(courseId, notebookId, file)
+      return { src: attachment.url, attachmentId: attachment.id }
+    } catch (cause) {
+      setImageError(cause instanceof Error ? cause.message : '图片上传失败')
+      return null
+    }
+  }
+
   async function importExistingNotes() {
-    if (!courseId || !notebookId || !outline || importing || blocks.length) return
+    if (!courseId || !notebookId || !outline || importing || !canImportExisting) return
+    const targetEditor = editorRef.current?.editor
+    if (!targetEditor) return
+    const originalContent = stableStringify(targetEditor.getJSON())
     setImporting(true)
     try {
       const chapters = await Promise.all(outline.chapters.filter((chapter) => chapter.sections.length).map(async (chapter) => ({
         title: chapter.title,
         notes: (await api.getNotebookChapter(courseId, notebookId, chapter.id)).sections,
       })))
-      const imported = chapters.flatMap(({ title: chapterTitle, notes }) => [
-        newBlock('h1', chapterTitle),
-        ...notes.flatMap((note) => [{ ...newBlock('h2', note.title), id: `source-${note.id}` }, newBlock('p', note.content_markdown)]),
-      ])
+      const blocks: Array<{ id: string; type: 'h1' | 'h2' | 'p' | 'bullet'; text: string }> = []
+      chapters.forEach(({ title: chapterTitle, notes }) => {
+        blocks.push({ id: crypto.randomUUID(), type: 'h1', text: chapterTitle })
+        notes.forEach((note) => {
+          blocks.push({ id: `source-${note.id}`, type: 'h2', text: note.title })
+          blocks.push({ id: crypto.randomUUID(), type: 'p', text: note.content_markdown })
+        })
+      })
       if (outline.historical_sections.length) {
         const historical = await Promise.all(outline.historical_sections.map((section) => api.getNote(section.id)))
-        imported.push(newBlock('h1', '历史笔记'), ...historical.flatMap((note) => [{ ...newBlock('h2', note.title), id: `source-${note.id}` }, newBlock('p', note.content_markdown)]))
+        blocks.push({ id: crypto.randomUUID(), type: 'h1', text: '历史笔记' })
+        historical.forEach((note) => {
+          blocks.push({ id: `source-${note.id}`, type: 'h2', text: note.title })
+          blocks.push({ id: crypto.randomUUID(), type: 'p', text: note.content_markdown })
+        })
       }
-      setBlocks(imported)
-      setActiveBlockId(imported[0]?.id)
-    } catch (cause) { setSaveError(cause instanceof Error ? cause.message : '已有笔记导入失败') }
-    finally { setImporting(false) }
+      const document = legacyBlocksToDocument(blocks)
+      if (!pageActiveRef.current || editorRef.current?.editor !== targetEditor) return
+      if (stableStringify(targetEditor.getJSON()) !== originalContent) {
+        setNotice('导入期间正文发生了变化，已取消导入以保留当前编辑。')
+        return
+      }
+      editorRef.current?.replaceContent(document)
+      setContent(document)
+      setEditVersion((value) => value + 1)
+      save.markEdited(document)
+      setDirectoryOpen(true)
+      setNotice('已导入已有分节笔记，原分节内容保持不变。')
+    } catch (cause) {
+      setTitleError(cause instanceof Error ? cause.message : '已有笔记导入失败')
+    } finally { setImporting(false) }
+  }
+
+  function appendLinkedNote() {
+    if (!linkedNote || !editorRef.current?.editor) return
+    const document = legacyBlocksToDocument([
+      { id: `source-${linkedNote.id}`, type: 'h2', text: linkedNote.title },
+      { id: crypto.randomUUID(), type: 'p', text: linkedNote.content_markdown },
+    ])
+    const editor = editorRef.current.editor
+    editor.chain().focus().insertContentAt(editor.state.doc.content.size, document.content ?? []).run()
+    setDirectoryOpen(true)
+  }
+
+  function restoreDraft() {
+    if (!draftFound) return
+    const restored = normalizeDocument(draftFound.content)
+    editorRef.current?.replaceContent(restored)
+    setContent(restored)
+    setEditVersion((value) => value + 1)
+    save.markEdited(restored)
+    setDraftFound(null)
+    setNotice('已恢复本地草稿，保存成功后会清除草稿副本。')
+  }
+
+  async function discardDraft() {
+    setDraftFound(null)
+    if (courseId && notebookId) await clearDraft(courseId, notebookId)
+  }
+
+  async function copyDraft() {
+    try {
+      await navigator.clipboard.writeText(docToMarkdown(content))
+      setNotice('本地草稿已复制为 Markdown。')
+    } catch {
+      setNotice('复制失败，请手动选择正文复制。')
+    }
+  }
+
+  async function showServerVersion() {
+    const latest = await save.fetchServer()
+    if (latest) setConflictPreview(latest)
+  }
+
+  function useServerVersion() {
+    if (!conflictPreview) return
+    const normalized = normalizeDocument(conflictPreview.content)
+    editorRef.current?.replaceContent(normalized)
+    setContent(normalized)
+    setEditVersion((value) => value + 1)
+    save.applyServer({ ...conflictPreview, content: normalized })
+    save.setConflictOpen(false)
+    setConflictPreview(null)
+    setNotice('已切换到服务器版本。')
+  }
+
+  function exportMarkdown() {
+    const blob = new Blob([docToMarkdown(content)], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${title.trim() || '笔记'}.md`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    setNotice('已导出 Markdown。')
+  }
+
+  function exportPdf() {
+    const html = editorRef.current?.editor?.getHTML()
+    if (!html) return
+    const win = window.open('', '_blank')
+    if (!win) { setNotice('浏览器阻止了打印窗口，请允许弹窗后重试。'); return }
+    const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style')).map((node) => node.outerHTML).join('')
+    win.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title>${styles}<style>
+      body{margin:0;background:#fff;color:#24322a;font-family:var(--nb-sans,"Noto Sans SC",sans-serif);}
+      article{max-width:760px;margin:0 auto;padding:48px 24px;}
+      .ProseMirror{outline:none;}
+      h1,h2,h3{break-after:avoid;}
+      table{border-collapse:collapse;width:100%;}td,th{border:1px solid #dbe4dc;padding:6px 8px;}
+      img{max-width:100%;}
+      blockquote{border-left:3px solid #b9d0bc;margin:12px 0;padding-left:14px;color:#4c6352;}
+      pre{background:#f4f7f4;padding:12px;border-radius:6px;overflow:auto;}
+      @media print{article{padding:0;} .nb-drag-handle,.nb-selection-menu{display:none!important;}}
+    </style></head><body><article class="ProseMirror">${html}</article></body></html>`)
+    win.document.close()
+    win.setTimeout(() => { win.focus(); win.print() }, 450)
+  }
+
+  function openAssistant(action?: AIAction) {
+    window.dispatchEvent(new CustomEvent('notebuddy:open-assistant', {
+      detail: { courseId, notebookId, action, selection, revision: save.revision, title },
+    }))
   }
 
   if (!courseId || !notebookId) return <section className="route-state-card" role="alert">笔记地址无效。</section>
   if (loadError) return <section className="route-state-card" role="alert"><h1>无法打开笔记</h1><p>{loadError}</p><Link className="primary-button link-button" to="/courses">返回课程</Link></section>
+
+  const titleDirty = title !== (outline?.title ?? '')
+  const displaySaveState = save.state === 'conflict' ? 'conflict'
+    : save.state === 'error' || titleError ? 'error'
+      : save.state === 'saving' || titleSaving ? 'saving'
+        : save.state === 'unsaved' || titleDirty ? 'unsaved' : 'saved'
+  const saveLabel = displaySaveState === 'conflict' ? '有冲突'
+    : displaySaveState === 'error' ? titleError ? '名称保存失败' : '保存失败'
+      : displaySaveState === 'saving' ? titleSaving ? '名称保存中…' : '保存中…'
+        : displaySaveState === 'unsaved' ? titleDirty ? '名称待保存' : '待保存'
+          : `已保存${save.lastSavedAt ? ` ${clock(save.lastSavedAt)}` : ''}`
 
   return <div className="notebook-document-page">
     <header className="notebook-document-topbar">
@@ -255,46 +393,239 @@ export function NotebookPage() {
       <span className="notebook-document-top-course" title={course?.name}>{course?.name ?? '课程'}</span>
       <span className="notebook-document-top-chevron" aria-hidden="true">›</span>
       <strong className="notebook-document-top-title" title={outline?.title}>{outline?.title ?? '正在读取笔记…'}</strong>
+
       <div className="notebook-document-top-actions">
-        <span className={`notebook-document-save-status notebook-document-save-${saveState}`} role="status">
-          <span aria-hidden="true" />{titleSaving ? '名称保存中…' : saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存失败' : '待保存'}
+        <span className={`notebook-document-save-status notebook-document-save-${displaySaveState}`} role="status" aria-live="polite">
+          <span aria-hidden="true" />{saveLabel}
         </span>
-        <details className="notebook-document-more"><summary>更多</summary><div><Link to={`/courses/${courseId}/materials?notebook=${notebookId}`}>管理课程资料</Link><button type="button" onClick={() => void saveNow()}>立即保存</button></div></details>
+        <div className="notebook-document-history-actions" role="group" aria-label="撤销与重做">
+          <button type="button" onClick={() => editorRef.current?.undo()} title="撤销（Ctrl+Z）" aria-label="撤销">↶</button>
+          <button type="button" onClick={() => editorRef.current?.redo()} title="重做（Ctrl+Shift+Z）" aria-label="重做">↷</button>
+        </div>
+        <button className="notebook-document-ai-button" type="button" onClick={() => openAssistant()} aria-label="打开 AI 助手">
+          <span aria-hidden="true">✦</span> AI 助手
+        </button>
+        <details className="notebook-document-more">
+          <summary aria-label="更多操作">更多</summary>
+          <div>
+            <button type="button" onClick={() => void save.saveNow()}>立即保存</button>
+            <button type="button" onClick={() => setHistoryOpen(true)}>历史版本</button>
+            <button type="button" onClick={exportMarkdown}>导出 Markdown</button>
+            <button type="button" onClick={exportPdf}>导出 PDF</button>
+            <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href).then(() => setNotice('链接已复制。'))}>复制链接</button>
+            <Link to={`/courses/${courseId}/materials?notebook=${notebookId}`}>管理课程资料</Link>
+          </div>
+        </details>
       </div>
     </header>
+
+    {notice && <div className="notebook-document-notice" role="status">{notice}<button type="button" onClick={() => setNotice(undefined)} aria-label="关闭提示">×</button></div>}
+    {save.error && <div className="notebook-document-banner is-error" role="alert">
+      <span>{save.error}</span>
+      {save.state === 'conflict'
+        ? <div><button type="button" onClick={() => save.setConflictOpen(true)}>处理冲突</button><button type="button" onClick={() => void showServerVersion()}>查看服务器版本</button><button type="button" onClick={() => void copyDraft()}>复制本地草稿</button></div>
+        : <button type="button" onClick={() => save.retry()}>重试保存</button>}
+    </div>}
+    {draftFound && <div className="notebook-document-banner" role="status">
+      <span>发现 {clock(draftFound.updatedAt)} 的本地草稿，与服务器版本不同。</span>
+      <div><button type="button" onClick={restoreDraft}>恢复草稿</button><button type="button" onClick={() => void discardDraft()}>忽略</button></div>
+    </div>}
+    {documentWarning && <div className="notebook-document-banner" role="alert">{documentWarning}</div>}
+    {imageError && <div className="notebook-document-banner is-error" role="alert">{imageError}<button type="button" onClick={() => setImageError(undefined)}>关闭</button></div>}
+
     <div className="notebook-document-workspace">
       <aside className="notebook-document-sidebar" aria-label="资料与目录">
         <div className="notebook-document-sidebar-heading">资料与目录</div>
-        <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" onChange={(event) => void handleUpload(event)} aria-label="选择课程资料" />
-        <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}><span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}</button>
+        <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" onChange={(event) => void handleUploadMaterial(event)} aria-label="选择课程资料" />
+        <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
+          <span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}
+        </button>
         {uploadError && <p className="notebook-document-sidebar-error" role="alert">{uploadError}</p>}
         <section className="notebook-document-sidebar-section">
-          <button className="notebook-document-section-toggle" type="button" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}><span className={resourcesOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>课程资料 <small>{bookMaterials.length}</small></button>
-          {resourcesOpen && <div className="notebook-document-section-body">{bookMaterials.length ? bookMaterials.map((material) => <Link className="notebook-document-material" key={material.id} to={`/courses/${courseId}/materials?notebook=${notebookId}`} title={material.original_filename}><span className="notebook-document-file-icon" aria-hidden="true">≡</span><span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? `已整理 · ${material.page_count} 页` : material.status === 'failed' ? '处理失败' : '正在整理'}</small></span></Link>) : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}</div>}
+          <button className="notebook-document-section-toggle" type="button" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}>
+            <span className={resourcesOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>课程资料 <small>{bookMaterials.length}</small>
+          </button>
+          {resourcesOpen && <div className="notebook-document-section-body">
+            {bookMaterials.length ? bookMaterials.map((material) => <Link className="notebook-document-material" key={material.id} to={`/courses/${courseId}/materials?notebook=${notebookId}`} title={material.original_filename}>
+              <span className="notebook-document-file-icon" aria-hidden="true">{material.original_filename.toLowerCase().endsWith('.pdf') ? 'PDF' : material.original_filename.toLowerCase().endsWith('.pptx') ? 'PPT' : 'DOC'}</span>
+              <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? `已整理 · ${material.page_count} 页` : material.status === 'failed' ? '处理失败' : '正在整理'}</small></span>
+            </Link>) : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}
+          </div>}
         </section>
         <section className="notebook-document-sidebar-section notebook-document-sidebar-directory">
-          <button className="notebook-document-section-toggle" type="button" aria-expanded={directoryOpen} onClick={() => setDirectoryOpen((value) => !value)}><span className={directoryOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>笔记目录 <small>随标题更新</small></button>
-          {directoryOpen && <nav className="notebook-document-section-body" aria-label="笔记目录">{headings.length ? headings.map((heading) => <button className={`notebook-document-outline-item notebook-document-outline-${heading.type}${activeBlockId === heading.id ? ' is-active' : ''}`} key={heading.id} type="button" onClick={() => { document.getElementById(`notebook-block-${heading.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); setActiveBlockId(heading.id) }}>{heading.text}</button>) : <p className="notebook-document-sidebar-empty">正文标题会显示在这里</p>}</nav>}
+          <button className="notebook-document-section-toggle" type="button" aria-expanded={directoryOpen} onClick={() => setDirectoryOpen((value) => !value)}>
+            <span className={directoryOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>笔记目录 <small>{headings.length ? `${headings.length} 个标题` : '随标题更新'}</small>
+          </button>
+          {directoryOpen && <nav className="notebook-document-section-body" aria-label="笔记目录">
+            {headings.length ? headings.map((heading) => <button
+              className={`notebook-document-outline-item notebook-document-outline-h${heading.level}${activeBlockId === heading.id ? ' is-active' : ''}`}
+              key={heading.id}
+              type="button"
+              onClick={() => {
+                editorRef.current?.focusBlock(heading.id)
+                setActiveBlockId(heading.id)
+              }}
+            >{heading.text}</button>) : <p className="notebook-document-sidebar-empty">正文标题会显示在这里</p>}
+          </nav>}
+          {canImportExisting && hasExistingSections && <button className="notebook-document-import" type="button" disabled={importing} onClick={() => void importExistingNotes()}>
+            {importing ? '正在导入…' : '导入已有分节笔记'}
+          </button>}
         </section>
       </aside>
+
       <main className="notebook-document-canvas" aria-label="笔记正文">
         <div className="notebook-document-breadcrumb"><span>课程笔记</span><span aria-hidden="true">›</span><span>{course?.name ?? '课程'}</span><span aria-hidden="true">›</span><span>{outline?.title ?? '笔记'}</span></div>
         {!loaded ? <div className="notebook-document-loading" role="status">正在读取笔记正文…</div> : <article className="notebook-document-paper">
-          <input className="notebook-document-title" value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => void renameTitle()} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} aria-label="笔记名称" maxLength={200} />
-          <div className="notebook-document-meta">{course?.name ?? '课程'} · {bookMaterials.length} 份资料</div>
+          <input className="notebook-document-title" value={title} onChange={(event) => { setTitle(event.target.value); setTitleError(undefined) }} onBlur={() => void renameTitle()} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} aria-label="笔记名称" maxLength={200} />
+          <div className="notebook-document-meta">
+            <span>{course?.name ?? '课程'} · {bookMaterials.length} 份资料 · 约 {wordCount.toLocaleString('zh-CN')} 字</span>
+            {save.lastSavedAt && <span>最后编辑 {clock(save.lastSavedAt)}</span>}
+          </div>
           {titleError && <p className="notebook-document-error" role="alert">{titleError}</p>}
-          {saveError && <div className="notebook-document-error" role="alert">{saveError}{!conflictRef.current && <button type="button" onClick={() => { failedRef.current = false; setSaveError(undefined); void saveNow() }}>重试保存</button>}</div>}
           {linkedNoteError && <p className="notebook-document-error" role="alert">{linkedNoteError}</p>}
-          {linkedNote && !linkedNoteInDocument && <section className="notebook-document-source-note" aria-label="来源小节"><div><strong>{linkedNote.title}</strong><span>来源小节</span></div><p>{linkedNote.content_markdown}</p><button type="button" onClick={() => { setBlocks((current) => [...current, { ...newBlock('h2', linkedNote.title), id: `source-${linkedNote.id}` }, newBlock('p', linkedNote.content_markdown)]); setDirectoryOpen(true) }}>加入当前笔记</button></section>}
-          {!blocks.length && <div className="notebook-document-empty"><h2>开始写这篇笔记</h2><p>可以直接写正文，也可以添加标题。左侧目录会跟着标题变化。</p><div><button type="button" onClick={() => addBlock('p')}>写正文</button><button type="button" onClick={() => addBlock('h1')}>添加章节标题</button>{hasExistingSections && <button type="button" disabled={importing} onClick={() => void importExistingNotes()}>{importing ? '正在导入…' : '导入已有分节笔记'}</button>}</div></div>}
-          {blocks.length > 0 && <div className="notebook-document-editor" aria-label="可编辑的笔记内容">{blocks.map((block) => <div className={`notebook-document-row${activeBlockId === block.id ? ' is-selected' : ''}`} key={block.id}>
-            <div className="notebook-document-row-tools"><button type="button" title="在下方添加段落" aria-label="在下方添加段落" onClick={() => addBlock('p', block.id)}>＋</button></div>
-            <BlockField block={block} onChange={(text) => updateBlock(block.id, { text })} onFocus={() => setActiveBlockId(block.id)} onEnter={() => addBlock('p', block.id)} />
-            {activeBlockId === block.id && <div className="notebook-document-editbar" role="toolbar" aria-label="当前段落格式"><span>段落格式</span>{([['p', '正文'], ['h1', '章节标题'], ['h2', '小节标题'], ['bullet', '项目符号']] as const).map(([type, label]) => <button key={type} type="button" className={block.type === type ? 'is-active' : ''} onClick={() => updateBlock(block.id, { type })}>{label}</button>)}<button type="button" className="notebook-document-delete-block" disabled={blocks.length === 1} onClick={() => { setBlocks((current) => current.filter((item) => item.id !== block.id)); setActiveBlockId(undefined) }}>删除段落</button></div>}
-          </div>)}</div>}
-          {blocks.length > 0 && <button className="notebook-document-add-bottom" type="button" onClick={() => addBlock('p')}>＋ 添加段落</button>}
+          {linkedNote && !linkedNoteInDocument && <section className="notebook-document-source-note" aria-label="来源小节">
+            <div><strong>{linkedNote.title}</strong><span>来源小节</span></div>
+            <p>{linkedNote.content_markdown}</p>
+            <button type="button" onClick={appendLinkedNote}>加入当前笔记</button>
+          </section>}
+          <NotebookEditor
+            ref={editorRef}
+            initialContent={content}
+            onChange={handleChange}
+            onSelectionChange={setSelection}
+            onRequestAI={(action) => openAssistant(action)}
+            onUploadImage={uploadImage}
+            onSaveShortcut={() => void save.saveNow()}
+            onReady={(editor) => {
+              editorReadyRef.current = true
+              save.reset(editor.getJSON() as DocNode, save.revision, save.lastSavedAt)
+            }}
+          />
         </article>}
       </main>
+    </div>
+
+    {save.conflictOpen && <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="保存冲突">
+      <div className="nb-modal">
+        <h2>这篇笔记已在别处更新</h2>
+        <p>你的本地修改仍然保留。请选择要保留的版本，系统不会自动覆盖任何一方。</p>
+        <ul className="notebook-document-conflict-list">
+          <li>服务器版本：revision {save.revision}</li>
+          <li>本地草稿：{wordCount} 字</li>
+        </ul>
+        <div className="nb-modal-actions is-stacked">
+          <button type="button" onClick={() => void showServerVersion()}>查看服务器版本</button>
+          <button type="button" onClick={() => void copyDraft()}>复制本地草稿</button>
+          <button type="button" onClick={() => save.keepLocalDraft()}>保留本地草稿，暂停自动保存</button>
+          <button type="button" className="is-danger" onClick={() => void save.overwriteServer()}>用本地版本覆盖服务器</button>
+          <button type="button" className="primary-button" onClick={() => save.setConflictOpen(false)}>继续编辑</button>
+        </div>
+      </div>
+    </div>}
+
+    {conflictPreview && <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="服务器版本预览">
+      <div className="nb-modal is-wide">
+        <h2>服务器上的最新版本</h2>
+        <pre className="notebook-document-conflict-preview">{docToMarkdown(conflictPreview.content).slice(0, 12_000)}</pre>
+        <div className="nb-modal-actions">
+          <button type="button" onClick={() => setConflictPreview(null)}>返回</button>
+          <button type="button" className="primary-button" onClick={useServerVersion}>用服务器版本替换编辑器</button>
+        </div>
+      </div>
+    </div>}
+
+    {historyOpen && <NotebookHistoryPanel
+      courseId={courseId}
+      notebookId={notebookId}
+      beforeRestore={async () => {
+        if (save.isDirty() && !await save.saveNow()) return null
+        return save.isDirty() ? null : save.getRevision()
+      }}
+      onClose={() => setHistoryOpen(false)}
+      onRestored={(document, revision, updatedAt) => {
+        const normalized = normalizeDocument(document)
+        editorRef.current?.replaceContent(normalized)
+        setContent(normalized)
+        setEditVersion((value) => value + 1)
+        save.reset(normalized, revision, updatedAt)
+        setHistoryOpen(false)
+        setNotice('已恢复到选中的历史版本，并生成新的修订。')
+      }}
+    />}
+  </div>
+}
+
+function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, onRestored }: {
+  courseId: string
+  notebookId: string
+  beforeRestore: () => Promise<number | null>
+  onClose: () => void
+  onRestored: (content: DocNode, revision: number, updatedAt: string) => void
+}) {
+  const [items, setItems] = useState<Array<{ revision: number; origin: string; created_at: string }>>([])
+  const [preview, setPreview] = useState<DocNode | null>(null)
+  const [selectedRevision, setSelectedRevision] = useState<number | null>(null)
+  const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void api.listNotebookRevisions(courseId, notebookId).then((rows) => {
+      if (active) setItems(rows)
+    }).catch((cause: unknown) => {
+      if (active) setError(cause instanceof Error ? cause.message : '历史版本读取失败')
+    })
+    return () => { active = false }
+  }, [courseId, notebookId])
+
+  async function loadPreview(revision: number) {
+    setBusy(true)
+    setSelectedRevision(revision)
+    try {
+      const snapshot = await api.getNotebookRevision(courseId, notebookId, revision)
+      setPreview(snapshot.content)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '版本内容读取失败')
+    } finally { setBusy(false) }
+  }
+
+  async function restore() {
+    if (selectedRevision === null) return
+    if (!window.confirm(`恢复 revision ${selectedRevision}？已保存的当前版本会保留在历史中，恢复操作会生成新修订。`)) return
+    setBusy(true)
+    try {
+      const expectedRevision = await beforeRestore()
+      if (expectedRevision === null) {
+        setError('当前正文尚未保存，请先完成保存或处理冲突，再恢复历史版本。')
+        return
+      }
+      const restored = await api.restoreNotebookRevision(courseId, notebookId, selectedRevision, expectedRevision)
+      onRestored(restored.content, restored.revision, restored.updated_at)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '恢复失败')
+    } finally { setBusy(false) }
+  }
+
+  return <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="历史版本">
+    <div className="nb-modal is-wide">
+      <div className="nb-modal-head"><h2>历史版本</h2><button type="button" onClick={onClose} aria-label="关闭">×</button></div>
+      {error && <p className="notebook-document-error" role="alert">{error}</p>}
+      <div className="notebook-document-history">
+        <div className="notebook-document-history-list">
+          {items.length ? items.map((item) => <button key={item.revision} type="button" className={selectedRevision === item.revision ? 'is-active' : ''} onClick={() => void loadPreview(item.revision)}>
+            <strong>revision {item.revision}</strong>
+            <span>{serverDate(item.created_at).toLocaleString('zh-CN')}</span>
+            <small>{item.origin === 'restore' ? '恢复生成' : item.origin === 'autosave' ? '自动保存' : item.origin}</small>
+          </button>) : <p className="notebook-document-sidebar-empty">还没有历史快照。</p>}
+        </div>
+        <div className="notebook-document-history-preview">
+          {preview ? <pre>{docToMarkdown(preview).slice(0, 20_000)}</pre> : <p>选择左侧版本查看内容。</p>}
+        </div>
+      </div>
+      <div className="nb-modal-actions">
+        <button type="button" onClick={onClose}>关闭</button>
+        <button type="button" className="primary-button" disabled={selectedRevision === null || busy} onClick={() => void restore()}>恢复到此版本（生成新修订）</button>
+      </div>
     </div>
   </div>
 }

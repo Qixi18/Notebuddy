@@ -200,6 +200,38 @@ export type NotebookSummary = {
 }
 export type NotebookDocumentBlock = { id: string; type: 'h1' | 'h2' | 'p' | 'bullet'; text: string }
 export type NotebookDocument = { blocks: NotebookDocumentBlock[]; revision: number; updated_at: string }
+
+/** Tiptap / ProseMirror document tree persisted by the notebook editor (schema v2). */
+export type DocMark = {
+  type: 'bold' | 'italic' | 'underline' | 'strike' | 'link' | 'code' | 'highlight' | string
+  attrs?: Record<string, unknown>
+}
+export type DocNode = {
+  type: string
+  attrs?: Record<string, unknown>
+  content?: DocNode[]
+  marks?: DocMark[]
+  text?: string
+}
+export type NotebookDocumentResponse = {
+  schema_version: number
+  content: DocNode
+  blocks: NotebookDocumentBlock[]
+  revision: number
+  updated_at: string
+  warning?: string | null
+}
+export type NotebookAttachment = {
+  id: string
+  url: string
+  original_filename: string
+  mime: string
+  size_bytes: number
+  created_at: string
+}
+export type NotebookRevisionSummary = { revision: number; origin: string; created_at: string }
+export type NotebookRevision = NotebookRevisionSummary & { schema_version: number; content: DocNode }
+export type OutlineItem = { id: string; level: number; text: string }
 export type CourseTree = { course_id: string; notebooks: NotebookRead[] }
 export type NotebookReadingPosition = {
   notebook_id: string; chapter_id: string | null; note_id: string | null

@@ -54,6 +54,15 @@ export type AgentReadingContext = {
   excerpt?: string
 }
 
+export type AgentNotebookContext = {
+  course_id: string
+  notebook_id: string
+  revision: number
+  title?: string
+  selection?: string
+  excerpt?: string
+}
+
 export type AgentQuestionPayload = {
   question: string
   scope: AgentScope
@@ -62,6 +71,7 @@ export type AgentQuestionPayload = {
   allow_web?: boolean
   idempotency_key?: string
   reading_context?: AgentReadingContext
+  notebook_context?: AgentNotebookContext
 }
 
 export type AgentStreamHandlers = {

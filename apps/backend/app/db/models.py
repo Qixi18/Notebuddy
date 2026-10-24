@@ -55,7 +55,7 @@ class Course(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     notebook_order_revision: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     last_opened_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    notebooks: Mapped[list[Notebook]] = relationship(cascade="all, delete-orphan")
+    notebooks: Mapped[list[Notebook]] = relationship(passive_deletes=True)
 
     # 除了 materials，其余关联表只有 course_id 外键。显式声明 ORM 级联，
     # 这样即使引擎未开启 SQLite 外键（tests / 迁移脚本 / 换库），
@@ -97,7 +97,7 @@ class Notebook(Base):
         Index("uq_notebooks_default", "course_id", unique=True, sqlite_where=text("is_default = 1")),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    course_id: Mapped[str | None] = mapped_column(ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     display_order: Mapped[int] = mapped_column(default=0, server_default="0")
     order_revision: Mapped[int] = mapped_column(default=0, server_default="0")
@@ -111,15 +111,6 @@ class Notebook(Base):
     reading_position: Mapped[NotebookReadingPosition | None] = relationship(cascade="all, delete-orphan")
 
 
-class UnboundNotebook(Base):
-    __tablename__ = "unbound_notebooks"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
-
-
 class NotebookReadingPosition(Base):
     __tablename__ = "notebook_reading_positions"
     notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True)
@@ -129,6 +120,40 @@ class NotebookReadingPosition(Base):
     section_offset: Mapped[float] = mapped_column(default=0)
     revision: Mapped[int] = mapped_column(default=1)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
+
+
+class NotebookDocumentRevision(Base):
+    """Immutable snapshots of a notebook document, written with each save."""
+
+    __tablename__ = "notebook_document_revisions"
+    __table_args__ = (
+        UniqueConstraint("notebook_id", "revision", name="uq_notebook_document_revisions"),
+        Index("ix_notebook_document_revisions_notebook", "notebook_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"))
+    revision: Mapped[int] = mapped_column(nullable=False)
+    schema_version: Mapped[int] = mapped_column(default=2, server_default="2", nullable=False)
+    document_json: Mapped[str] = mapped_column(Text, nullable=False)
+    origin: Mapped[str] = mapped_column(String(20), default="autosave", server_default="autosave")
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class NotebookAttachment(Base):
+    """Image (or other) attachment owned by one notebook document."""
+
+    __tablename__ = "notebook_attachments"
+    __table_args__ = (Index("ix_notebook_attachments_notebook", "notebook_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"))
+    course_id: Mapped[str | None] = mapped_column(ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
 
 class Material(Base):

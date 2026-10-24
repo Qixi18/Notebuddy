@@ -106,6 +106,18 @@ class ReadingContext(BaseModel):
     excerpt: str | None = Field(default=None, max_length=1200)
 
 
+class NotebookDocumentContext(BaseModel):
+    """整篇 Notebook 编辑器的上下文，与分节 Note 的 ReadingContext 互斥。"""
+
+    model_config = ConfigDict(extra="forbid")
+    course_id: str = Field(min_length=1, max_length=36)
+    notebook_id: str = Field(min_length=1, max_length=36)
+    revision: int = Field(ge=0)
+    title: str | None = Field(default=None, max_length=200)
+    selection: str | None = Field(default=None, max_length=4000)
+    excerpt: str | None = Field(default=None, max_length=2000)
+
+
 class AgentMessageCreate(BaseModel):
     """悬浮坞 agent 提问（SSE 流式端点的请求体）。"""
 
@@ -118,3 +130,4 @@ class AgentMessageCreate(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=120)
     teacher_persona: TeacherPersonaId = "elf"
     reading_context: ReadingContext | None = None
+    notebook_context: NotebookDocumentContext | None = None

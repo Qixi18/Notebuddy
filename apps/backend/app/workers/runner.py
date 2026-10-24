@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import time
@@ -20,9 +21,16 @@ from app.forest.jobs import (
     mark_interrupted_forest_jobs,
     process_forest_job,
 )
+from app.notes.attachments import (
+    prune_deleted_notebook_directories,
+    prune_stray_attachment_files,
+    prune_unreferenced_attachments,
+)
 from app.workers.material_worker import process_material
 
 STOP = False
+ATTACHMENT_CLEANUP_INTERVAL = 60 * 60
+logger = logging.getLogger(__name__)
 _material_jobs_since_forest = 0
 FOREST_CHECK_INTERVAL = 3
 
@@ -136,7 +144,17 @@ def main() -> None:
     with exclusive_runner_lock(settings.data_dir / "worker.lock"):
         mark_interrupted_jobs(force=True)
         mark_interrupted_forest_jobs(force=True)
+        next_attachment_cleanup = 0.0
         while not STOP:
+            if time.monotonic() >= next_attachment_cleanup:
+                try:
+                    with SessionLocal() as db:
+                        prune_unreferenced_attachments(db)
+                        prune_deleted_notebook_directories(db)
+                        prune_stray_attachment_files(db)
+                except Exception:
+                    logger.exception("Notebook attachment cleanup failed")
+                next_attachment_cleanup = time.monotonic() + ATTACHMENT_CLEANUP_INTERVAL
             if not run_once():
                 time.sleep(0.5)
 

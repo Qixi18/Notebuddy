@@ -46,6 +46,7 @@ FOREST_TABLES = {
 }
 MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES | {
     "notebooks", "notebook_reading_positions", "unbound_notebooks",
+    "notebook_document_revisions", "notebook_attachments",
 }
 LEGACY_COLUMNS = {
     "materials": {"topic_title": "VARCHAR(200)"},

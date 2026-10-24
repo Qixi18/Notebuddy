@@ -11,6 +11,7 @@ import { HomePage } from './pages/HomePage'
 import { MaterialsPage } from './pages/MaterialsPage'
 import { NotesPage } from './pages/NotesPage'
 import { NotebookPage } from './pages/NotebookPage'
+import { UnboundNotebookPage } from './pages/UnboundNotebookPage'
 import { RecycleBinPage } from './pages/RecycleBinPage'
 
 const ForestPage = lazy(() => import('./pages/ForestPage').then((module) => ({ default: module.ForestPage })))
@@ -35,6 +36,7 @@ function App() {
         <Route element={<AppLayout />}>
           <Route index element={<HomePage />} />
           <Route path="/courses" element={<CourseLibraryPage />} />
+          <Route path="/notebooks/unbound/:notebookId" element={<UnboundNotebookPage />} />
           <Route path="/recycle" element={<RecycleBinPage />} />
           <Route path="/forest" element={<Suspense fallback={<p role="status">正在打开知识森林…</p>}><ForestPage /></Suspense>} />
           <Route path="/courses/:courseId" element={<CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard>} />

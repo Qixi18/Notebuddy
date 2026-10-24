@@ -2,9 +2,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 
-const { createCourse, listNotebooks } = vi.hoisted(() => ({ createCourse: vi.fn(), listNotebooks: vi.fn() }))
+const { createCourse, refreshCourses, listNotebooks, listUnboundNotebooks } = vi.hoisted(() => ({
+  createCourse: vi.fn(), refreshCourses: vi.fn().mockResolvedValue(undefined),
+  listNotebooks: vi.fn(), listUnboundNotebooks: vi.fn().mockResolvedValue([]),
+}))
 
-vi.mock('../src/api', () => ({ api: { listNotebooks } }))
+vi.mock('../src/api', () => ({ api: { listNotebooks, listUnboundNotebooks } }))
 vi.mock('../src/components/AppLayout', () => {
   const courses = [
     { id: 'math', name: '数学分析', description: null, created_at: '2026-10-07T07:07:57' },
@@ -14,12 +17,13 @@ vi.mock('../src/components/AppLayout', () => {
     courses,
     coursesLoading: false,
     createCourse,
+    refreshCourses,
   }) }
 })
 
 import { CourseLibraryPage } from '../src/pages/CourseLibraryPage'
 
-afterEach(() => { cleanup(); createCourse.mockReset(); listNotebooks.mockReset() })
+afterEach(() => { cleanup(); createCourse.mockReset(); refreshCourses.mockClear(); listNotebooks.mockReset(); listUnboundNotebooks.mockClear() })
 
 function renderPage(initialEntry: string | { pathname: string; state: object } = '/courses') {
   render(<MemoryRouter initialEntries={[initialEntry]}>
@@ -65,7 +69,8 @@ test('侧边栏创建课程状态仍由课程页处理', async () => {
   createCourse.mockResolvedValue({ id: 'new', name: '软件工程' })
   renderPage({ pathname: '/courses', state: { openCreateCourse: true } })
   fireEvent.change(await screen.findByLabelText('课程名称'), { target: { value: '软件工程' } })
-  fireEvent.click(screen.getByRole('button', { name: '创建并打开' }))
+  fireEvent.click(screen.getByRole('button', { name: '确认新建' }))
   await waitFor(() => expect(createCourse).toHaveBeenCalledWith('软件工程'))
-  expect(await screen.findByText('课程页面')).toBeTruthy()
+  await waitFor(() => expect(refreshCourses).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(screen.queryByLabelText('课程名称')).toBeNull())
 })

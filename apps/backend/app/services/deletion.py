@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -16,6 +16,8 @@ from app.db.models import (
     Material,
     MaterialPage,
     Note,
+    Notebook,
+    NotebookAttachment,
     PageBlock,
     ProcessingJob,
     SourceRef,
@@ -99,6 +101,10 @@ def soft_delete_course(db: Session, course: Course) -> dict:
     if preview["active_jobs"]:
         raise DeletionConflict("课程仍有处理任务；完成或取消后再删除")
     _checkpoint()
+    db.execute(update(Notebook).where(Notebook.course_id == course.id).values(
+        course_id=None, tree_slot=0, display_order=0, order_revision=0, is_default=False))
+    db.execute(update(NotebookAttachment).where(NotebookAttachment.course_id == course.id).values(
+        course_id=None))
     course.deleted_at = datetime.now(UTC)
     db.commit()
     return preview

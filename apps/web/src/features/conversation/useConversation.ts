@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
-import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentReadingContext, type AgentScope, type AgentStepEvent } from '../../api/agent'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent } from '../../api/agent'
 import type { TeacherCharacterId } from '../../components/TeacherCharacter'
 import type { Conversation, ConversationMessage } from '../../types'
 import { teacherPersonaMeta } from '../persona/personas'
@@ -41,6 +41,7 @@ export type AgentAskOptions = {
   scope: AgentScope
   materialId?: string
   readingContext?: AgentReadingContext
+  notebookContext?: AgentNotebookContext
 }
 
 export type ConversationState = {
@@ -368,6 +369,7 @@ export function useConversation(
         allow_web: true,
         idempotency_key: `${targetId}-${askedAt}`,
         reading_context: options.readingContext,
+        notebook_context: options.notebookContext,
       }, {
         onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
         onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
