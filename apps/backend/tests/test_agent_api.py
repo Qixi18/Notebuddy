@@ -243,3 +243,59 @@ def test_notebook_context_is_validated_and_forwarded(tmp_path, monkeypatch) -> N
         assert both.status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+def test_agent_endpoint_rejects_material_outside_course_scope(tmp_path, monkeypatch) -> None:
+    """课件收窄仅 course 档可用：global / note 携带 material_id → schema 层 422。"""
+    client, _factory, ids = _client_with_db(tmp_path)
+    try:
+        for scope in ("global", "note"):
+            response = client.post(
+                f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+                json={"question": "问题", "scope": scope, "material_id": "m-1"},
+            )
+            assert response.status_code == 422, f"scope={scope} 带 material_id 应 422"
+
+        # course 档带 material_id 通过 schema 校验；bogus id 落到端点的归属校验（404，而非 422）
+        course_scope = client.post(
+            f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+            json={"question": "问题", "scope": "course", "material_id": "not-exist"},
+        )
+        assert course_scope.status_code == 404, "course 档不应被 schema 422 拦截，而是走端点归属校验"
+        assert "不属于当前课程" in course_scope.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_agent_endpoint_forwards_note_discovery_and_lists_course_suggestions(tmp_path, monkeypatch) -> None:
+    """P4 端到端：allow_note_discovery 透传给 run_agent；课程级端点返回 pending 建议并带笔记标题。"""
+    client, factory, ids = _client_with_db(tmp_path)
+    try:
+        captured: dict = {}
+
+        def fake_agent(db, **kwargs):
+            captured.update(kwargs)
+            yield {"type": "final", "answer": "已定位并提交建议。", "mode": "agent", "model_version": None,
+                   "chunks": [], "web_results": [], "suggestions": []}
+
+        monkeypatch.setattr(agent_endpoint, "run_agent", fake_agent)
+        response = client.post(
+            f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+            json={"question": "把《行列式笔记》补全一下", "scope": "global", "allow_note_discovery": True},
+        )
+        assert response.status_code == 200, response.text
+        assert captured["allow_note_discovery"] is True, "发现开关必须透传到 agent 循环"
+
+        with factory() as db:
+            from app.knowledge.proposals import create_note_suggestion
+            suggestion = create_note_suggestion(db, note_id=ids["note"], proposed_markdown="# 行列式\n新内容", source_ids=[], impact="补全")
+            db.commit()
+
+        listed = client.get(f"/api/v1/courses/{ids['course']}/note-suggestions?status=pending")
+        assert listed.status_code == 200, listed.text
+        rows = listed.json()
+        assert len(rows) == 1 and rows[0]["id"] == suggestion.id
+        assert rows[0]["note_title"] == "行列式笔记", "课程级建议必须带目标笔记标题"
+        assert listed.json() == client.get(f"/api/v1/courses/{ids['course']}/note-suggestions").json(), "默认 status=pending"
+    finally:
+        app.dependency_overrides.clear()

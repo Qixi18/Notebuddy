@@ -110,6 +110,137 @@ def test_search_course_rejects_foreign_material() -> None:
         assert "不属于当前课程" in outcome.payload_text
 
 
+def test_tool_specs_narrow_when_material_pinned() -> None:
+    """课件收窄模式：search_course 描述改为「已固定」，覆盖率与跨课程工具不挂（后者只是兜底）。"""
+    pinned = build_tool_specs(scope="course", editable_note=False, material_id="m1")
+    names = {item["function"]["name"] for item in pinned}
+    assert "get_note_coverage" not in names
+    assert "search_forest" not in names
+    search_desc = next(item["function"]["description"] for item in pinned if item["function"]["name"] == "search_course")
+    assert "已固定" in search_desc
+
+    global_pinned = build_tool_specs(scope="global", editable_note=False, material_id="m1")
+    assert "search_forest" not in {item["function"]["name"] for item in global_pinned}
+
+    # 不传 material_id 时行为不变（回归）
+    plain = build_tool_specs(scope="course", editable_note=False)
+    assert "get_note_coverage" in {item["function"]["name"] for item in plain}
+
+
+def test_search_course_injects_and_guards_pinned_material() -> None:
+    """收窄模式下：未传 material_id 注入当前值；显式传别的课件直接拒绝；传当前课件放行。"""
+    for db, ids in _world():
+        injected = execute_tool(
+            db, course_id=ids["course_a"], name="search_course",
+            arguments={"query": "行列式"}, material_id=ids["material_a"],
+        )
+        assert injected.chunks, "注入课件 id 后应命中该课件片段"
+        assert "第1讲 行列式" in injected.payload_text
+
+        override = execute_tool(
+            db, course_id=ids["course_a"], name="search_course",
+            arguments={"query": "行列式", "material_id": ids["material_b"]}, material_id=ids["material_a"],
+        )
+        assert not override.chunks and "已限定" in override.payload_text
+
+        same = execute_tool(
+            db, course_id=ids["course_a"], name="search_course",
+            arguments={"query": "行列式", "material_id": ids["material_a"]}, material_id=ids["material_a"],
+        )
+        assert same.chunks, "显式传当前课件应放行"
+
+        # 收窄不影响其他工具：read_note 仍可跨课件读课程笔记（D3：笔记工具保留）
+        note = execute_tool(
+            db, course_id=ids["course_a"], name="read_note",
+            arguments={"note_id": ids["note_a2"]}, scope="course", material_id=ids["material_a"],
+        )
+        assert "《矩阵》" in note.summary
+
+
+def test_discovery_specs_register_only_with_switch() -> None:
+    """P4 发现模式：开关开 + course/global 才注册 propose_note_edits（note_id 必填）；开关关行为不变。"""
+    on = build_tool_specs(scope="course", editable_note=False, allow_note_discovery=True)
+    names = {item["function"]["name"] for item in on}
+    assert "propose_note_edits" in names
+    spec = next(item["function"] for item in on if item["function"]["name"] == "propose_note_edits")
+    assert "note_id" in spec["parameters"]["required"]
+    assert "定位" in spec["description"]
+
+    global_on = build_tool_specs(scope="global", editable_note=False, allow_note_discovery=True)
+    assert "propose_note_edits" in {item["function"]["name"] for item in global_on}
+
+    # 开关关（悬浮坞）：course/global 且无打开笔记 → 不注册，行为与旧版一致
+    off = build_tool_specs(scope="course", editable_note=False)
+    assert "propose_note_edits" not in {item["function"]["name"] for item in off}
+
+    # note 档：注册的是「省略即锁定笔记」版，不带 note_id 必填
+    note_scope = build_tool_specs(scope="note", editable_note=True, allow_note_discovery=True)
+    note_spec = next(item["function"] for item in note_scope if item["function"]["name"] == "propose_note_edits")
+    assert "note_id" not in note_spec["parameters"]["required"]
+
+
+def test_propose_note_edits_discovery_targets_any_course_note() -> None:
+    """发现开启：course/global 档可对课程内任意笔记提交建议（pending，不直接改正文）。"""
+    for db, ids in _world():
+        outcome = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"note_id": ids["note_a2"], "rationale": "补全", "edits": [{"op": "append", "content": "新段落"}]},
+            scope="course", editable_note_id=None, allow_note_discovery=True,
+        )
+        assert "《矩阵》" in outcome.summary and "待" in outcome.summary
+        suggestion = db.get(NoteSuggestion, outcome.suggestions[0]["id"])
+        assert suggestion is not None and suggestion.status == "pending"
+        note = db.get(Note, ids["note_a2"])
+        db.refresh(note)
+        assert note.content_markdown == "# 矩阵", "确认前不得直接改动正文"
+
+        # 开关开着却没带 note_id → 引导先定位
+        missing = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "补全", "edits": [{"op": "append", "content": "新段落"}]},
+            scope="global", editable_note_id=None, allow_note_discovery=True,
+        )
+        assert "定位" in missing.payload_text
+
+        # 跨课程笔记被 load_note 课程护栏挡住（夹具没有 B 课程笔记，现造一篇）
+        foreign_node = db.query(KnowledgeNode).filter_by(course_id=ids["course_b"]).first()
+        foreign_note = Note(course_id=ids["course_b"], knowledge_node_id=foreign_node.id, title="阅读方法", content_markdown="# 阅读")
+        db.add(foreign_note)
+        db.flush()
+        foreign = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"note_id": foreign_note.id, "rationale": "补全", "edits": [{"op": "append", "content": "新段落"}]},
+            scope="course", editable_note_id=None, allow_note_discovery=True,
+        )
+        assert "不属于当前课程" in foreign.payload_text
+
+
+def test_propose_note_edits_without_discovery_keeps_single_target() -> None:
+    """开关关闭（坞）回归：没有打开的笔记 → 旧文案；打开了笔记却传别的 note_id → 仍拒绝。"""
+    for db, ids in _world():
+        locked = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"rationale": "补全", "edits": [{"op": "append", "content": "新段落"}]},
+            scope="course", editable_note_id=None,
+        )
+        assert "没有可编辑的笔记" in locked.summary
+
+        override = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"note_id": ids["note_a2"], "rationale": "补全", "edits": [{"op": "append", "content": "新段落"}]},
+            scope="course", editable_note_id=ids["note_a1"],
+        )
+        assert "超出可编辑范围" in override.summary
+
+        # note 档（发现开着也救不了）：目标必须是锁定的那一篇
+        note_scope = execute_tool(
+            db, course_id=ids["course_a"], name="propose_note_edits",
+            arguments={"note_id": ids["note_a2"], "rationale": "补全", "edits": [{"op": "append", "content": "新段落"}]},
+            scope="note", editable_note_id=ids["note_a1"], allow_note_discovery=True,
+        )
+        assert "超出可编辑范围" in note_scope.summary
+
+
 def test_read_note_respects_locked_scope() -> None:
     for db, ids in _world():
         outside = execute_tool(

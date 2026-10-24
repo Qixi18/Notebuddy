@@ -32,6 +32,7 @@ from app.ai.discipline import infer_context
 from app.ai.personas import DEFAULT_PERSONA_ID, resolve_persona
 from app.ai.prompts import build_agent_messages
 from app.core.config import settings
+from app.db.models import Material
 from app.retrieval.service import RetrievedChunk
 
 MAX_TOOL_ROUNDS = 6
@@ -87,10 +88,20 @@ def run_agent(
     learning_goal: str | None = None,
     history: list[tuple[str, str]] | None = None,
     teacher_persona: str = DEFAULT_PERSONA_ID,
+    allow_note_discovery: bool = False,
 ) -> Iterator[dict[str, Any]]:
     persona = resolve_persona(teacher_persona)
     teaching_context = infer_context(question, learning_goal)
-    specs = build_tool_specs(scope=scope, editable_note=bool(editable_note_id), allow_web=allow_web)
+    # 课件收窄（消息级）：标题进提示词，id 进工具装配与执行器（注入 + 拒覆盖）。
+    material_title: str | None = None
+    if material_id:
+        material = db.get(Material, material_id)
+        if material is not None:
+            material_title = material.lecture_title
+    specs = build_tool_specs(
+        scope=scope, editable_note=bool(editable_note_id), allow_web=allow_web,
+        material_id=material_id, allow_note_discovery=allow_note_discovery,
+    )
     messages = build_agent_messages(
         question,
         course_name=course_name,
@@ -100,6 +111,8 @@ def run_agent(
         persona=persona.id,
         history=history,
         reading_context=reading_context,
+        material_title=material_title,
+        allow_note_discovery=allow_note_discovery,
     )
     client = DeepSeekClient()
     if not client.configured:
@@ -173,6 +186,8 @@ def run_agent(
                     locked_note_id=locked_note_id,
                     editable_note_id=editable_note_id,
                     allow_web=allow_web,
+                    material_id=material_id,
+                    allow_note_discovery=allow_note_discovery,
                 )
                 collected_chunks.extend(outcome.chunks)
                 collected_web.extend(outcome.web_results)

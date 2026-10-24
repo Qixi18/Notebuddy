@@ -131,6 +131,21 @@ def get_note_suggestions(note_id: str, db: Session = Depends(get_db)) -> list[No
     ).all())
 
 
+@router.get("/courses/{course_id}/note-suggestions", response_model=list[NoteSuggestionRead])
+def get_course_note_suggestions(
+    course_id: str, status: str = "pending", db: Session = Depends(get_db)
+) -> list[NoteSuggestion]:
+    """按课程列待确认建议（P4）：改动栏是「本课程的待确认改动」，不承诺只属于本会话（D6）。"""
+    ensure_course(db, course_id)
+    return list(db.scalars(
+        select(NoteSuggestion)
+        .join(Note, NoteSuggestion.note_id == Note.id)
+        .where(Note.course_id == course_id, NoteSuggestion.status == status)
+        .order_by(NoteSuggestion.created_at.desc())
+        .options(selectinload(NoteSuggestion.note))
+    ).all())
+
+
 @router.post("/notes/{note_id}/suggestions", response_model=NoteSuggestionRead, status_code=201)
 def create_note_suggestion_endpoint(
     note_id: str, payload: dict, db: Session = Depends(get_db)
