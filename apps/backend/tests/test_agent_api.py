@@ -299,3 +299,23 @@ def test_agent_endpoint_forwards_note_discovery_and_lists_course_suggestions(tmp
         assert listed.json() == client.get(f"/api/v1/courses/{ids['course']}/note-suggestions").json(), "默认 status=pending"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_persist_unfinished_assistant_covers_partial_and_empty(tmp_path) -> None:
+    """v6 P2：断连兜底——有部分正文落 aborted；无正文落 failed 占位。"""
+    client, factory, ids = _client_with_db(tmp_path)
+    try:
+        from app.api.v1.agent import _persist_unfinished_assistant
+
+        with factory() as db:
+            conversation = db.get(Conversation, ids["conversation"])
+            _persist_unfinished_assistant(db, conversation, "已经流式生成的部分回答", None)
+            _persist_unfinished_assistant(db, conversation, "   ", None)
+            rows = db.query(ConversationMessage).filter_by(
+                conversation_id=ids["conversation"], role="assistant"
+            ).all()
+            assert [row.status for row in rows] == ["aborted", "failed"]
+            assert rows[0].content == "已经流式生成的部分回答"
+            assert rows[1].failure_type == "ClientDisconnected"
+    finally:
+        app.dependency_overrides.clear()

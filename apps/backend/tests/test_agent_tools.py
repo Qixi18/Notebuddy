@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
 from app.ai.agent_tools import build_tool_specs, execute_tool
@@ -69,7 +70,11 @@ def _build_world(db: Session) -> dict[str, str]:
 
 
 def _world():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         ids = _build_world(db)
@@ -434,3 +439,40 @@ def test_search_forest_covers_courses_and_skips_deleted() -> None:
         db.commit()
         after_delete = execute_tool(db, course_id=ids["course_a"], name="search_forest", arguments={"query": "阅读"})
         assert "没有匹配" in after_delete.payload_text, "已删除课程不得出现在全局搜索"
+
+
+def test_list_course_materials_and_read_page() -> None:
+    """P8 新工具：课件清单只列已完成课件；读页原文带讲次与页码标注；跨课程与越界页拒绝。"""
+    for db, ids in _world():
+        listed = execute_tool(db, course_id=ids["course_a"], name="list_course_materials", arguments={})
+        assert "第1讲 行列式" in listed.payload_text and ids["material_a"] in listed.payload_text
+        assert ids["material_b"] not in listed.payload_text, "不得列出其他课程的课件"
+
+        page = execute_tool(
+            db, course_id=ids["course_a"], name="read_material_page",
+            arguments={"material_id": ids["material_a"], "page_number": 1},
+        )
+        assert "第 1 页" in page.payload_text and "行列式" in page.payload_text
+
+        missing = execute_tool(
+            db, course_id=ids["course_a"], name="read_material_page",
+            arguments={"material_id": ids["material_a"], "page_number": 99},
+        )
+        assert "没有第 99 页" in missing.summary
+
+        foreign = execute_tool(
+            db, course_id=ids["course_a"], name="read_material_page",
+            arguments={"material_id": ids["material_b"], "page_number": 1},
+        )
+        assert "不属于当前课程" in foreign.summary
+
+
+def test_new_tools_in_specs_and_scoping() -> None:
+    """P8：新工具随 course/global 注册；note 档不注册；课件收窄模式下仍可用。"""
+    course_specs = build_tool_specs(scope="course", editable_note=False)
+    names = {item["function"]["name"] for item in course_specs}
+    assert {"list_course_materials", "read_material_page"} <= names
+    assert "list_course_materials" not in {item["function"]["name"] for item in build_tool_specs(scope="note", editable_note=False)}
+    # 收窄模式下清单/读页仍可用（用户可能想读收窄课件的某一页原文）
+    pinned = build_tool_specs(scope="course", editable_note=False, material_id="m1")
+    assert {"list_course_materials", "read_material_page"} <= {item["function"]["name"] for item in pinned}

@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 from app.ai.agent_read_tools import (
     _explain_term,
     _get_note_coverage,
+    _list_course_materials,
     _list_course_notes,
+    _read_material_page,
     _read_note,
     _search_course,
     _search_forest,
@@ -27,7 +29,9 @@ from app.ai.agent_read_tools import (
 )
 from app.ai.agent_tool_types import AgentScope, ToolOutcome
 from app.ai.note_edits import apply_note_edits
+from app.db.models import Course
 from app.knowledge.proposals import create_knowledge_proposal, create_note_suggestion
+from app.services.quiz import QuizSchemaError
 
 NOTE_SUGGESTION_MAX_CHARS = 20000
 _MAX_EDITS = 8
@@ -55,6 +59,7 @@ def build_tool_specs(
     allow_web: bool = True,
     material_id: str | None = None,
     allow_note_discovery: bool = False,
+    allow_quiz: bool = False,
 ) -> list[dict]:
     """按作用范围装配工具集：``note`` 只保留聚焦工具，``global`` 才解锁跨课程检索。
 
@@ -89,6 +94,20 @@ def build_tool_specs(
         ))
     if scope in ("course", "global"):
         specs.append(_spec("list_course_notes", "列出当前课程全部笔记的标题与 ID，用于定位要读的笔记。", {}, []))
+        specs.append(_spec(
+            "list_course_materials",
+            "列出当前课程全部已完成课件（ID、讲次、页数）。需要知道这门课有哪些讲、或准备收窄到某份课件/读取某页原文时先调用它。",
+            {}, [],
+        ))
+        specs.append(_spec(
+            "read_material_page",
+            "读取某份课件某一页的完整原文。检索片段是截断的，需要整页原文（如用户直接问第 N 页内容）时使用；课件与页码可先用 list_course_materials 确认。",
+            {
+                "material_id": {"type": "string", "description": "课件 ID"},
+                "page_number": {"type": "integer", "description": "页码（从 1 开始）"},
+            },
+            ["material_id", "page_number"],
+        ))
         if not material_id:
             specs.append(_spec(
                 "get_note_coverage",
@@ -175,7 +194,82 @@ def build_tool_specs(
             },
             ["note_id", "rationale", "edits"],
         ))
+    if allow_quiz and scope in ("course", "global"):
+        specs.append(_spec(
+            "generate_quiz",
+            "根据课程材料出一组自测题（选择题+简答题），学生在前端作答、系统自动判分讲评。"
+            "用户说「考考我/出几道题/测测我掌握得怎么样」时调用；用户指定某一讲时把 material_id 传给它。"
+            "不要在用户没要求测试时主动出题。",
+            {
+                "material_id": {"type": "string", "description": "可选：只针对某份课件出题"},
+                "note_id": {"type": "string", "description": "可选：只针对某篇笔记出题"},
+                "count": {"type": "integer", "description": "题目数量，1-5，默认 3"},
+                "focus": {"type": "string", "description": "可选：出题重点（如「内聚与耦合的区别」）"},
+            },
+            [],
+        ))
     return specs
+
+
+def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None = None) -> ToolOutcome:
+    """出自测卷（v6 P10）：素材 → 模型产出 → schema 硬门槛 → 落库 → suggestion 回前端。
+
+    schema 不合格由服务层带具体原因重试；重试仍不合格折算为文本回模型（不中断流）。
+    """
+    from app.services.quiz import (
+        _quiz_source,
+        create_quiz,
+        generate_quiz_payload,
+    )
+
+    material_id = str(arguments.get("material_id") or "") or None
+    note_id = str(arguments.get("note_id") or "") or None
+    try:
+        count = int(arguments.get("count") or 3)
+    except (TypeError, ValueError):
+        count = 3
+    count = max(1, min(5, count))
+    focus = str(arguments.get("focus") or "").strip()[:200]
+
+    note_markdown = ""
+    if note_id:
+        note, error = load_note(db, course_id, note_id)
+        if note is None:
+            return ToolOutcome("读取笔记失败", error)
+        note_markdown = note.content_markdown
+
+    source = _quiz_source(db, course_id=course_id, material_id=material_id, note_markdown=note_markdown)
+    if not source.strip():
+        return ToolOutcome(
+            "没有可出题的材料",
+            "这门课还没有解析完成的课件，也没有指定的笔记。请先提示用户上传课程资料，或指定一篇已有笔记。",
+        )
+    course = db.get(Course, course_id)
+    try:
+        payload = generate_quiz_payload(source, count=count, focus=focus, course_name=course.name if course else "课程")
+    except QuizSchemaError as exc:
+        return ToolOutcome(
+            "出题未通过校验",
+            f"生成的题目未通过质量校验（{exc}）。请向用户如实说明本次出题失败，建议换个重点再试。",
+        )
+    except Exception as exc:  # DeepSeekError 等 → 文本降级，不断流
+        return ToolOutcome(
+            "出题失败",
+            f"出题服务暂时不可用（{type(exc).__name__}）。请向用户说明并建议稍后再试。",
+        )
+    quiz = create_quiz(
+        db, course_id=course_id, conversation_id=conversation_id,
+        material_id=material_id, title=payload["title"], items=payload["items"],
+    )
+    return ToolOutcome(
+        f"出了 {len(payload['items'])} 道自测题《{quiz.title}》",
+        f"已创建自测卷《{quiz.title}》（{len(payload['items'])} 题，待学生作答）。"
+        "请在回答里简要介绍这套题考什么，学生在前端卡片上作答后系统自动判分。",
+        suggestions=[{
+            "type": "quiz", "id": quiz.id, "quiz_id": quiz.id,
+            "title": quiz.title, "item_count": len(payload["items"]),
+        }],
+    )
 
 
 def _web_search(db: Session, *, course_id: str, arguments: dict[str, Any], allow_web: bool = True) -> ToolOutcome:
@@ -315,10 +409,13 @@ _EXECUTORS = {
     "search_course": _search_course,
     "read_note": _read_note,
     "list_course_notes": _list_course_notes,
+    "list_course_materials": _list_course_materials,
+    "read_material_page": _read_material_page,
     "search_forest": _search_forest,
     "get_note_coverage": _get_note_coverage,
     "explain_term": _explain_term,
     "web_search": _web_search,
+    "generate_quiz": _generate_quiz,
     "propose_note_edits": _propose_note_edits,
     "propose_knowledge_node": _propose_knowledge_node,
 }
@@ -328,10 +425,13 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "search_course": ("course_id", "arguments"),
     "read_note": ("course_id", "arguments", "scope", "locked_note_id"),
     "list_course_notes": ("course_id",),
+    "list_course_materials": ("course_id",),
+    "read_material_page": ("course_id", "arguments"),
     "search_forest": ("course_id", "arguments"),
     "get_note_coverage": ("course_id", "arguments"),
     "explain_term": ("course_id", "arguments"),
     "web_search": ("course_id", "arguments", "allow_web"),
+    "generate_quiz": ("course_id", "arguments", "conversation_id"),
     "propose_note_edits": ("course_id", "arguments", "editable_note_id", "scope", "allow_note_discovery"),
     "propose_knowledge_node": ("course_id", "arguments"),
 }
@@ -349,6 +449,8 @@ def execute_tool(
     allow_web: bool = True,
     material_id: str | None = None,
     allow_note_discovery: bool = False,
+    allow_quiz: bool = False,
+    conversation_id: str | None = None,
 ) -> ToolOutcome:
     """执行一个工具调用；任何异常都折算成错误文本回给模型，绝不让循环中断。
 
@@ -381,6 +483,8 @@ def execute_tool(
         "editable_note_id": editable_note_id,
         "allow_web": allow_web,
         "allow_note_discovery": allow_note_discovery,
+        "allow_quiz": allow_quiz,
+        "conversation_id": conversation_id,
     }
     kwargs = {key: available[key] for key in _EXECUTOR_PARAMS.get(name, ())}
     try:

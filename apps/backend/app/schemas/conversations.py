@@ -145,6 +145,11 @@ class AgentMessageCreate(BaseModel):
     # 发现开关（P4）：允许 agent 自主定位课程内任意笔记并对其提交修改建议。
     # 默认 False——悬浮坞不传即行为不变；答疑页传 True。同时是 kill switch。
     allow_note_discovery: bool = False
+    # 出题开关（P10）：允许 agent 调 generate_quiz 出自测卷；同上，仅答疑页传 True。
+    allow_quiz: bool = False
+    # 学习模式（P9）：direct=直接答（默认）/ guided=引导式答疑（先诊断再提示，逐步展开）。
+    # 消息级参数，不写会话；悬浮坞不传即行为不变。
+    learning_mode: Literal["direct", "guided"] = "direct"
 
     @model_validator(mode="after")
     def _material_id_only_for_course_scope(self) -> "AgentMessageCreate":

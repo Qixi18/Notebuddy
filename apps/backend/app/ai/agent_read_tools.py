@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.agent_tool_types import AgentScope, ToolOutcome
-from app.db.models import Course, Material, Note
+from app.db.models import Course, Material, MaterialPage, Note, PageBlock
 from app.forest.service import visible_note_predicate
 from app.retrieval.rerank import rerank
 from app.retrieval.service import RetrievedChunk, retrieve
@@ -169,3 +169,49 @@ def _explain_term(db: Session, *, course_id: str, arguments: dict[str, Any]) -> 
         for source in response.sources
     )
     return ToolOutcome(f"定位术语「{term}」的课件原文", truncate("\n".join(lines)))
+
+
+def _list_course_materials(db: Session, *, course_id: str) -> ToolOutcome:
+    """列出课程全部已完成课件（v6 P8）：agent 由此获得可检索的讲次清单，自主规划收窄。"""
+    rows = db.execute(
+        select(Material.id, Material.lecture_title, Material.page_count)
+        .where(
+            Material.course_id == course_id,
+            Material.deleted_at.is_(None),
+            Material.status == "completed",
+        )
+        .order_by(Material.created_at)
+    ).all()
+    if not rows:
+        return ToolOutcome("课程暂无课件", "这门课还没有解析完成的课件。")
+    lines = [f"- {material_id} 《{title}》（{page_count or 0} 页）" for material_id, title, page_count in rows]
+    return ToolOutcome(f"列出课程课件 {len(rows)} 份", truncate("\n".join(lines), LIST_RESULT_MAX_CHARS))
+
+
+def _read_material_page(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
+    """读某份课件某页的完整原文（v6 P8）：检索片段是截断的，用户问「第 N 页写了什么」时用。"""
+    material_id = str(arguments.get("material_id") or "")
+    material = db.get(Material, material_id) if material_id else None
+    if material is None or material.course_id != course_id or material.deleted_at is not None:
+        return ToolOutcome("课件不属于当前课程", "指定的 material_id 不属于当前课程。")
+    try:
+        page_number = int(arguments.get("page_number"))
+    except (TypeError, ValueError):
+        return ToolOutcome("页码无效", "请提供整数 page_number。")
+    page = db.scalar(
+        select(MaterialPage).where(MaterialPage.material_id == material_id, MaterialPage.page_number == page_number)
+    )
+    if page is None:
+        total = material.page_count or 0
+        return ToolOutcome(
+            f"《{material.lecture_title}》没有第 {page_number} 页",
+            f"该课件共 {total} 页；可用 list_course_materials 确认讲次，或改用 search_course 检索内容。",
+        )
+    blocks = list(db.scalars(
+        select(PageBlock).where(PageBlock.page_id == page.id).order_by(PageBlock.position)
+    ).all())
+    body = "\n".join(block.content for block in blocks if block.content.strip()) or page.raw_text or "（本页没有可读文本）"
+    return ToolOutcome(
+        f"读取《{material.lecture_title}》第 {page_number} 页",
+        truncate(f"[课程资料：{material.lecture_title} | 第 {page_number} 页]\n{body}"),
+    )
