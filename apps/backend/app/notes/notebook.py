@@ -6,14 +6,14 @@ from app.schemas.notebook import ChapterRead, NotebookRead, SectionRead
 
 
 def default_notebook(db: Session, course: Course, *, create: bool = True) -> Notebook | None:
-    book = db.scalar(select(Notebook).where(Notebook.course_id == course.id, Notebook.is_default.is_(True)))
+    book = db.scalar(select(Notebook).where(Notebook.course_id == course.id, Notebook.is_default.is_(True), Notebook.deleted_at.is_(None)))
     if book is None and create:
         book = db.get(Notebook, default_notebook_id(db.connection(), course.id))
     return book
 
 
 def list_course_notebooks(db: Session, course_id: str) -> list[Notebook]:
-    return list(db.scalars(select(Notebook).where(Notebook.course_id == course_id)
+    return list(db.scalars(select(Notebook).where(Notebook.course_id == course_id, Notebook.deleted_at.is_(None))
                            .order_by(Notebook.display_order, Notebook.created_at, Notebook.id)).all())
 
 
