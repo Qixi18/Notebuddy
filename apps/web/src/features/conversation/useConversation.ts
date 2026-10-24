@@ -60,7 +60,11 @@ export type ConversationState = {
   error?: string
   /** agent 执行中的实时状态；非 agent 提问时为 null */
   agentRun: AgentRunState | null
-  selectConversation: (id: string) => Promise<void>
+  /** 搜索命中消息带来的定位目标：历史加载完后由线程滚动高亮，消费后清除（P6） */
+  pendingMessageId?: string
+  selectConversation: (id: string, pendingMessageId?: string) => Promise<void>
+  /** 线程完成定位高亮后调用，清掉定位目标 */
+  consumePendingMessage: () => void
   /** 重命名会话（右键菜单）；成功更新本地列表标题，返回是否成功 */
   renameConversation: (id: string, title: string) => Promise<boolean>
   /** 删除整段会话（右键菜单）；删的是当前会话时切换到剩余最近一条，或清空等待下次新建 */
@@ -107,6 +111,7 @@ export function useConversation(
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string>()
   const [agentRun, setAgentRun] = useState<AgentRunState | null>(null)
+  const [pendingMessageId, setPendingMessageId] = useState<string>()
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
   const historyRequestRef = useRef(0)
@@ -130,6 +135,7 @@ export function useConversation(
     setHistory([])
     setError(undefined)
     setAgentRun(null)
+    setPendingMessageId(undefined)
     setReady(false)
     creatingRef.current = null
     if (!courseId) {
@@ -154,10 +160,12 @@ export function useConversation(
     return () => { active = false }
   }, [courseId])
 
-  const selectConversation = useCallback(async (id: string) => {
+  const selectConversation = useCallback(async (id: string, pendingMessageId?: string) => {
     const request = ++historyRequestRef.current
     const requestCourseId = courseRef.current
     setConversationId(id)
+    /* P6：带消息命中的跳转记录定位目标；普通切换传 undefined 顺带清掉遗留目标 */
+    setPendingMessageId(pendingMessageId)
     setHistory([])
     setBusy(true)
     setError(undefined)
@@ -175,6 +183,9 @@ export function useConversation(
       }
     }
   }, [])
+
+  /* 线程完成滚动高亮后消费定位目标 */
+  const consumePendingMessage = useCallback(() => setPendingMessageId(undefined), [])
 
   const renameConversation = useCallback(async (id: string, title: string): Promise<boolean> => {
     const trimmed = title.trim()
@@ -452,5 +463,5 @@ export function useConversation(
     [history, conversationId, greeting],
   )
 
-  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, selectConversation, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
+  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, pendingMessageId, selectConversation, consumePendingMessage, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
 }

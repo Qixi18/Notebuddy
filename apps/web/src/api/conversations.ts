@@ -8,8 +8,20 @@ export type ConversationOwnership = {
   noteTitle?: string | null
 }
 
+/** P6 消息全文搜索的命中项：snippet 已按关键词截窗，前端负责高亮渲染 */
+export type ConversationMessageHit = {
+  conversation_id: string
+  conversation_title: string
+  message_id: string
+  message_role: string
+  snippet: string
+  created_at: string
+}
+
 export const conversationApi = {
   listConversations: (courseId: string) => request<Conversation[]>(`/api/v1/courses/${courseId}/conversations`),
+  searchMessages: (courseId: string, q: string) =>
+    request<ConversationMessageHit[]>(`/api/v1/courses/${courseId}/conversations/search?q=${encodeURIComponent(q)}`),
   renameConversation: (conversationId: string, title: string) =>
     request<Conversation>(`/api/v1/conversations/${conversationId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },

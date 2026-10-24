@@ -437,6 +437,44 @@
 .workspace-agent-live.is-aborted .workspace-msg-head em { color: var(--nb-clay-ink); }
 .workspace-agent-aborted-note { margin: 0 0 6px; color: var(--nb-clay-ink); font-size: 11px; line-height: 1.6; }
 
+/* ---- P6 搜索：面板两级结果 + 命中高亮 + 消息定位闪烁 ---- */
+.workspace-palette-group {
+  margin: 2px 0 4px;
+  color: var(--nb-muted);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+}
+.workspace-palette-list ul { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.workspace-palette-hit-title {
+  display: block;
+  font-weight: 600;
+  color: var(--nb-forest-deep);
+  font-size: 12px;
+}
+.workspace-palette-snippet {
+  display: block;
+  color: var(--nb-muted-strong, #46544a);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.workspace-palette-snippet mark {
+  background: #fdf3d8;
+  color: #8a6d3b;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.workspace-msg.is-flash {
+  animation: nb-msg-flash 1.6s var(--nb-ease, ease) both;
+}
+@keyframes nb-msg-flash {
+  0%, 55% { background: #fdf3d8; box-shadow: 0 0 0 3px #fdf3d8; }
+  100% { background: transparent; box-shadow: 0 0 0 3px transparent; }
+}
+
 /* ---- P4 多目标建议：卡片标注目标笔记 + 改动栏按笔记分组 ---- */
 .agent-card-note {
   display: inline-block;

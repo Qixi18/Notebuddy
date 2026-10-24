@@ -492,6 +492,8 @@ export function AssistantPage() {
           onRetry={retryQuestion}
           onFollowUp={useStarter}
           agentRun={agentRun}
+          highlightMessageId={conversation.pendingMessageId}
+          onHighlightConsumed={conversation.consumePendingMessage}
           extras={(
             <>
               <NoteSuggestionCards
@@ -563,7 +565,12 @@ export function AssistantPage() {
         <ConversationSearch
           conversations={conversation.conversations}
           conversationId={conversation.conversationId}
+          courseId={courseId}
           onSelect={(id) => void conversation.selectConversation(id)}
+          onSelectMessage={(conversationId, messageId) => {
+            /* P6 消息命中：切会话时带上定位目标，历史加载完由线程滚动高亮 */
+            void conversation.selectConversation(conversationId, messageId)
+          }}
           onClose={() => setPaletteOpen(false)}
         />
       )}

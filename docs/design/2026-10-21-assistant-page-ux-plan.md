@@ -11,7 +11,22 @@
 
 ### 实施记录
 
-- **第三批（P4 agent 自主定位并修改笔记）已于 2026-10-24 落地**（尚未提交；基线为合并上游 12 个提交后的 `6866402`）：
+- **第四批（P6 会话全文搜索）已于 2026-10-24 落地并提交**：
+  - 后端 3 文件：`services/conversations.py`（`search_course_messages`：JOIN 消息表 `content LIKE`，提问与回答都参与匹配——「上周问过的一个问题」搜的正是 user 消息；`_hit_snippet` 按首个命中位置截 ±60 字符窗口）、`schemas/conversations.py` + `schemas/api.py`（`ConversationMessageHit`）、`api/v1/conversations.py`（`GET /courses/{id}/conversations/search?q=`，query 参数用 `fastapi.Query`）。
+  - 前端 5 文件：`api/conversations.ts`（`searchMessages` 封装）、`useConversation.ts`（`pendingMessageId` 状态：`selectConversation(id, pendingMessageId?)` 携带、`consumePendingMessage` 消费、切课程清理）、`ConversationList.tsx`（面板两级结果——会话组本地标题过滤照旧 + 消息组 300ms 防抖走后端，命中片段 `<mark>` 高亮、标注会话名与「提问/回答」）、`AssistantThread.tsx`（消息元素加 `data-message-id`；`highlightMessageId` 就绪后 `scrollIntoView` 居中 + 1.8s 闪烁高亮后消费）、`assistant-workspace.css`（分组标签/命中片段/闪烁动画）。
+  - 定位时序按计划处理：selectConversation 先清空 history 再异步加载，高亮不靠「切完再找」，而是目标随选择传入、历史就绪且消息在场才滚动，消费后清除。
+  - 新增测试 2 个：后端搜索命中（本课程命中含片段、跨课程不串、空 q 空、无命中空）；前端面板两级结果（标题组照旧 + 消息组 `<mark>` 高亮，点击命中带 `selectConversation(convId, msgId)`）。
+  - 验证：`tsc -b && vite build` 通过；vitest 49 文件（仅已知 flaky 组，隔离复跑 13/13）；test:navigation 38/38；后端全量 283 passed（唯一失败仍为上游自带 notebook 备份用例）。
+  - 待真机：浏览器里 Ctrl+K 搜一个历史问题关键词，看两级结果与点击后滚动高亮的观感。
+- **2026-10-24 真机走查（API 层，真实模型跑通）**：测试后端跑最新代码（8010 端口，主 8000 被一个无法定位的旧进程占用），结论如下——
+  - **P3 验收 2 ✅**：course 档带 material_id 真实模型跑完整 agent 链路（无降级），final.sources 的 material_id 集合 = 收窄课件单元素，课件依据只来自该课件。
+  - **P4 验收 1/2/3 ✅**：global 档自然语言「把《内聚与耦合》的方法与应用补全」→ agent 定位成功 → final 携带 note_suggestion（note_title 正确）→ 确认前正文未变 → 课程级端点可见 → 采纳写入（revision 7→8，新增内容带课程资料标注，diff 基准无串写）→ 撤销还原（内容与原文逐字相等，revision 8→9）。
+  - **P4 kill switch ✅**：同一问题不传开关（坞默认）→ agent 能读笔记与课件但 **0 条建议产出**，回答如实说明无法直接修改——坞行为与旧版一致。
+  - **P1-3 实测结论**：客户端断开后服务端生成器被取消——**中断后刷新页面 = 有问无答**（提问已落库保留，回答不落库）。前端「已中断」本地态仅不刷新时有意义；若要中断后保留部分答案，需后端把持久化改为逐块落库（后续项）。
+  - **P2-2 实测结论**：同一问题重发两次 → 历史两条相同提问气泡，已知限制成立（去重依赖 §7-1 后端重试能力）。
+  - **数据还原**：走查产生的建议行已删、4 个走查会话已删、《内聚与耦合》正文逐字还原（revision 因采纳/撤销净 +2，内容为准）；既有 pending 建议 `aef37d06` 未动。
+  - **仍需浏览器人工确认（纯视觉）**：P5a 锁定预告文案位置、来源 chip 的渲染观感、坞内收窄下拉的交互。
+- **第三批（P4 agent 自主定位并修改笔记）已于 2026-10-24 落地**（提交 `5037a0e`；基线为合并上游 12 个提交后的 `6866402`）：
   - 后端 8 文件：`schemas/conversations.py`（`allow_note_discovery: bool = False`）、`api/v1/agent.py`（透传）、`ai/agent_loop.py`（透传至工具装配/执行器/提示词）、`ai/agent_tools.py`（`build_tool_specs` 发现模式注册 note_id 必填版 `propose_note_edits`，开关关闭行为逐字节一致；`_propose_note_edits` 多目标——note 档必须等于锁定篇、开关关闭必须等于打开篇、发现开启 course/global 可定位任意篇，`load_note` 课程护栏兜底）、`ai/prompts.py`（发现模式独立范围标签 + `AGENT_DISCOVERY_RULES` 追加 system 消息，`AGENT_SYSTEM` 常量不动——提示词与工具集同步条件化）、`schemas/proposals.py` + `db/models.py`（`note_title` 字段 + property）、`api/v1/notes.py`（`GET /courses/{id}/note-suggestions?status=pending`）。
   - 前端 9 文件（比计划多 1 个 `useConversation.ts` 透传）：`api/agentStream.ts`（payload 开关）、`api/notes.ts`（课程级封装）、`features/conversation/useConversation.ts`（`AgentAskOptions.allowNoteDiscovery` 透传）、`features/assistant/useNoteSuggestions.ts`（**重写为多目标状态机**：课程级/逐目标双模式拉取、`notesById` 正文+revision 缓存（knownNotes 种子 + 按 note_id 补拉）、diff/写入/撤销全部按 `suggestion.note_id` 路由、applyAll 按笔记分组且正文缓存缺失的组跳过、review 返回值防御性合并（字段不全不入缓存））、`AgentCards.tsx`（`currentContentByNoteId` + 卡上标注目标笔记）、`ChangesPanel.tsx`（标题改「待确认改动（本课程）」+ 按笔记分组标签）、`pages/AssistantPage.tsx`（开关 true + 课程级 hook + 预览按目标笔记取正文）、`AssistantDock.tsx`（单目标语义不变：targets=[当前笔记]、不传 courseId/开关）、`assistant-workspace.css`（`.agent-card-note` + `.workspace-change-group`）。
   - 数据安全红线已落测试：`note-suggestion.test.tsx`「applyAll groups by note」断言 A/B 两篇各自以自己正文为基准、互不串写。

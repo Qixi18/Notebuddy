@@ -14,9 +14,12 @@ vi.mock('../src/api', () => ({
     /* P4：答疑页挂载即按课程拉待确认建议（空列表即可） */
     listCourseSuggestions: vi.fn(async () => []),
     getNote: vi.fn(),
+    /* P6：消息全文搜索 */
+    searchMessages: vi.fn(async () => []),
   },
 }))
 
+import { api } from '../src/api'
 import type { ConversationMessage } from '../src/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { AssistantPage } from '../src/pages/AssistantPage'
@@ -320,8 +323,34 @@ test('用户气泡显示提问时间', () => {
   expect(document.querySelectorAll('.workspace-msg-user time').length).toBe(1)
 })
 
-/* ---- P3 课件收窄 ---- */
+/* ---- P6 消息全文搜索 ---- */
 
+test('搜索面板消息命中：显示命中片段，点击带定位目标切换会话', async () => {
+  vi.mocked(api.searchMessages).mockResolvedValueOnce([
+    {
+      conversation_id: 'conv-0', conversation_title: '堆排序的时间复杂度',
+      message_id: 'msg-hit-1', message_role: 'user',
+      snippet: '……复杂度分析里提到的红黑树旋转可以类比……', created_at: '2026-10-20T14:01:00Z',
+    },
+  ])
+  const { conversation } = renderPage()
+  fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
+  fireEvent.change(screen.getByLabelText('搜索会话标题'), { target: { value: '旋转' } })
+
+  /* 标题不命中的关键词走消息级搜索：高亮关键词 + 显示会话名（标题命中的会话组照常显示） */
+  await waitFor(() => {
+    const mark = document.querySelector('.workspace-palette-snippet mark')
+    expect(mark?.textContent).toBe('旋转')
+  })
+  const groups = document.querySelectorAll('.workspace-palette-group')
+  expect([...groups].map((node) => node.textContent)).toEqual(['会话', '消息'])
+  expect(document.querySelector('.workspace-palette-hit-title')?.textContent).toBe('堆排序的时间复杂度')
+
+  fireEvent.click(document.querySelector('.workspace-palette-snippet')?.closest('button') as Element)
+  expect(conversation.selectConversation).toHaveBeenCalledWith('conv-0', 'msg-hit-1')
+})
+
+/* ---- P3 课件收窄 ---- */
 /* 「整门课程」是两步：先选档（展开课程子菜单），再点当前课程落档 */
 function pickCourseScope() {
   fireEvent.click(screen.getAllByTitle('修改提问范围')[0])

@@ -49,6 +49,50 @@ class ConversationUnavailable(Exception):
         super().__init__(detail)
 
 
+def _hit_snippet(content: str, keyword: str, *, window: int = 60) -> str:
+    """取首个命中位置前后的上下文窗口；中文按字符数截，无大小写但统一按 lower 匹配。"""
+    lowered = content.lower()
+    index = lowered.find(keyword.lower())
+    if index < 0:
+        return content[: window * 2] + ("…" if len(content) > window * 2 else "")
+    start = max(0, index - window)
+    end = min(len(content), index + len(keyword) + window)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(content) else ""
+    return f"{prefix}{content[start:end]}{suffix}"
+
+
+def search_course_messages(db: Session, course_id: str, query: str, *, limit: int = 20) -> list[dict]:
+    """课程内消息全文搜索（P6）：提问与回答都参与匹配——「上周问过的一个问题」搜的是 user 消息。
+
+    返回消息级命中（含会话标题与命中片段），按消息时间倒序；片段在前端按关键词二次定位高亮。
+    """
+    keyword = query.strip()
+    if not keyword:
+        return []
+    rows = db.execute(
+        select(ConversationMessage, Conversation)
+        .join(Conversation, ConversationMessage.conversation_id == Conversation.id)
+        .where(
+            Conversation.course_id == course_id,
+            ConversationMessage.content.like(f"%{keyword}%"),
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(limit)
+    ).all()
+    return [
+        {
+            "conversation_id": conversation.id,
+            "conversation_title": conversation.title,
+            "message_id": message.id,
+            "message_role": message.role,
+            "snippet": _hit_snippet(message.content, keyword),
+            "created_at": message.created_at,
+        }
+        for message, conversation in rows
+    ]
+
+
 def load_conversation(db: Session, conversation_id: str) -> Conversation:
     conversation = db.scalar(
         select(Conversation).where(Conversation.id == conversation_id).options(

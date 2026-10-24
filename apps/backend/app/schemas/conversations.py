@@ -49,6 +49,17 @@ class ConversationTitleUpdate(BaseModel):
         return stripped
 
 
+class ConversationMessageHit(BaseModel):
+    """课程内消息全文搜索的命中项（P6）：命中片段已按关键词截窗，前端负责高亮渲染。"""
+
+    conversation_id: str
+    conversation_title: str
+    message_id: str
+    message_role: str
+    snippet: str
+    created_at: datetime
+
+
 class MessageEvidenceRead(BaseModel):
     id: str
     claim_key: str

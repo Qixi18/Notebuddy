@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -20,6 +20,7 @@ from app.db.models import (
 from app.schemas.api import (
     ConversationCreate,
     ConversationMessageCreate,
+    ConversationMessageHit,
     ConversationMessageRead,
     ConversationRead,
     ConversationTitleUpdate,
@@ -30,6 +31,7 @@ from app.services.conversations import (
     DEFAULT_CONVERSATION_TITLE,
     derive_conversation_title,
     persist_assistant_message,
+    search_course_messages,
 )
 
 router = APIRouter()
@@ -155,6 +157,15 @@ def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> 
 def list_conversations(course_id: str, db: Session = Depends(get_db)) -> list[Conversation]:
     ensure_course(db, course_id)
     return list(db.scalars(select(Conversation).where(Conversation.course_id == course_id).order_by(Conversation.updated_at.desc())).all())
+
+
+@router.get("/courses/{course_id}/conversations/search", response_model=list[ConversationMessageHit])
+def search_course_conversations(
+    course_id: str, q: str = Query(default="", max_length=120), db: Session = Depends(get_db)
+) -> list[dict]:
+    """课程内会话消息全文搜索（P6）：提问与回答都参与匹配，返回消息级命中片段。"""
+    ensure_course(db, course_id)
+    return search_course_messages(db, course_id, q)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[ConversationMessageRead])
