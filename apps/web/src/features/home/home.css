@@ -107,7 +107,7 @@
   .app-sidebar-home .home-sidebar-quote { display: none; }
   .app-shell-home .app-sidebar-home .sidebar-footer { display: flex; margin: 0; padding: 0; border: 0; }
   .app-sidebar-home .sidebar-nav { gap: 5px; }
-  .app-sidebar-home .sidebar-link, .app-shell-home.app-shell-sidebar-collapsed .sidebar-link { min-width: 65px; width: auto; gap: 0; padding: 4px 10px; font-size: 10px; border-radius: 4px; }
+  .app-sidebar-home .sidebar-link, .app-shell-home.app-shell-sidebar-collapsed .sidebar-link { min-width: 72px; width: auto; gap: 0; padding: 4px 10px; font-size: 12px; border-radius: 4px; }
   .app-sidebar-home .sidebar-link-icon { font-size: 20px; }
   .app-sidebar-home .brand-lockup strong { font-size: 20px; }
   .app-shell-home .app-main-home { min-height: 0; }
@@ -118,7 +118,7 @@
   .home-garden-page .home-canvas { padding-inline: 20px; }
   .home-garden-header { flex-wrap: wrap; gap: 18px; padding-bottom: 22px; }
   .home-garden-page .home-garden-header h1 { font-size: 30px; letter-spacing: 1px; }
-  .home-garden-page .home-garden-header p { max-width: 300px; font-size: 11px; line-height: 1.8; margin-top: 10px; }
+  .home-garden-page .home-garden-header p { max-width: 300px; font-size: 13px; line-height: 1.7; margin-top: 10px; }
   .home-garden-actions { width: 100%; justify-content: space-between; }
   .home-garden-actions button { padding-inline: 16px; }
   .home-garden-page .kt-toolbar { flex-wrap: wrap; gap: 0; padding-top: 5px; }
@@ -141,7 +141,7 @@
 }
 @container home-garden (max-width: 620px) {
   .home-garden-page .home-garden-header h1 { font-size: 30px; letter-spacing: 1px; }
-  .home-garden-page .home-garden-header p { font-size: 11px; line-height: 1.8; }
+  .home-garden-page .home-garden-header p { font-size: 13px; line-height: 1.7; }
   .home-garden-page .kt-toolbar { flex-wrap: wrap; gap: 0; padding-top: 5px; }
   .home-search { width: 100%; min-width: 0; }
   .home-search-field kbd { display: none; }

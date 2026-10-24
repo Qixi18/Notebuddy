@@ -6,18 +6,18 @@
 .kt-camera-controls button, .kt-contents button { color: #284b39; background: transparent; border: 0; cursor: pointer; font: inherit; min-height: 44px; min-width: 44px; }
 .kt-camera-controls button { border-radius: 7px; font-size: 19px; }
 .kt-camera-controls button:hover { background: #e5e7d4; }
-.kt-camera-controls output { font: 13px system-ui, sans-serif; min-width: 40px; text-align: center; }
+.kt-camera-controls output { font: 13px var(--nb-sans); min-width: 40px; text-align: center; }
 .kt-overview-controls { position: absolute; left: 18px; bottom: 54px; max-height: 150px; max-width: calc(100% - 36px); overflow: auto; display: flex; flex-wrap: wrap; gap: 8px; padding: 6px; background: #f7f5eaee; border: 1px solid #b5b99c; border-radius: 8px; }
-.kt-overview-controls button { min-height: 44px; min-width: 44px; padding: 6px 12px; border: 1px solid #b5b99c; border-radius: 6px; color: #284b39; background: #fcfbf3; cursor: pointer; font: 13px 'Microsoft YaHei', system-ui, sans-serif; }
+.kt-overview-controls button { min-height: 44px; min-width: 44px; padding: 6px 12px; border: 1px solid #b5b99c; border-radius: 6px; color: #284b39; background: #fcfbf3; cursor: pointer; font: 13px var(--nb-sans); }
 .kt-overview-controls span { margin-left: 8px; color: #667d42; font-size: 11px; }
 .kt-overview-controls button:focus-visible { outline: 2px solid #6f8650; outline-offset: -2px; }
 .kt-action { cursor: pointer; outline: none; }
 .kt-action text { pointer-events: none; }
-.kt-course-title, .kt-book-title { font-family: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun', serif; }
+.kt-course-title, .kt-book-title { font-family: var(--nb-sans); }
 .kt-course-title { fill: #284b39; font-size: 25px; font-weight: 700; letter-spacing: 1px; }
 .kt-book-title { fill: #344c36; font-size: 17px; font-weight: 600; }
-.kt-note-label { fill: #334b35; font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif; }
-.kt-state { fill: #54624b; font: 12px 'Microsoft YaHei', system-ui, sans-serif; }
+.kt-note-label { fill: #334b35; font-family: var(--nb-sans); }
+.kt-state { fill: #54624b; font: 12px var(--nb-sans); }
 .kt-tree-planned .kt-branch image, .kt-tree-planned [data-leaf-paint] image { opacity: .65; filter: saturate(.42); }
 .kt-tree-planned .kt-sapling-crown image { opacity: .86; filter: saturate(.65); }
 .kt-tree-completed .kt-branch image, .kt-tree-completed [data-leaf-paint] image { filter: saturate(1.1) brightness(.83); }
@@ -30,7 +30,7 @@
 .kt-action:hover .kt-note-label-bg, .kt-action:focus-visible .kt-note-label-bg { fill: #cfe0b9; stroke: #7a935f; }
 .kt-book-action:hover .kt-book-plaque, .kt-book-action:focus-visible .kt-book-plaque { stroke: #8e9f69; fill: #edeecf; }
 .kt-root:hover > path:first-of-type, .kt-root:focus-visible > path:first-of-type { stroke: #7e925f; stroke-width: 2.8; }
-.kt-aggregate text { fill: #45583b; font: 12px 'Microsoft YaHei', system-ui, sans-serif; }
+.kt-aggregate text { fill: #45583b; font: 12px var(--nb-sans); }
 .kt-aggregate:hover rect, .kt-aggregate:focus-visible rect { fill: #e1e5c8; stroke: #798c57; stroke-width: 2; }
 .kt-vine:hover .kt-vine-paint, .kt-vine:focus-visible .kt-vine-paint, .kt-vine-selected .kt-vine-paint { stroke: #8c883e; stroke-width: 4; }
 .kt-course-directory { outline: none; }
@@ -44,11 +44,11 @@
 .kt-vine-group-list button > span { grid-column: 1 / -1; font-size: 12px; line-height: 1.85; color: #56664c; }
 .forest-dialog .kt-vine-group-list button:hover, .forest-dialog .kt-vine-group-list .kt-vine-list-selected { background: #edf1df; border-color: #8b9e73; }
 .forest-dialog .forest-relation-selected { border-color: #879b6e; background: #f5f7e9; box-shadow: inset 3px 0 #6d8555; }
-.kt-hint { position: absolute; bottom: 10px; left: 22px; pointer-events: none; margin: 0; padding: 7px 10px; font: 12px 'Microsoft YaHei', system-ui, sans-serif; color: #4b5e46; background: #f7f5eac9; border-radius: 5px; }
-.kt-empty { position: absolute; inset: 42% 0 auto; text-align: center; font-family: 'STSong', 'SimSun', serif; }
+.kt-hint { position: absolute; bottom: 10px; left: 22px; pointer-events: none; margin: 0; padding: 7px 10px; font: 12px var(--nb-sans); color: #4b5e46; background: #f7f5eac9; border-radius: 5px; }
+.kt-empty { position: absolute; inset: 42% 0 auto; text-align: center; font-family: var(--nb-sans); }
 .kt-contents { position: absolute; z-index: 3; top: 80px; right: 18px; bottom: 52px; width: min(360px, calc(100% - 36px)); display: flex; flex-direction: column; padding: 20px; box-sizing: border-box; background: #fcfbf3fa; border: 1px solid #b5b99c; box-shadow: 0 9px 32px #34452f1a; border-radius: 8px; }
 .kt-contents-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.kt-contents h2 { margin: 0; font: 600 21px 'STSong', 'SimSun', serif; overflow-wrap: anywhere; }
+.kt-contents h2 { margin: 0; font: 600 21px var(--nb-sans); overflow-wrap: anywhere; }
 .kt-contents p { color: #5c6952; font-size: 12px; margin: 8px 0 16px; }
 .kt-contents-scroll { overflow: auto; flex: 1; min-height: 0; scroll-padding: 8px; }
 .kt-contents-row { display: flex; border-bottom: 1px solid #dedfcc; }

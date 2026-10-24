@@ -10,7 +10,7 @@
 .forest-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 26px 36px 22px; border-bottom: 1px solid #e5eadb; background: #fafbf7; flex-shrink: 0; }
 .forest-heading { display: flex; align-items: center; gap: 16px; }
 .forest-heading svg { width: 43px; height: 43px; stroke: #668357; fill: #dbe6ce; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
-.forest-heading h1 { font-family: 'STKaiti', 'KaiTi', 'Noto Serif SC', 'Songti SC', serif; font-weight: 600; font-size: 29px; letter-spacing: 2px; margin: 0; }
+.forest-heading h1 { font-family: var(--nb-sans); font-weight: 600; font-size: 29px; letter-spacing: 2px; margin: 0; }
 .forest-heading p { margin: 5px 0 0; color: #839077; font-size: 12px; letter-spacing: .8px; }
 .forest-header-actions { display: flex; align-items: center; gap: 14px; }
 .forest-header-actions button, .forest-dialog button, .forest-course-panel button { background: transparent; border: 1px solid #d7dfcb; color: #4b6442; padding: 9px 14px; border-radius: 7px; }
@@ -20,7 +20,7 @@
 .app-main.app-main-home { padding: 0; background: #f7f5ea; }
 .home-tree-page { width: 100%; height: 100dvh; min-height: 620px; display: flex; flex-direction: column; }
 .home-tree-surface { position: relative; flex: 1; min-height: 440px; }
-.home-tree-page h1 { font: 600 28px 'Songti SC', 'SimSun', serif; color: #284b39; margin: 0; }
+.home-tree-page h1 { font: 600 28px var(--nb-sans); color: #284b39; margin: 0; }
 .home-tree-page header p { font-size: 13px; color: #62745d; }
 .home-tree-page .forest-header-actions a { color: #284b39; }
 .forest-settings-wrap { position: absolute; top: 90px; right: 20px; width: 320px; max-height: calc(100% - 120px); overflow: auto; background: #fafbf7; border: 1px solid #d7dfcb; padding: 12px; z-index: 6; }
@@ -53,38 +53,38 @@
 .forest-minimap circle:hover, .forest-minimap circle:focus { stroke: #9ab583; }
 .forest-course-panel { position: absolute; right: 18px; top: 75px; bottom: 132px; z-index: 4; width: 314px; padding: 20px; border: 1px solid #dbe3cf; border-radius: 12px 10px 14px 10px; background: #fcfdf8f7; box-shadow: 0 8px 30px #5263400c; overflow: auto; scrollbar-width: thin; scrollbar-color: #d3dcc7 transparent; }
 .forest-course-panel > header { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
-.forest-course-panel > header small { font-size: 10px; color: #849377; }
-.forest-course-panel h2 { font-family: 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; font-size: 24px; margin: 6px 0 0; }
+.forest-course-panel > header small { font-size: 11px; color: #849377; }
+.forest-course-panel h2 { font-family: var(--nb-sans); font-size: 24px; margin: 6px 0 0; }
 .forest-course-panel > header > button { padding: 0; font-size: 23px; border: 0; line-height: 1; }
 .forest-course-state { display: flex; align-items: center; gap: 7px; font-size: 11px; color: #70865f; padding: 10px 0; border-bottom: 1px dashed #dfe5d6; }
-.forest-course-state small { margin-left: auto; font-size: 9px; color: #9ca78d; }
+.forest-course-state small { margin-left: auto; font-size: 11px; color: #74836a; }
 .forest-course-reading-links { display: flex; flex-wrap: wrap; align-items: center; gap: 13px; margin-bottom: 22px; }
-.forest-course-reading-links a, .forest-course-reading-links button { color: #6b8759; font-size: 11px; padding: 0; border: 0; text-decoration: none; }
+.forest-course-reading-links a, .forest-course-reading-links button { color: #6b8759; font-size: 13px; padding: 0; border: 0; text-decoration: none; }
 .forest-chapter-list h3 { font-size: 11px; color: #8a987b; font-weight: 400; margin: 0 0 13px; }
 .forest-chapter-list p { font-size: 12px; line-height: 1.8; color: #8b967e; }
 .forest-chapter { margin: 0 0 8px; }
 .forest-chapter-toggle { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; border: 0 !important; padding: 7px 0 !important; }
 .forest-chapter-toggle > span { color: #a1b38c; font-size: 14px; }
 .forest-chapter-toggle strong { font-size: 12px; font-weight: 500; flex: 1; }
-.forest-chapter-toggle small { font-size: 9px; color: #9aa78c; }
+.forest-chapter-toggle small { font-size: 11px; color: #74836a; }
 .forest-chapter-notes { padding: 3px 0 3px 17px; border-left: 1px solid #e0e7d5; margin-left: 5px; }
-.forest-chapter-notes button { display: flex; align-items: baseline; gap: 5px; width: 100%; text-align: left; border: 0; padding: 6px 0; font-size: 11px; color: #7c8d6d; line-height: 1.6; }
+.forest-chapter-notes button { display: flex; align-items: baseline; gap: 5px; width: 100%; text-align: left; border: 0; padding: 6px 0; font-size: 13px; color: #627a59; line-height: 1.6; }
 .forest-chapter-notes button:hover { color: #3b6731; }
 .forest-chapter-notes button span { color: #9aaf83; }
-.forest-chapter-notes button small { font-size: 8px; color: #a1a68f; flex-shrink: 0; margin-left: auto; }
+.forest-chapter-notes button small { font-size: 11px; color: #74836a; flex-shrink: 0; margin-left: auto; }
 .forest-course-settings { border-top: 1px dashed #dbe3cd; padding-top: 16px; margin-top: 20px; font-size: 11px; }
 .forest-course-settings summary { color: #869676; cursor: pointer; }
 .forest-course-settings form { margin-top: 15px; }
-.forest-course-panel label, .forest-dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: #7e8d6f; margin: 0 0 13px; }
+.forest-course-panel label, .forest-dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #687b60; margin: 0 0 13px; }
 .forest-course-panel input, .forest-course-panel select, .forest-dialog input, .forest-dialog select, .forest-dialog textarea { padding: 9px 10px; border: 1px solid #d9e1cc; border-radius: 5px; color: #465d3e; background: #fffefa; font: inherit; font-size: 12px; width: 100%; min-width: 0; box-sizing: border-box; }
-.forest-course-panel .forest-action { width: 100%; font-size: 11px; }
+.forest-course-panel .forest-action { width: 100%; font-size: 13px; }
 .forest-settings-hint { font-size: 10px; color: #98a18c; line-height: 1.7; }
-.forest-suggest-button { width: 100%; font-size: 11px !important; margin: 22px 0 0; }
+.forest-suggest-button { width: 100%; font-size: 13px !important; margin: 22px 0 0; }
 .forest-form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .forest-scene-message, .forest-scene-empty, .forest-scene-error { position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%); z-index: 4; }
 .forest-scene-message { font-size: 13px; color: #879779; }
 .forest-scene-empty { text-align: center; max-width: 440px; width: calc(100% - 70px); }
-.forest-scene-empty h2 { font-family: 'STKaiti', 'KaiTi', serif; font-size: 29px; font-weight: 500; }
+.forest-scene-empty h2 { font-family: var(--nb-sans); font-size: 29px; font-weight: 500; }
 .forest-scene-empty p { font-size: 13px; line-height: 1.9; color: #8b997b; }
 .forest-scene-empty button { margin: 12px 4px 0; padding: 10px 16px; border: 1px solid #d8e0cd; border-radius: 8px; color: #6b8459; background: #fcfdf8; }
 .forest-scene-error { padding: 16px 22px; background: #fcfdf6f0; border: 1px solid #ddcfb8; border-radius: 8px; max-width: 420px; font-size: 13px; }
@@ -97,7 +97,7 @@
 .forest-dialog { background: #fbfcf6; color: #405637; border: 1px solid #d6e0c7; border-radius: 14px 16px 12px 18px; padding: 27px 30px; width: min(640px, 100%); max-height: calc(100dvh - 60px); overflow: auto; box-shadow: 0 25px 100px #273d2a1f; outline: 0; }
 .forest-dialog-wide { width: min(960px, 100%); }
 .forest-dialog > header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.forest-dialog > header h2 { margin: 0; font: 600 25px 'STKaiti', 'KaiTi', 'Noto Serif SC', serif; letter-spacing: 1px; }
+.forest-dialog > header h2 { margin: 0; font: 600 25px var(--nb-sans); letter-spacing: 1px; }
 .forest-dialog > header button { border: 0; padding: 0; font-size: 26px; color: #96a587; }
 .forest-dialog-intro { color: #8b997b; font-size: 12px; line-height: 1.8; margin-bottom: 25px; }
 .forest-error { background: #f6ebd7; color: #8b6d43; border-radius: 5px; font-size: 12px; line-height: 1.7; padding: 10px 13px; }
@@ -108,7 +108,7 @@
 .forest-relation-list { display: grid; grid-template-columns: 1fr 1fr; gap: 17px; }
 .forest-relation-card { border: 1px solid #dde5d0; border-radius: 7px; padding: 18px; background: #fffef9; }
 .forest-relation-kind { font-size: 10px; color: #94a184; }
-.forest-relation-card h3 { margin: 10px 0 5px; font-family: 'STKaiti', 'KaiTi', serif; font-size: 20px; line-height: 1.5; }
+.forest-relation-card h3 { margin: 10px 0 5px; font-family: var(--nb-sans); font-size: 20px; line-height: 1.5; }
 .forest-relation-card h3 span { color: #9ab089; margin: 0 5px; }
 .forest-relation-card > p { font-size: 12px; line-height: 1.8; margin: 10px 0; }
 .forest-relation-card p.forest-relation-courses { font-size: 10px; color: #a0aa91; margin-top: 0; }
@@ -153,7 +153,7 @@
 .forest-import-confirm p { color: #98a48c; font-size: 11px; }
 .forest-import-confirm button { white-space: nowrap; font-size: 12px; }
 .forest-task-status { text-align: center; padding: 45px 20px; color: #92a17e; }
-.forest-task-status h3 { font: 500 23px 'STKaiti', 'KaiTi', serif; }
+.forest-task-status h3 { font: 500 23px var(--nb-sans); }
 .forest-task-status p { font-size: 12px; line-height: 1.8; }
 .forest-loading-seed { font-size: 40px; color: #91a977; }
 .materials-forest-start { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; background: #f1f6e8; color: #71865d; padding: 10px 15px; border: 1px solid #dbe6cc; border-radius: 7px; margin-bottom: 16px; font-size: 12px; }
@@ -187,4 +187,7 @@
   .forest-page .forest-explore-tools { flex-basis: 100%; gap: 10px; }
   .forest-page .forest-search { flex-basis: 100%; max-width: none; }
   .forest-page .kt-toolbar .kt-camera-controls { margin-left: 0; }
+  .forest-heading p { font-size: 12px; }
+  .forest-header-actions button { min-height: 36px; font-size: 12px; }
+  .forest-minimap > span { font-size: 10px; }
 }

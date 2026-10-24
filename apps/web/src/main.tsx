@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 
 import App from './App'
+import '@fontsource-variable/noto-sans-sc/wght.css'
 import 'katex/dist/katex.min.css'
 import './styles.css'
 import './redesign.css'

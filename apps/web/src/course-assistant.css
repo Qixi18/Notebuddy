@@ -8,10 +8,6 @@
   --nb-muted-strong: #5f6b5f;
   --nb-clay-ink: #9a553c;
   --nb-shadow-float: 0 18px 48px rgba(31, 42, 34, 0.12);
-  /* 统一字体：答疑页三栏改回与全站一致的无衬线，去掉重设计引入的衬线/等宽混排 */
-  --nb-serif: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-  --nb-sans: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-  --nb-mono: Inter, "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   /* 动效 token：统一时长与缓动，避免各处随手写数字导致节奏不一致 */
   --nb-ease: cubic-bezier(0.22, 0.8, 0.32, 1);
   --nb-dur-fast: 110ms;

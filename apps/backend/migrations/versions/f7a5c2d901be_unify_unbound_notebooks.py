@@ -76,6 +76,9 @@ def _rebuild_attachments(*, nullable: bool, ondelete: str) -> None:
 
 def upgrade() -> None:
     connection = op.get_bind()
+    # The old notebooks.course_id is NOT NULL, so the table has to be
+    # rebuilt before unbound notebooks (course_id = NULL) can be folded in.
+    _rebuild_notebooks(ondelete="SET NULL")
     connection.exec_driver_sql("""
         INSERT INTO notebooks
         (id, course_id, title, display_order, order_revision, document_json,
@@ -85,7 +88,6 @@ def upgrade() -> None:
         FROM unbound_notebooks
     """)
     connection.exec_driver_sql("DROP TABLE unbound_notebooks")
-    _rebuild_notebooks(ondelete="SET NULL")
     _rebuild_attachments(nullable=True, ondelete="SET NULL")
 
 
