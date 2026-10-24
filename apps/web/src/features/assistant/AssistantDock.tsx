@@ -273,9 +273,10 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   /* 当前笔记的待确认建议：打开笔记或 agent 产出新建议后刷新；建议持久化在服务端，重开悬浮坞仍在。
      建议状态机与答疑页共用 useNoteSuggestions，两条入口的写入逻辑不会漂移。 */
   const lastAgentFinalId = conversation.agentRun?.final?.message_id
+  /* 坞保持单目标语义（D2）：不传 courseId（逐目标拉取）、不传发现开关——行为与旧单目标版一致 */
   const noteSuggestions = useNoteSuggestions({
-    noteId: notePath ? selectedNote?.id : undefined,
-    note: selectedNote,
+    targets: notePath && selectedNote ? [selectedNote.id] : [],
+    knownNotes: selectedNote ? [selectedNote] : [],
     refreshNotes: refreshCurrentNotes,
     agentFinalId: lastAgentFinalId,
   })
@@ -432,7 +433,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
           ) : null}
           <NoteSuggestionCards
             suggestions={noteSuggestions.suggestions}
-            currentContent={selectedNote?.content_markdown ?? ''}
+            currentContentByNoteId={noteSuggestions.contentById}
             busyId={noteSuggestions.busyId}
             adoptedContents={noteSuggestions.adopted}
             onReview={(suggestion, decision, finalMarkdown) => void noteSuggestions.review(suggestion, decision, finalMarkdown)}

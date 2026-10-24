@@ -42,6 +42,8 @@ export type AgentAskOptions = {
   materialId?: string
   readingContext?: AgentReadingContext
   notebookContext?: AgentNotebookContext
+  /** P4 发现开关：只有答疑页传 true；悬浮坞不传即行为不变 */
+  allowNoteDiscovery?: boolean
 }
 
 export type ConversationState = {
@@ -370,6 +372,7 @@ export function useConversation(
         idempotency_key: `${targetId}-${askedAt}`,
         reading_context: options.readingContext,
         notebook_context: options.notebookContext,
+        allow_note_discovery: options.allowNoteDiscovery,
       }, {
         onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
         onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),

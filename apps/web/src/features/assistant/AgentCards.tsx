@@ -22,14 +22,15 @@ export type PendingNoteSuggestion = {
 
 export function NoteSuggestionCards({
   suggestions,
-  currentContent,
+  currentContentByNoteId,
   busyId,
   adoptedContents,
   onReview,
   onUndo,
 }: {
   suggestions: PendingNoteSuggestion[]
-  currentContent: string
+  /** 每篇笔记的当前正文：diff 基准按 suggestion.note_id 取，多目标下绝不共用单一正文 */
+  currentContentByNoteId: Record<string, string>
   busyId?: string
   /** 已采纳建议 id → 采纳前正文（撤销时回写） */
   adoptedContents: Record<string, string>
@@ -60,6 +61,8 @@ export function NoteSuggestionCards({
             </article>
           )
         }
+        /* 数据安全红线：diff 基准必须是这条建议自己的那篇笔记 */
+        const currentContent = currentContentByNoteId[suggestion.note_id] ?? ''
         const rows = diffRows(currentContent, suggestion.proposed_markdown)
         const hunks = hunksOf(rows)
         const skipSet = skipped[suggestion.id] ?? new Set<string>()
@@ -76,7 +79,10 @@ export function NoteSuggestionCards({
         }
         return (
           <article key={suggestion.id} className="agent-card" role="listitem">
-            <p className="agent-card-body">{suggestion.impact || 'AI 提出的修改建议'}</p>
+            <p className="agent-card-body">
+              {suggestion.note_title && <small className="agent-card-note">《{suggestion.note_title}》</small>}
+              {suggestion.impact || 'AI 提出的修改建议'}
+            </p>
             <DiffView rows={rows} skipped={skipSet} onToggle={toggle} />
             <div className="agent-card-actions">
               <button

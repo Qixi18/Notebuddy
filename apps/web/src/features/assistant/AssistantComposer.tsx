@@ -1,7 +1,11 @@
-import type { KeyboardEvent, RefObject } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
 
-/** 输入区：Enter 发送（IME 组合中不触发）、Shift+Enter 换行；回答进行中时发送键变「停止」 */
-export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop, placeholder, hint, scopeLabel, onScopeClick, onTermClick, onComposerFocus, textareaRef }: {
+/**
+ * 输入区：Enter 发送（IME 组合中不触发）、Shift+Enter 换行；回答进行中时发送键变「停止」。
+ * 课件收窄（P3）：仅「整门课程」档由页面传入 materials 时显示——它是消息级参数，
+ * 收窄不写会话 scope、不触发锁定，切档/切会话由页面负责复位。
+ */
+export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop, placeholder, hint, scopeLabel, onScopeClick, onTermClick, onComposerFocus, textareaRef, materials, materialId, onMaterialChange }: {
   draft: string
   onDraftChange: (draft: string) => void
   /** 返回 false 表示未发出（ busy / 空文本），调用方不清空草稿 */
@@ -16,7 +20,24 @@ export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop
   onTermClick: () => void
   onComposerFocus: () => void
   textareaRef?: RefObject<HTMLTextAreaElement | null>
+  /** 当前课程可选课件；不传（非 course 档 / 无课件）就不显示收窄控件 */
+  materials?: Array<{ id: string; lecture_title: string }>
+  /** 已选中的收窄课件；undefined = 全部课件 */
+  materialId?: string
+  onMaterialChange?: (materialId?: string) => void
 }) {
+  const [materialMenuOpen, setMaterialMenuOpen] = useState(false)
+  const materialRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!materialMenuOpen) return
+    function onDocClick(event: MouseEvent) {
+      if (materialRef.current && !materialRef.current.contains(event.target as Node)) setMaterialMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [materialMenuOpen])
+
   function submit() {
     const text = draft.trim()
     if (!text || busy) return
@@ -43,6 +64,9 @@ export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop
     submit()
   }
 
+  const pickedMaterial = materials?.find((item) => item.id === materialId)
+  const showMaterialPicker = Boolean(materials?.length && onMaterialChange)
+
   return (
     <form
       className="workspace-composer"
@@ -64,6 +88,42 @@ export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop
           <button type="button" className="workspace-composer-tool" onClick={onScopeClick} title="修改提问范围">
             {scopeLabel}
           </button>
+          {showMaterialPicker && (
+            <div className="workspace-material-wrap" ref={materialRef}>
+              <button
+                type="button"
+                className={`workspace-composer-tool${materialId ? ' is-active' : ''}`}
+                onClick={() => setMaterialMenuOpen((open) => !open)}
+                title="只检索某一讲课件（仅影响本轮回答，不改变范围）"
+                aria-haspopup="true"
+                aria-expanded={materialMenuOpen}
+              >
+                课件 · <span className="workspace-material-label">{pickedMaterial ? pickedMaterial.lecture_title : '全部'}</span>
+              </button>
+              {materialMenuOpen && (
+                <div className="workspace-material-menu" role="menu" aria-label="选择收窄课件">
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={!materialId}
+                    className={`workspace-scope-option${materialId ? '' : ' is-active'}`}
+                    onClick={() => { onMaterialChange?.(undefined); setMaterialMenuOpen(false) }}
+                  >全部课件</button>
+                  {materials!.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={materialId === item.id}
+                      className={`workspace-scope-option${materialId === item.id ? ' is-active' : ''}`}
+                      title={item.lecture_title}
+                      onClick={() => { onMaterialChange?.(item.id); setMaterialMenuOpen(false) }}
+                    >{item.lecture_title}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <span className="workspace-composer-hint">{hint}</span>
         {busy && onStop ? (

@@ -10,6 +10,9 @@ vi.mock('../src/api', () => ({
     updateNote: vi.fn(async () => ({ title: '行列式笔记' })),
     listSuggestions: vi.fn(async () => []),
     reviewSuggestion: vi.fn(async () => ({ title: '行列式笔记' })),
+    /* P4 多目标：建议涉及的目标笔记按 note_id 取正文 */
+    getNote: vi.fn(async () => ({ id: 'n1', title: '行列式笔记', content_markdown: '# 行列式\n已有正文。', revision_number: 1 })),
+    listCourseSuggestions: vi.fn(async () => []),
   },
 }))
 
