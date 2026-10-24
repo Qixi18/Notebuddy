@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import { api } from '../../api'
+import type { QuizDto } from '../../api/quiz'
 import { DiffView } from './DiffView'
 import { applySelected, diffRows, hunksOf } from './noteDiff'
 
@@ -116,5 +118,132 @@ export function KnowledgeProposalCards({ suggestions }: { suggestions: Array<{ t
         </article>
       ))}
     </div>
+  )
+}
+
+/** QuizCards（v6 P10）：agent 出的自测卷——拉题目、作答、服务端判分讲评。 */
+export function QuizCards({ quizzes, courseId }: {
+  quizzes: Array<{ type: 'quiz'; id: string; quiz_id: string; title: string; item_count: number }>
+  courseId?: string
+}) {
+  const [quizzesById, setQuizzesById] = useState<Record<string, QuizDto>>({})
+
+  /* 一次拉课程内 active 卷子，按 id 匹配本批建议（答案不下发，判分在服务端） */
+  useEffect(() => {
+    if (!courseId || quizzes.length === 0) return
+    let alive = true
+    void api.listQuizzes(courseId, 'active')
+      .then((items) => {
+        if (!alive) return
+        const map: Record<string, QuizDto> = {}
+        for (const quiz of items) map[quiz.id] = quiz
+        setQuizzesById(map)
+      })
+      .catch(() => { if (alive) setQuizzesById({}) })
+    return () => { alive = false }
+  }, [courseId, quizzes.length])
+
+  if (quizzes.length === 0) return null
+  return (
+    <div className="agent-cards" role="list" aria-label="自测卷">
+      <small className="agent-cards-title">📝 自测卷 · 作答后系统自动判分讲评（答案不出现在页面上）</small>
+      {quizzes.map((quiz) => {
+        const dto = quizzesById[quiz.quiz_id]
+        if (!dto) {
+          return (
+            <article key={quiz.quiz_id} className="agent-card agent-card-info" role="listitem">
+              <p className="agent-card-body">📄 {quiz.title}（{quiz.item_count} 题）{courseId ? '· 正在加载题目…' : ''}</p>
+            </article>
+          )
+        }
+        return <QuizCard key={quiz.quiz_id} quiz={dto} />
+      })}
+    </div>
+  )
+}
+
+function QuizCard({ quiz }: { quiz: QuizDto }) {
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [results, setResults] = useState<Array<{ item_id: string; correct: boolean; answer: string; explanation: string; comment: string }> | null>(null)
+  const [score, setScore] = useState<string>()
+  const [error, setError] = useState<string>()
+
+  const allAnswered = quiz.items.every((item) => (answers[item.id] ?? '').trim())
+
+  function submit() {
+    if (submitting || !allAnswered) return
+    setSubmitting(true)
+    setError(undefined)
+    void api.submitAttempts(quiz.id, quiz.items.map((item) => ({ item_id: item.id, answer: answers[item.id] ?? '' })))
+      .then((result) => {
+        setResults(result.results)
+        setScore(result.score)
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : '提交失败，请重试')
+      })
+      .finally(() => setSubmitting(false))
+  }
+
+  return (
+    <article className="agent-card" role="listitem">
+      <p className="agent-card-body">📄 {quiz.title}</p>
+      {quiz.items.map((item) => {
+        const verdict = results?.find((entry) => entry.item_id === item.id)
+        return (
+          <div key={item.id} className="quiz-item">
+            <p className="quiz-item-stem">{item.seq}. {item.stem}{item.type === 'short' && <small>（简答）</small>}</p>
+            {item.type === 'choice' ? (
+              <div className="quiz-item-options" role="radiogroup" aria-label={`第 ${item.seq} 题选项`}>
+                {item.options.map((option) => (
+                  <label key={option} className="quiz-item-option">
+                    <input
+                      type="radio"
+                      name={`quiz-${quiz.id}-item-${item.id}`}
+                      disabled={Boolean(results)}
+                      checked={answers[item.id] === option}
+                      onChange={() => setAnswers((current) => ({ ...current, [item.id]: option }))}
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <textarea
+                className="quiz-item-short"
+                value={answers[item.id] ?? ''}
+                disabled={Boolean(results)}
+                rows={3}
+                placeholder="写下你的回答…"
+                aria-label={`第 ${item.seq} 题作答`}
+                onChange={(event) => setAnswers((current) => ({ ...current, [item.id]: event.target.value }))}
+              />
+            )}
+            {verdict && (
+              <p className={`quiz-item-verdict${verdict.correct ? ' is-correct' : ' is-wrong'}`}>
+                {verdict.correct ? '✓ 答对了。' : '✗ 答错了。'}
+                {verdict.answer && <span> 参考答案：{verdict.answer}</span>}
+                {verdict.explanation && <span> {verdict.explanation}</span>}
+                {verdict.comment && <span> {verdict.comment}</span>}
+              </p>
+            )}
+          </div>
+        )
+      })}
+      {results ? (
+        <div className="agent-card-actions"><span className="quiz-score">得分 {score}</span></div>
+      ) : (
+        <div className="agent-card-actions">
+          <button
+            type="button"
+            className="agent-card-confirm"
+            disabled={!allAnswered || submitting}
+            onClick={submit}
+          >{submitting ? '判分中…' : '交卷'}</button>
+        </div>
+      )}
+      {error && <p className="workspace-agent-notice">{error}</p>}
+    </article>
   )
 }

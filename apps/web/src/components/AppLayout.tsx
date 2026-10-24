@@ -17,6 +17,7 @@ import { ConfirmDialog } from './ConfirmDialog'
 import type { TeacherCharacterId } from './TeacherCharacter'
 import { SettingsPanel } from './SettingsPanel'
 import { shouldBlockNoteNavigation } from '../features/notebook/navigation'
+import { readStorage, writeStorage } from '../utils/safeStorage'
 import { footerNavItems, primaryNavItems, resolveActiveNav, type SidebarNavId } from '../features/navigation/sidebarNav'
 import { DOCK_STORAGE, resolveDockOpen, resolveDockWidth } from '../features/assistant/dockLayout'
 
@@ -120,13 +121,13 @@ export function AppLayout() {
   const isForest = location.pathname === '/forest'
   const isAssistantPage = location.pathname.endsWith('/assistant')
   const activeNav = resolveActiveNav(location.pathname)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('notebuddy.sidebar-collapsed') === 'true')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readStorage('notebuddy.sidebar-collapsed') === 'true')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const createAreaRef = useRef<HTMLDivElement>(null)
   /* 抽屉开合与宽度都由外壳持有：宽度要写进 CSS 变量驱动网格列，正文才能跟着让位 */
-  const [dockOpen, setDockOpen] = useState(() => resolveDockOpen(localStorage.getItem(DOCK_STORAGE.open)))
-  const [dockWidth, setDockWidth] = useState(() => resolveDockWidth(localStorage.getItem(DOCK_STORAGE.width)))
+  const [dockOpen, setDockOpen] = useState(() => resolveDockOpen(readStorage(DOCK_STORAGE.open)))
+  const [dockWidth, setDockWidth] = useState(() => resolveDockWidth(readStorage(DOCK_STORAGE.width)))
   const [dockResizing, setDockResizing] = useState(false)
   const [notebookAction, setNotebookAction] = useState<AIAction | null>(null)
   /* 笔记页的工具条只负责“请求打开助手”；开合仍由外壳唯一持有，避免第二套侧栏状态 */
@@ -153,7 +154,7 @@ export function AppLayout() {
   }, [noteDirty, documentDirty])
 
   useEffect(() => {
-    localStorage.setItem('notebuddy.sidebar-collapsed', String(sidebarCollapsed))
+    writeStorage('notebuddy.sidebar-collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
 
   useEffect(() => {
@@ -168,11 +169,11 @@ export function AppLayout() {
   }, [createOpen])
 
   useEffect(() => {
-    localStorage.setItem(DOCK_STORAGE.open, String(dockOpen))
+    writeStorage(DOCK_STORAGE.open, String(dockOpen))
   }, [dockOpen])
 
   useEffect(() => {
-    localStorage.setItem(DOCK_STORAGE.width, String(dockWidth))
+    writeStorage(DOCK_STORAGE.width, String(dockWidth))
   }, [dockWidth])
 
   function handleNav(id: SidebarNavId) {

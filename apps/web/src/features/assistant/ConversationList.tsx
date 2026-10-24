@@ -317,19 +317,19 @@ export function ConversationSearch({ conversations, conversationId, courseId, on
     return matched.slice(0, 8)
   }, [conversations, keyword])
 
-  /* 消息搜索：300ms 防抖；仅课程内（端点按 course_id 过滤） */
+  /* 消息搜索：300ms 防抖；请求级守门（递增序号）防晚到的旧响应覆盖新结果（v6 P5） */
+  const searchSeqRef = useRef(0)
   useEffect(() => {
     if (!courseId || !keyword) { setHits([]); setHitsLoading(false); return }
     setHitsLoading(true)
     const timer = window.setTimeout(() => {
-      let alive = true
+      const requestId = ++searchSeqRef.current
       void api.searchMessages(courseId, keyword)
-        .then((items) => { if (alive) setHits(items) })
-        .catch(() => { if (alive) setHits([]) })
-        .finally(() => { if (alive) setHitsLoading(false) })
-      return () => { alive = false }
+        .then((items) => { if (searchSeqRef.current === requestId) setHits(items) })
+        .catch(() => { if (searchSeqRef.current === requestId) setHits([]) })
+        .finally(() => { if (searchSeqRef.current === requestId) setHitsLoading(false) })
     }, 300)
-    return () => { window.clearTimeout(timer); setHitsLoading(false) }
+    return () => window.clearTimeout(timer)
   }, [courseId, keyword])
 
   return (

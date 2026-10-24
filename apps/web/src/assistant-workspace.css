@@ -475,6 +475,55 @@
   100% { background: transparent; box-shadow: 0 0 0 3px transparent; }
 }
 
+/* ---- P10 自测卷 + P11 反馈原因 ---- */
+.quiz-item { margin: 8px 0; }
+.quiz-item-stem { margin: 0 0 4px; color: var(--nb-ink); font-size: 13px; line-height: 1.7; }
+.quiz-item-stem small { color: var(--nb-muted); }
+.quiz-item-options { display: flex; flex-direction: column; gap: 3px; }
+.quiz-item-option {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  padding: 5px 9px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--nb-ink);
+}
+.quiz-item-option:hover { border-color: var(--nb-sage); background: #f4f9f4; }
+.quiz-item-option input { accent-color: var(--nb-forest); }
+.quiz-item-short {
+  width: 100%;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--nb-ink);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 7px 9px;
+  resize: vertical;
+}
+.quiz-item-verdict {
+  margin: 5px 0 0;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.quiz-item-verdict.is-correct { color: #1e5a44; background: #e8f2ec; }
+.quiz-item-verdict.is-wrong { color: #8a4b3f; background: #fbefef; }
+.quiz-score { font-weight: 600; color: var(--nb-forest-deep); font-size: 12.5px; }
+.workspace-msg-reasons { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.workspace-msg-reasons button {
+  border: 1px solid var(--nb-line);
+  background: var(--nb-white);
+  color: var(--nb-muted-strong, #46544a);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.workspace-msg-reasons button:hover { border-color: var(--nb-sage); color: var(--nb-forest); }
+
 /* ---- P4 多目标建议：卡片标注目标笔记 + 改动栏按笔记分组 ---- */
 .agent-card-note {
   display: inline-block;

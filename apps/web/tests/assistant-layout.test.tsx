@@ -16,6 +16,9 @@ vi.mock('../src/api', () => ({
     getNote: vi.fn(),
     /* P6：消息全文搜索 */
     searchMessages: vi.fn(async () => []),
+    /* P10：自测卷 */
+    listQuizzes: vi.fn(async () => []),
+    submitAttempts: vi.fn(async () => ({ quiz_id: 'q1', status: 'completed', results: [], score: '0/1' })),
   },
 }))
 
@@ -409,4 +412,51 @@ test('没有已完成课件时不显示收窄控件', () => {
   renderPage({ materials: [{ ...material, status: 'processing' }] })
   pickCourseScope()
   expect(screen.queryByRole('button', { name: /课件 · / })).toBeNull()
+})
+
+
+/* ---- P9 学习模式 + P10 自测卷 ---- */
+
+test('学习模式 chip 点击切换并随请求下发', async () => {
+  const askAgent = vi.fn(async () => true)
+  renderPage({ askAgent, conversationId: undefined, conversations: [] })
+  const chip = screen.getByRole('button', { name: '直接答' })
+  fireEvent.click(chip)
+  expect(screen.getByRole('button', { name: '引导我' }).getAttribute('aria-pressed')).toBe('true')
+
+  const textarea = screen.getByLabelText('课程问题') as HTMLTextAreaElement
+  fireEvent.change(textarea, { target: { value: '这个概念我搞不懂' } })
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  await waitFor(() => expect(askAgent).toHaveBeenCalled())
+  expect(askAgent.mock.calls[0][1]).toMatchObject({ learningMode: 'guided' })
+})
+
+test('自测卷：拉题、作答、交卷判分', async () => {
+  vi.mocked(api.listQuizzes).mockResolvedValueOnce([
+    {
+      id: 'q1', title: '行列式小测', status: 'active',
+      items: [{ id: 'qi1', seq: 1, type: 'choice', stem: '行列式为零说明？', options: ['可逆', '不可逆'] }],
+    },
+  ])
+  vi.mocked(api.submitAttempts).mockResolvedValueOnce({
+    quiz_id: 'q1', status: 'completed',
+    results: [{ item_id: 'qi1', seq: 1, correct: false, answer: '不可逆', explanation: '行列式为零等价于不可逆。', comment: '' }],
+    score: '0/1',
+  })
+  renderPage({
+    agentRun: {
+      steps: [], streamingText: '',
+      final: {
+        type: 'final', answer: '我出了一道题，请在卡片上作答。', mode: 'agent', model_version: 'test',
+        suggestions: [{ type: 'quiz', id: 's1', quiz_id: 'q1', title: '行列式小测', item_count: 1 }],
+      },
+    } as never,
+  })
+
+  await waitFor(() => expect(screen.getByText(/行列式为零说明/)).toBeTruthy())
+  fireEvent.click(screen.getByRole('radio', { name: /不可逆/ }))
+  fireEvent.click(screen.getByRole('button', { name: '交卷' }))
+  await waitFor(() => expect(screen.getByText(/✗ 答错了/)).toBeTruthy())
+  expect(screen.getByText(/得分 0\/1/)).toBeTruthy()
+  expect(screen.getByText(/参考答案：不可逆/)).toBeTruthy()
 })

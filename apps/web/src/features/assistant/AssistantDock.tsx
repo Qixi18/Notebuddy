@@ -452,7 +452,11 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
             <div className="assistant-dock-adopt-actions">
               <button type="button" onClick={() => adoptAnswer('after')} disabled={!pendingNotebookAnswer?.anchor}>插入到选区后</button>
               <button type="button" onClick={() => adoptAnswer('replace')} disabled={!pendingNotebookAnswer?.anchor}>替换选区</button>
-              <button type="button" onClick={() => { void navigator.clipboard.writeText(adoptableAnswer.content).then(() => setAdoptNotice('回答已复制。')) }}>复制</button>
+              <button type="button" onClick={() => {
+                navigator.clipboard.writeText(adoptableAnswer.content)
+                  .then(() => setAdoptNotice('回答已复制。'))
+                  .catch(() => setAdoptNotice('复制失败：浏览器未授权剪贴板，请手动选择文本复制。'))
+              }}>复制</button>
             </div>
             {adoptNotice ? <p role="status">{adoptNotice}</p> : null}
           </section> : null}

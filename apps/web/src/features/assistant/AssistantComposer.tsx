@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 
  * 课件收窄（P3）：仅「整门课程」档由页面传入 materials 时显示——它是消息级参数，
  * 收窄不写会话 scope、不触发锁定，切档/切会话由页面负责复位。
  */
-export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop, placeholder, hint, scopeLabel, onScopeClick, onTermClick, onComposerFocus, textareaRef, materials, materialId, onMaterialChange }: {
+export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop, placeholder, hint, scopeLabel, onScopeClick, onTermClick, onComposerFocus, textareaRef, materials, materialId, onMaterialChange, learningMode, onLearningModeChange }: {
   draft: string
   onDraftChange: (draft: string) => void
   /** 返回 false 表示未发出（ busy / 空文本），调用方不清空草稿 */
@@ -25,6 +25,9 @@ export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop
   /** 已选中的收窄课件；undefined = 全部课件 */
   materialId?: string
   onMaterialChange?: (materialId?: string) => void
+  /** 学习模式（P9）：direct=直接答 / guided=引导式；chip 点击切换 */
+  learningMode?: 'direct' | 'guided'
+  onLearningModeChange?: (mode: 'direct' | 'guided') => void
 }) {
   const [materialMenuOpen, setMaterialMenuOpen] = useState(false)
   const materialRef = useRef<HTMLDivElement>(null)
@@ -88,6 +91,19 @@ export function AssistantComposer({ draft, onDraftChange, onSubmit, busy, onStop
           <button type="button" className="workspace-composer-tool" onClick={onScopeClick} title="修改提问范围">
             {scopeLabel}
           </button>
+          {onLearningModeChange && (
+            <button
+              type="button"
+              className={`workspace-composer-tool${learningMode === 'guided' ? ' is-active' : ''}`}
+              onClick={() => onLearningModeChange(learningMode === 'guided' ? 'direct' : 'guided')}
+              title={learningMode === 'guided'
+                ? '引导模式已开：AI 会先诊断卡点、分步给提示；点击切回直接答'
+                : '切换到引导模式：AI 先诊断卡点、分步给提示，不直接给答案'}
+              aria-pressed={learningMode === 'guided'}
+            >
+              {learningMode === 'guided' ? '引导我' : '直接答'}
+            </button>
+          )}
           {showMaterialPicker && (
             <div className="workspace-material-wrap" ref={materialRef}>
               <button

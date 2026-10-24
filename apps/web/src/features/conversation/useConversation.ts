@@ -44,6 +44,10 @@ export type AgentAskOptions = {
   notebookContext?: AgentNotebookContext
   /** P4 发现开关：只有答疑页传 true；悬浮坞不传即行为不变 */
   allowNoteDiscovery?: boolean
+  /** P10 出题开关：只有答疑页传 true */
+  allowQuiz?: boolean
+  /** P9 学习模式：答疑页可切「引导我」；悬浮坞不传即 direct */
+  learningMode?: 'direct' | 'guided'
 }
 
 export type ConversationState = {
@@ -130,6 +134,8 @@ export function useConversation(
   useEffect(() => {
     let active = true
     const request = ++historyRequestRef.current
+    abortRef.current?.abort()
+    abortRef.current = null
     setConversations([])
     setConversationId(undefined)
     setHistory([])
@@ -163,6 +169,11 @@ export function useConversation(
   const selectConversation = useCallback(async (id: string, pendingMessageId?: string) => {
     const request = ++historyRequestRef.current
     const requestCourseId = courseRef.current
+    /* 切会话先中止进行中的回答（v6 P1）：旧流的 final 会被本请求的门丢弃，留着只会产生
+       僵尸实时块与 busy 错位；abort 后旧流的收尾分支会因请求门失效而不再触碰状态 */
+    abortRef.current?.abort()
+    abortRef.current = null
+    setAgentRun(null)
     setConversationId(id)
     /* P6：带消息命中的跳转记录定位目标；普通切换传 undefined 顺带清掉遗留目标 */
     setPendingMessageId(pendingMessageId)
@@ -230,6 +241,11 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
+    /* 新会话同样中止进行中的回答（v6 P1），与 selectConversation 同一套清理 */
+    abortRef.current?.abort()
+    abortRef.current = null
+    setAgentRun(null)
+    setPendingMessageId(undefined)
     try {
       const created = await api.createConversation(requestCourseId, '新对话', ownership)
       if (courseRef.current !== requestCourseId) return
@@ -281,12 +297,14 @@ export function useConversation(
       : scope.kind === 'note'
         ? { scope: 'note' as const, noteId: scope.targetId ?? null, noteTitle: scope.targetTitle ?? null }
         : { scope: 'course' as const }
+    let localUserId = ''
     try {
       const targetId = await ensureConversation(ownership)
       if (!targetId || courseRef.current !== requestCourseId) return false
       const askedAt = Date.now()
+      localUserId = `local-user-${askedAt}`
       setHistory((current) => [...current, {
-        id: `local-user-${askedAt}`,
+        id: localUserId,
         conversation_id: targetId,
         role: 'user',
         content: question,
@@ -334,6 +352,9 @@ export function useConversation(
     } catch (cause) {
       if (courseRef.current === requestCourseId) {
         setError(cause instanceof Error ? cause.message : '问答请求失败')
+        /* 乐观插入的本地提问气泡随失败回滚（v6 P5）：服务端没有这条消息，
+            留着会与刷新后的历史不一致 */
+        setHistory((current) => current.filter((message) => message.id !== localUserId))
       }
       return false
     } finally {
@@ -358,7 +379,11 @@ export function useConversation(
     abortRef.current = controller
     try {
       targetId = await ensureConversation() ?? ''
-      if (!targetId || courseRef.current !== requestCourseId) return false
+      if (!targetId || courseRef.current !== requestCourseId) {
+        /* 提问链路没走通：清掉置好的空实时块，避免线程残留「Agent 执行中」（v6 P5） */
+        setAgentRun(null)
+        return false
+      }
       const askedAt = Date.now()
       setHistory((current) => [...current, {
         id: `local-user-${askedAt}`,
@@ -384,10 +409,23 @@ export function useConversation(
         reading_context: options.readingContext,
         notebook_context: options.notebookContext,
         allow_note_discovery: options.allowNoteDiscovery,
+        allow_quiz: options.allowQuiz,
+        learning_mode: options.learningMode,
       }, {
-        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
-        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
-        onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
+      /* 三个实时分支都必须过双守门（v6 P1）：否则切会话后旧流继续写 agentRun，
+          在新会话线程里渲染旧会话的流式块 */
+      onStep: (event: AgentStepEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current)
+      },
+      onDelta: (event: AgentDeltaEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current)
+      },
+      onNotice: (event: AgentNoticeEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => current ? { ...current, notice: event.text } : current)
+      },
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
@@ -444,7 +482,9 @@ export function useConversation(
     } finally {
       if (abortRef.current === controller) abortRef.current = null
       busyRef.current = false
-      if (courseRef.current === requestCourseId) setBusy(false)
+      /* busy 归还必须过请求门（v6 P1）：切会话触发的 abort 会让本分支在历史加载期间
+          抢先 setBusy(false)，吞掉加载态；门内表示仍是本会话的本请求，正常复位 */
+      if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setBusy(false)
     }
   }, [courseId, teacherPersona, ensureConversation])
 

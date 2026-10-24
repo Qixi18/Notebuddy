@@ -16,7 +16,13 @@ export async function request<T>(input: RequestInfo | URL, init?: RequestInit): 
   if (response.status === 204) return undefined as T
   const text = await response.text()
   if (!text.trim()) return undefined as T
-  return JSON.parse(text) as T
+  // 网关/代理可能返回 HTML 错误页：裸 parse 抛 SyntaxError，用户看到的是
+  // 「Unexpected token <」这类不可读信息（v6 P2）
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new ApiError('服务响应异常（非 JSON），请稍后重试', response.status)
+  }
 }
 
 export class ApiError extends Error {

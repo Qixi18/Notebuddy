@@ -71,8 +71,24 @@ export async function streamAgentMessage(
     if (event.type === 'final') finalEvent = event
     if (event.type === 'error') errorMessage = event.message
   }
+  /* 空闲超时（v6 P2）：连接开着但服务端不发数据时，reader.read() 会永久 pending，
+      用户只能干等。每次读都限 30s，超时取消读取并给出可操作的错误。 */
+  const IDLE_TIMEOUT_MS = 30_000
   for (;;) {
-    const { done, value } = await reader.read()
+    let idleTimer: ReturnType<typeof setTimeout> | undefined
+    const idle = new Promise<never>((_, reject) => {
+      idleTimer = setTimeout(() => reject(new ApiError('连接长时间没有响应，请重试', response.status)), IDLE_TIMEOUT_MS)
+    })
+    let chunk: Awaited<ReturnType<typeof reader.read>>
+    try {
+      chunk = await Promise.race([reader.read(), idle])
+    } catch (cause) {
+      void reader.cancel().catch(() => {})
+      throw cause
+    } finally {
+      clearTimeout(idleTimer)
+    }
+    const { done, value } = chunk
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const parsed = parseAgentStream(buffer)

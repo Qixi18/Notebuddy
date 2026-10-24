@@ -69,7 +69,14 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
           if (!alive) return
           setSuggestions(items.filter((item) => item.status === 'pending') as PendingNoteSuggestion[])
         })
-        .catch(() => { if (alive) setSuggestions([]) })
+        .catch((cause: unknown) => {
+          if (!alive) return
+          setSuggestions([])
+          /* 静默清空会让用户分不清「建议丢了」和「本来没有」（v6 P5）；
+             但 404 = 后端未部署新端点（环境不匹配），提示了用户也做不了什么，保持安静 */
+          const status = cause instanceof ApiError ? cause.status : undefined
+          if (status !== 404) setNotice('待确认建议读取失败，请稍后刷新重试。')
+        })
       return () => { alive = false }
     }
     /* 坞模式：逐目标拉取（现状只有一篇），保持旧行为 */
