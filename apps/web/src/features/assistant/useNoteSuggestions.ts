@@ -17,7 +17,7 @@ import { applySelected, diffRows, hunksOf } from './noteDiff'
  * 正文与 revision（notesById 缓存），绝不能拿别的笔记的正文当基准——多目标下沿用
  * 单一正文会把 A 的内容写进 B。
  */
-export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes, agentFinalId }: {
+export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes, agentFinalId, resetKey }: {
   /** 显式目标笔记 id（悬浮坞 = 当前打开的笔记；答疑页传空数组，目标来自课程级建议列表） */
   targets: string[]
   /** 已知笔记（工作区笔记 / 当前打开的笔记）作为正文与 revision 缓存种子 */
@@ -28,6 +28,8 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
   refreshNotes: () => Promise<void>
   /** agent 每次 final 都会换新 id → 用来触发「又产出建议了」的重新拉取 */
   agentFinalId?: string
+  /** 会话标识：变化即清掉瞬态提示（提示不该跟着人进下一个对话） */
+  resetKey?: string
 }) {
   const [suggestions, setSuggestions] = useState<PendingNoteSuggestion[]>([])
   /** 目标笔记缓存：id → 完整 Note（diff 基准 + 写入/撤销用的 revision_number） */
@@ -36,6 +38,16 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
   const [adopted, setAdopted] = useState<Record<string, string>>({})
   const [busyId, setBusyId] = useState<string>()
   const [notice, setNotice] = useState<string>()
+  /* 提示是瞬态反馈：5 秒自动消失（v6 用户反馈——「已忽略该建议。」曾常驻每个对话底部） */
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const flashNotice = useCallback((message: string) => {
+    setNotice(message)
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = setTimeout(() => setNotice(undefined), 5000)
+  }, [])
+  useEffect(() => () => { if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current) }, [])
+  /* 会话切换（resetKey 变化）清掉残留提示 */
+  useEffect(() => { setNotice(undefined) }, [resetKey])
 
   const knownNotesRef = useRef(knownNotes)
   knownNotesRef.current = knownNotes
@@ -75,7 +87,7 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
           /* 静默清空会让用户分不清「建议丢了」和「本来没有」（v6 P5）；
              但 404 = 后端未部署新端点（环境不匹配），提示了用户也做不了什么，保持安静 */
           const status = cause instanceof ApiError ? cause.status : undefined
-          if (status !== 404) setNotice('待确认建议读取失败，请稍后刷新重试。')
+          if (status !== 404) flashNotice('待确认建议读取失败，请稍后刷新重试。')
         })
       return () => { alive = false }
     }
@@ -128,19 +140,19 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
         setAdopted((current) => ({ ...current, [suggestion.id]: beforeContent }))
         await refreshNotes()
         const partial = finalMarkdown !== undefined && finalMarkdown !== suggestion.proposed_markdown
-        setNotice(`已${partial ? '部分采纳' : '采纳'}建议，《${title}》已更新，可在修订历史中回退。`)
+        flashNotice(`已${partial ? '部分采纳' : '采纳'}建议，《${title}》已更新，可在修订历史中回退。`)
       } else {
         setSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
-        setNotice('已忽略该建议。')
+        flashNotice('已忽略该建议。')
       }
     } catch (cause) {
-      setNotice(cause instanceof ApiError && cause.status === 409
+      flashNotice(cause instanceof ApiError && cause.status === 409
         ? '这条建议已处理或笔记刚更新过。'
         : cause instanceof Error ? cause.message : '处理建议失败')
     } finally {
       setBusyId(undefined)
     }
-  }, [mergeNoteResponse, refreshNotes])
+  }, [flashNotice, mergeNoteResponse, refreshNotes])
 
   /** 撤销本次 AI 改动：回写采纳前正文（用目标笔记**当前** revision） */
   const undo = useCallback(async (suggestion: PendingNoteSuggestion) => {
@@ -148,7 +160,7 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
     const beforeContent = adopted[suggestion.id]
     const title = targetNote?.title ?? suggestion.note_title ?? '笔记'
     if (!targetNote || beforeContent === undefined) {
-      setNotice('找不到这篇笔记的当前内容，请刷新页面后再撤销。')
+      flashNotice('找不到这篇笔记的当前内容，请刷新页面后再撤销。')
       return
     }
     setBusyId(suggestion.id)
@@ -162,15 +174,15 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
         return next
       })
       setSuggestions((current) => current.filter((item) => item.id !== suggestion.id))
-      setNotice(`已撤销本次 AI 改动，《${title}》恢复到采纳前内容。`)
+      flashNotice(`已撤销本次 AI 改动，《${title}》恢复到采纳前内容。`)
     } catch (cause) {
-      setNotice(cause instanceof ApiError && cause.status === 409
+      flashNotice(cause instanceof ApiError && cause.status === 409
         ? '笔记刚在别处更新过，请刷新笔记后再撤销。'
         : cause instanceof Error ? cause.message : '撤销失败')
     } finally {
       setBusyId(undefined)
     }
-  }, [adopted, refreshNotes])
+  }, [adopted, flashNotice, refreshNotes])
 
   /**
    * 全部写入：**按 note_id 分组**，每组以该篇当前正文为基准逐条累加，组间互不影响。
@@ -218,15 +230,15 @@ export function useNoteSuggestions({ targets, knownNotes, courseId, refreshNotes
         return next
       })
       setSuggestions((current) => current.filter((item) => !writtenNoteIds.has(item.note_id)))
-      setNotice(`已把 ${written.length} 条建议写入${skippedTitles.length ? `；${skippedTitles.join('、')}的正文未能获取，已跳过` : ''}。`)
+      flashNotice(`已把 ${written.length} 条建议写入${skippedTitles.length ? `；${skippedTitles.join('、')}的正文未能获取，已跳过` : ''}。`)
     } catch (cause) {
-      setNotice(cause instanceof ApiError && cause.status === 409
+      flashNotice(cause instanceof ApiError && cause.status === 409
         ? '笔记刚在别处更新过，请刷新笔记后再写入。'
         : cause instanceof Error ? cause.message : '写入失败')
     } finally {
       setBusyId(undefined)
     }
-  }, [mergeNoteResponse, suggestions, refreshNotes])
+  }, [flashNotice, mergeNoteResponse, suggestions, refreshNotes])
 
   /** 供改动栏用的摘要：每条建议的新增/删除行数与预览（diff 基准 = 该建议自己的笔记正文） */
   const changes = useMemo(() => {

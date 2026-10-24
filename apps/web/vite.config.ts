@@ -2,7 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // 后端代理目标可用 NB_API_TARGET 覆盖（如 8000 被占时切 8010），默认仍是 8000
-const apiTarget = process.env.NB_API_TARGET ?? 'http://127.0.0.1:8000'
+const nodeProcess = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+const apiTarget = nodeProcess?.env?.NB_API_TARGET ?? 'http://127.0.0.1:8000'
 
 export default defineConfig({
   plugins: [react()],

@@ -85,6 +85,7 @@ export function AssistantPage() {
     courseId,
     refreshNotes: refreshCurrentNotes,
     agentFinalId: agentRun?.final?.message_id,
+    resetKey: conversation.conversationId,
   })
   const knowledgeProposals = useMemo(
     () => (agentRun?.final?.suggestions ?? []).filter(
