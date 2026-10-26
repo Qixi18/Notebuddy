@@ -45,7 +45,7 @@ export const NotebookEditor = forwardRef<NotebookEditorHandle, {
   onChange: (doc: DocNode) => void
   onSelectionChange?: (selection: SelectionAnchor | null) => void
   onRequestAI?: (action: AIAction, text: string) => void
-  onUploadImage: (file: File) => Promise<{ src: string; attachmentId: string } | null>
+  onUploadImage: (file: File) => Promise<{ src: string; attachmentId?: string; assetId?: string } | null>
   onSaveShortcut?: () => void
   onReady?: (editor: Editor) => void
 }>(function NotebookEditor({
@@ -217,7 +217,7 @@ export const NotebookEditor = forwardRef<NotebookEditorHandle, {
       return
     }
     const chain = targetEditor.chain().focus().setTextSelection(anchor.from)
-    chain.insertImage({ src: uploaded.src, attachmentId: uploaded.attachmentId, alt: file.name }).run()
+    chain.insertImage({ src: uploaded.src, attachmentId: uploaded.attachmentId, assetId: uploaded.assetId, alt: file.name }).run()
   }
 
   function confirmMath() {

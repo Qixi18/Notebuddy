@@ -12,7 +12,7 @@ class MaterialRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    course_id: str
+    course_id: str | None = None
     notebook_id: str | None = None
     lecture_title: str
     topic_title: str | None

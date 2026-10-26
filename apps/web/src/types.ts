@@ -8,10 +8,10 @@ export type Course = {
 }
 
 export type Material = {
-  notebook_id?: string | null
+  notebook_id: string
   chapter_order?: number
   id: string
-  course_id: string
+  course_id: string | null
   lecture_title: string
   topic_title: string | null
   original_filename: string
@@ -115,6 +115,57 @@ export type Coverage = {
 export type UploadResponse = {
   material: Material
   job: Job
+}
+
+export type AssetResource = {
+  id: string
+  source_type: string
+  media_type: string
+  mime_type: string
+  original_name: string
+  byte_size: number
+  sha256: string | null
+  state: string
+  role: string
+  content_url: string
+  created_at: string
+}
+
+export type AssetProcessingJob = {
+  id: string
+  asset_id: string
+  status: string
+  attempt_count: number
+  error_code: string | null
+  error_message: string | null
+  created_at: string
+  finished_at: string | null
+}
+
+export type NotebookGenerationCandidate = {
+  id: string
+  job_id: string
+  notebook_id: string
+  document: DocNode
+  status: string
+  created_at: string
+  expires_at: string | null
+}
+
+export type NotebookGenerationJob = {
+  id: string
+  notebook_id: string
+  status: string
+  base_document_revision: number
+  model: string
+  prompt_version: string
+  attempt_count: number
+  error_code: string | null
+  error_message: string | null
+  created_at: string
+  updated_at: string
+  finished_at: string | null
+  candidate: NotebookGenerationCandidate | null
 }
 
 export type AssistantSource = {

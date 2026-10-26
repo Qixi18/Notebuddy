@@ -1,6 +1,7 @@
 import type {
   DocNode, Note, Notebook, NotebookAttachment, NotebookDocumentResponse, NotebookRead,
   NotebookRevision, NotebookRevisionSummary, NotebookSummary,
+  NotebookGenerationJob,
 } from '../types'
 import { request } from './http'
 
@@ -78,4 +79,15 @@ export const notebookApi = {
   }),
   visitCourse: (courseId: string) => request<{ last_opened_at: string }>(`/api/v1/courses/${courseId}/visit`, { method: 'POST' }),
   getNotebook: (courseId: string) => request<Notebook>(`/api/v1/courses/${courseId}/notebook`),
+  createNotebookGenerationJob: (notebookId: string, assetIds: string[] = []) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({ asset_ids: assetIds }),
+  }),
+  getNotebookGenerationJob: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}`),
+  applyNotebookGenerationCandidate: (notebookId: string, jobId: string, expectedRevision: number) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/apply`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: expectedRevision }),
+  }),
+  rejectNotebookGenerationCandidate: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/reject`, { method: 'POST' }),
+  cancelNotebookGenerationJob: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/cancel`, { method: 'POST' }),
+  retryNotebookGenerationJob: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/retry`, { method: 'POST' }),
 }

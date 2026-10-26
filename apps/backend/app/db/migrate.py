@@ -36,6 +36,10 @@ PHASE_TWO_COLUMNS = {
     "page_blocks": {"object_id", "location_label", "extraction_method", "confidence", "warning"},
     "source_refs": {"status", "target_label", "parser_version"},
 }
+ASSET_COLUMNS = {
+    "materials": {"asset_id"},
+    "notebook_attachments": {"asset_id"},
+}
 PHASE_THREE_TABLES = {
     "conversations", "conversation_messages", "message_evidence",
     "knowledge_proposals", "knowledge_changes", "note_suggestions",
@@ -46,7 +50,10 @@ FOREST_TABLES = {
 }
 MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES | {
     "notebooks", "notebook_reading_positions", "unbound_notebooks",
-    "notebook_document_revisions", "notebook_attachments",
+    "notebook_document_revisions", "notebook_attachments", "notebook_relations",
+    "assets", "asset_migration_issues", "notebook_assets", "notebook_cover_assets",
+    "notebook_revision_assets", "asset_processing_jobs", "asset_parse_results",
+    "notebook_generation_jobs", "notebook_generation_candidates",
 }
 LEGACY_COLUMNS = {
     "materials": {"topic_title": "VARCHAR(200)"},
@@ -95,7 +102,13 @@ def _prepare_legacy_schema() -> None:
             if table.name in MIGRATED_TABLES:
                 continue
             existing = {column["name"] for column in inspector.get_columns(table.name)}
-            baseline = {column.name for column in table.columns} - PHASE_ONE_COLUMNS.get(table.name, set()) - PHASE_TWO_COLUMNS.get(table.name, set()) - NOTEBOOK_COLUMNS.get(table.name, set())
+            baseline = (
+                {column.name for column in table.columns}
+                - PHASE_ONE_COLUMNS.get(table.name, set())
+                - PHASE_TWO_COLUMNS.get(table.name, set())
+                - NOTEBOOK_COLUMNS.get(table.name, set())
+                - ASSET_COLUMNS.get(table.name, set())
+            )
             if not baseline.issubset(existing):
                 raise RuntimeError(f"Unsupported legacy columns in {table.name}: {sorted(baseline - existing)}")
 

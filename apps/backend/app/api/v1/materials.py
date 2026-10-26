@@ -1,20 +1,32 @@
 from __future__ import annotations
 
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.shared import ensure_course, ensure_material
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import (
+    Asset,
+    AssetParseResult,
+    AssetProcessingJob,
     Material,
     MaterialPage,
+    Notebook,
+    NotebookAsset,
+    NotebookAttachment,
     PageBlock,
     ProcessingJob,
     SourceRef,
     WebSource,
 )
+from app.notes.assets import AssetUnavailable, assert_notebook_asset, remove_notebook_asset
 from app.notes.notebook import bump_order_revision
 from app.parsers.ocr import status as ocr_status
 from app.schemas.api import (
@@ -28,35 +40,296 @@ from app.schemas.api import (
     UploadMaterialResponse,
     WebSourceRead,
 )
+from app.schemas.assets import AssetProcessingJobRead, AssetRead, AssetUploadRead
 from app.services.coverage import material_coverage
 from app.services.deletion import (
     DeletionConflict,
     impact_preview,
     soft_delete_material,
 )
+from app.services.image_assets import ImageUploadRejected, ingest_source_image
 from app.services.uploads import UploadRejected, ingest_document
 
 router = APIRouter()
 
 
+def _asset_read(asset: Asset, role: str, notebook_id: str) -> dict:
+    return {
+        "id": asset.id, "source_type": asset.source_type,
+        "media_type": asset.media_type, "mime_type": asset.mime_type,
+        "original_name": asset.original_name, "byte_size": asset.byte_size,
+        "sha256": asset.sha256, "state": asset.state, "role": role,
+        "content_url": f"/api/v1/notebooks/{notebook_id}/assets/{asset.id}/content",
+        "created_at": asset.created_at,
+    }
+
+
+@router.get("/notebooks/{notebook_id}/assets", response_model=list[AssetRead])
+def list_notebook_assets(notebook_id: str, db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    rows = db.execute(select(Asset, NotebookAsset.role, NotebookAsset.notebook_id).join(
+        NotebookAsset, NotebookAsset.asset_id == Asset.id,
+    ).where(
+        NotebookAsset.notebook_id == notebook_id,
+        NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_(None),
+    ).order_by(NotebookAsset.created_at.desc())).all()
+    return [_asset_read(asset, role, owner_notebook_id) for asset, role, owner_notebook_id in rows]
+
+
+@router.post("/notebooks/{notebook_id}/assets/{asset_id}/inline", response_model=AssetRead)
+def mark_asset_inline(notebook_id: str, asset_id: str, db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    try:
+        asset = assert_notebook_asset(db, asset_id, notebook_id)
+    except AssetUnavailable as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if asset.media_type != "image":
+        raise HTTPException(422, "只有图片资源可以插入正文")
+    link = db.scalar(select(NotebookAsset).where(
+        NotebookAsset.notebook_id == notebook_id,
+        NotebookAsset.asset_id == asset_id,
+        NotebookAsset.role == "inline_image",
+        NotebookAsset.detached_at.is_(None),
+    ))
+    if link is None:
+        db.add(NotebookAsset(
+            notebook_id=notebook_id, asset_id=asset_id, role="inline_image",
+            is_owner=False,
+        ))
+        db.commit()
+    return _asset_read(asset, "inline_image", notebook_id)
+
+
+@router.delete("/notebooks/{notebook_id}/assets/{asset_id}")
+def delete_notebook_asset(notebook_id: str, asset_id: str, db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None:
+        raise HTTPException(404, "笔记不存在")
+    try:
+        state = remove_notebook_asset(db, notebook_id, asset_id)
+    except AssetUnavailable as exc:
+        message = str(exc)
+        raise HTTPException(404 if "不存在" in message else 409, message) from exc
+    return {"asset_id": asset_id, "state": state}
+
+
+@router.post("/notebooks/{notebook_id}/assets", response_model=AssetUploadRead,
+             status_code=201)
+async def upload_notebook_asset(
+    notebook_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    filename = file.filename or "upload"
+    extension = Path(filename).suffix.lower()
+    if extension in settings.allowed_extensions:
+        data = await file.read(settings.max_upload_bytes + 1)
+        notebook = db.get(Notebook, notebook_id)
+        if notebook is None or notebook.deleted_at is not None:
+            raise HTTPException(404, "笔记不存在")
+        try:
+            material, _document_job = ingest_document(
+                db, course_id=notebook.course_id, notebook_id=notebook_id,
+                source=BytesIO(data), filename=filename,
+                lecture_title=filename, topic_title="",
+                media_type=file.content_type,
+            )
+        except UploadRejected as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
+        asset = db.get(Asset, material.asset_id)
+        if asset is None:
+            raise HTTPException(500, "资源元数据未创建")
+        return {"asset": _asset_read(asset, "source_material", notebook_id), "processing_job": None}
+    data = await file.read(20 * 1024 * 1024 + 1)
+    try:
+        asset, job = ingest_source_image(
+            db, notebook_id=notebook_id, filename=filename, data=data,
+        )
+    except ImageUploadRejected as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    return {
+        "asset": _asset_read(asset, "source_material", notebook_id),
+        "processing_job": ({
+            "id": job.id, "asset_id": job.asset_id, "status": job.status,
+            "attempt_count": job.attempt_count, "error_code": job.error_code,
+            "error_message": job.error_message, "created_at": job.created_at,
+            "finished_at": job.finished_at,
+        } if job else None),
+    }
+
+
+@router.get("/assets/{asset_id}/parse-results")
+def list_asset_parse_results(asset_id: str, db: Session = Depends(get_db)):
+    owner = db.scalar(select(NotebookAsset).where(
+        NotebookAsset.asset_id == asset_id, NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_(None),
+    ))
+    if owner is None:
+        raise HTTPException(404, "资源不存在")
+    return list(db.scalars(select(AssetParseResult).where(
+        AssetParseResult.asset_id == asset_id,
+    ).order_by(AssetParseResult.created_at.desc())).all())
+
+
+@router.get("/notebooks/{notebook_id}/assets/{asset_id}/processing-jobs",
+            response_model=list[AssetProcessingJobRead])
+def list_notebook_asset_jobs(notebook_id: str, asset_id: str, db: Session = Depends(get_db)):
+    try:
+        assert_notebook_asset(db, asset_id, notebook_id)
+    except AssetUnavailable as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return list(db.scalars(select(AssetProcessingJob).where(
+        AssetProcessingJob.asset_id == asset_id,
+        AssetProcessingJob.notebook_id == notebook_id,
+    ).order_by(AssetProcessingJob.created_at.desc())).all())
+
+
+@router.post("/assets/{asset_id}/parse-retries", response_model=AssetProcessingJobRead,
+             status_code=202)
+def retry_asset_parse(asset_id: str, db: Session = Depends(get_db)):
+    owner = db.scalar(select(NotebookAsset).where(
+        NotebookAsset.asset_id == asset_id, NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_(None),
+    ))
+    asset = db.get(Asset, asset_id)
+    if owner is None or asset is None or asset.state != "ready" or asset.media_type != "image":
+        raise HTTPException(404, "可重试的原始图片不存在")
+    attempts = db.scalar(select(func.count(AssetProcessingJob.id)).where(
+        AssetProcessingJob.asset_id == asset_id,
+    )) or 0
+    if attempts >= 5:
+        raise HTTPException(409, "图片解析最多尝试 5 次；请先检查 OCR 配置或更换图片")
+    active = db.scalar(select(AssetProcessingJob.id).where(
+        AssetProcessingJob.asset_id == asset_id,
+        AssetProcessingJob.status.in_(("pending", "processing")),
+    ))
+    if active:
+        raise HTTPException(409, "图片解析任务已在队列中")
+    job = AssetProcessingJob(
+        asset_id=asset_id, notebook_id=owner.notebook_id, owner_link_id=owner.id,
+        kind="image_parse",
+        status="pending", attempt_count=0,
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+class CourseNotebookFileRead(BaseModel):
+    id: str
+    notebook_id: str | None
+    notebook_title: str | None
+    original_filename: str
+    media_type: str
+    size_bytes: int
+    created_at: datetime
+    status: str
+
+
+class CourseNotebookFilesRead(BaseModel):
+    course_id: str
+    file_count: int
+    total_size_bytes: int
+    files: list[CourseNotebookFileRead]
+
+
 @router.get("/courses/{course_id}/materials", response_model=list[MaterialRead])
 def list_materials(course_id: str, db: Session = Depends(get_db)) -> list[Material]:
     ensure_course(db, course_id)
+    notebook_ids = select(Notebook.id).where(
+        Notebook.course_id == course_id, Notebook.deleted_at.is_(None)
+    )
     return list(
         db.scalars(
-            select(Material)
-            .where(Material.course_id == course_id, Material.deleted_at.is_(None))
+            select(Material).outerjoin(Notebook, Notebook.id == Material.notebook_id)
+            .where(or_(
+                Material.course_id == course_id,
+                and_(Material.notebook_id.in_(notebook_ids), Notebook.deleted_at.is_(None)),
+            ), Material.deleted_at.is_(None))
             .order_by(Material.created_at.desc())
         ).all()
     )
+
+
+@router.get("/courses/{course_id}/notebook-files", response_model=CourseNotebookFilesRead)
+def list_course_notebook_files(course_id: str, db: Session = Depends(get_db)) -> dict:
+    """Aggregate uploaded source files and direct attachments across course notebooks."""
+    ensure_course(db, course_id)
+    notebooks = db.scalars(select(Notebook).where(
+        Notebook.course_id == course_id, Notebook.deleted_at.is_(None)
+    )).all()
+    titles = {book.id: book.title for book in notebooks}
+    files: list[dict] = []
+    materials = db.scalars(select(Material).outerjoin(
+        Notebook, Notebook.id == Material.notebook_id,
+    ).where(
+        Material.deleted_at.is_(None),
+        or_(
+            Material.course_id == course_id,
+            and_(Notebook.course_id == course_id, Notebook.deleted_at.is_(None)),
+        ),
+    )).all()
+    for item in materials:
+        notebook_title = titles.get(item.notebook_id) if item.notebook_id else None
+        files.append({
+            "id": item.id, "notebook_id": item.notebook_id,
+            "notebook_title": notebook_title,
+            "original_filename": item.original_filename,
+            "media_type": item.media_type or "application/octet-stream",
+            "size_bytes": item.size_bytes, "created_at": item.created_at,
+            "status": item.status,
+        })
+    notebook_assets = db.execute(select(Asset, NotebookAsset.notebook_id, NotebookAsset.role).join(
+        NotebookAsset, NotebookAsset.asset_id == Asset.id,
+    ).where(
+        NotebookAsset.notebook_id.in_(titles), NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_(None), Asset.media_type == "image",
+        Asset.state.in_(("ready", "missing", "quarantined")),
+        NotebookAsset.role.in_(("source_material", "inline_image", "cover")),
+    )).all()
+    for asset, owner_notebook_id, _role in notebook_assets:
+        files.append({
+            "id": asset.id, "notebook_id": owner_notebook_id,
+            "notebook_title": titles[owner_notebook_id],
+            "original_filename": asset.original_name,
+            "media_type": asset.mime_type, "size_bytes": asset.byte_size,
+            "created_at": asset.created_at, "status": asset.state,
+        })
+    legacy_attachments = db.scalars(select(NotebookAttachment).where(
+        NotebookAttachment.notebook_id.in_(titles),
+        NotebookAttachment.asset_id.is_(None),
+    )).all()
+    for attachment in legacy_attachments:
+        files.append({
+            "id": attachment.id, "notebook_id": attachment.notebook_id,
+            "notebook_title": titles[attachment.notebook_id],
+            "original_filename": attachment.original_filename,
+            "media_type": attachment.mime, "size_bytes": attachment.size_bytes,
+            "created_at": attachment.created_at, "status": "legacy_unmapped",
+        })
+    files.sort(key=lambda item: item["created_at"], reverse=True)
+    return {
+        "course_id": course_id,
+        "file_count": len(files),
+        "total_size_bytes": sum(item["size_bytes"] for item in files),
+        "files": files,
+    }
 
 
 
 @router.get("/courses/{course_id}/deleted-materials", response_model=list[MaterialRead])
 def list_deleted_materials(course_id: str, db: Session = Depends(get_db)) -> list[Material]:
     ensure_course(db, course_id)
-    return list(db.scalars(select(Material).where(
-        Material.course_id == course_id, Material.deleted_at.is_not(None)
+    return list(db.scalars(select(Material).outerjoin(Notebook, Notebook.id == Material.notebook_id).where(
+        or_(Material.course_id == course_id,
+            and_(Notebook.course_id == course_id, Notebook.deleted_at.is_(None))),
+        Material.deleted_at.is_not(None)
     ).order_by(Material.deleted_at.desc())).all())
 
 
@@ -83,7 +356,8 @@ def restore_material(material_id: str, db: Session = Depends(get_db)) -> Materia
     material = db.get(Material, material_id)
     if material is None or material.deleted_at is None:
         raise HTTPException(status_code=404, detail="待恢复资料不存在")
-    ensure_course(db, material.course_id)
+    if material.course_id is not None:
+        ensure_course(db, material.course_id)
     material.deleted_at = None
     bump_order_revision(db, material.course_id, material.notebook_id)
     db.commit()
@@ -113,6 +387,43 @@ def upload_material(
             topic_title=topic_title, media_type=file.content_type,
             allow_duplicate=allow_duplicate, idempotency_key=idempotency_key,
             notebook_id=notebook_id,
+        )
+    except UploadRejected as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return UploadMaterialResponse(material=material, job=job)
+
+
+@router.get("/notebooks/{notebook_id}/files", response_model=list[MaterialRead])
+def list_notebook_files(notebook_id: str, db: Session = Depends(get_db)) -> list[Material]:
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    return list(db.scalars(select(Material).where(
+        Material.notebook_id == notebook_id, Material.deleted_at.is_(None)
+    ).order_by(Material.created_at.desc())).all())
+
+
+@router.post("/notebooks/{notebook_id}/files", response_model=UploadMaterialResponse,
+             status_code=201)
+def upload_notebook_file(
+    notebook_id: str,
+    file: UploadFile = File(...),
+    lecture_title: str = Form(default=""),
+    topic_title: str = Form(default=""),
+    allow_duplicate: bool = Form(default=False),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+) -> UploadMaterialResponse:
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    try:
+        material, job = ingest_document(
+            db, course_id=notebook.course_id, notebook_id=notebook.id,
+            source=file.file, filename=file.filename or "upload",
+            lecture_title=lecture_title or (file.filename or "资料"),
+            topic_title=topic_title, media_type=file.content_type,
+            allow_duplicate=allow_duplicate, idempotency_key=idempotency_key,
         )
     except UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

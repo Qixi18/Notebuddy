@@ -10,28 +10,38 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from app.core.config import settings
 from app.db.database import SessionLocal
 from app.db.migrate import migrate_database
-from app.db.models import Material, ProcessingJob
+from app.db.models import Asset, AssetProcessingJob, Material, NotebookGenerationJob, ProcessingJob
 from app.forest.jobs import (
     claim_next_forest_job,
     mark_interrupted_forest_jobs,
     process_forest_job,
 )
+from app.notes.assets import collect_detached_assets
 from app.notes.attachments import (
     prune_deleted_notebook_directories,
     prune_stray_attachment_files,
     prune_unreferenced_attachments,
 )
+from app.services.image_assets import reconcile_staged_images
+from app.services.uploads import reconcile_staged_document_assets
+from app.workers.asset_worker import claim_next_asset_job, process_asset_job
 from app.workers.material_worker import process_material
+from app.workers.notebook_generation_worker import (
+    claim_next_generation_job,
+    process_generation_job,
+)
 
 STOP = False
 ATTACHMENT_CLEANUP_INTERVAL = 60 * 60
 logger = logging.getLogger(__name__)
 _material_jobs_since_forest = 0
+_material_jobs_since_asset = 0
+_jobs_since_generation = 0
 FOREST_CHECK_INTERVAL = 3
 
 
@@ -56,6 +66,24 @@ def mark_interrupted_jobs(*, force: bool = False) -> int:
             material = db.get(Material, job.material_id)
             if material is not None:
                 material.status = "failed"
+        image_jobs = db.scalars(select(AssetProcessingJob).where(
+            AssetProcessingJob.status == "processing",
+        )).all()
+        for job in image_jobs:
+            job.status = "failed"
+            job.error_code = "interrupted"
+            job.error_message = "图片解析进程中断；原图仍保留，可重试"
+            job.finished_at = datetime.now(UTC)
+            job.updated_at = job.finished_at
+        generation_jobs = db.scalars(select(NotebookGenerationJob).where(
+            NotebookGenerationJob.status == "processing",
+        )).all()
+        for job in generation_jobs:
+            job.status = "failed"
+            job.error_code = "interrupted"
+            job.error_message = "生成进程中断；可使用相同输入重新尝试"
+            job.finished_at = datetime.now(UTC)
+            job.updated_at = job.finished_at
         db.commit()
         return len(jobs)
 
@@ -64,8 +92,11 @@ def claim_next_job() -> str | None:
     """Atomic status transition prevents two runners from taking one pending row."""
     with SessionLocal() as db:
         candidate = db.scalar(select(ProcessingJob.id).where(
-            ProcessingJob.status == "pending"
-        ).order_by(ProcessingJob.created_at, ProcessingJob.id).limit(1))
+            ProcessingJob.status == "pending",
+        ).join(Material, Material.id == ProcessingJob.material_id)
+          .outerjoin(Asset, Asset.id == Material.asset_id)
+          .where(or_(Material.asset_id.is_(None), Asset.state == "ready"))
+          .order_by(ProcessingJob.created_at, ProcessingJob.id).limit(1))
         if candidate is None:
             return None
         now = datetime.now(UTC)
@@ -82,7 +113,19 @@ def claim_next_job() -> str | None:
 
 
 def run_once() -> bool:
-    global _material_jobs_since_forest
+    global _material_jobs_since_forest, _material_jobs_since_asset, _jobs_since_generation
+    if _jobs_since_generation >= 3:
+        generation_id = claim_next_generation_job()
+        if generation_id is not None:
+            _jobs_since_generation = 0
+            process_generation_job(generation_id)
+            return True
+    if _material_jobs_since_asset >= 3:
+        asset_job_id = claim_next_asset_job()
+        if asset_job_id is not None:
+            _material_jobs_since_asset = 0
+            process_asset_job(asset_job_id)
+            return True
     # A steady material queue must not indefinitely delay forest work.
     if _material_jobs_since_forest >= FOREST_CHECK_INTERVAL:
         forest_job_id = claim_next_forest_job()
@@ -92,6 +135,16 @@ def run_once() -> bool:
             return True
     job_id = claim_next_job()
     if job_id is None:
+        asset_job_id = claim_next_asset_job()
+        if asset_job_id is not None:
+            _material_jobs_since_asset = 0
+            process_asset_job(asset_job_id)
+            return True
+        generation_id = claim_next_generation_job()
+        if generation_id is not None:
+            _jobs_since_generation = 0
+            process_generation_job(generation_id)
+            return True
         forest_job_id = claim_next_forest_job()
         if forest_job_id is None:
             return False
@@ -99,6 +152,8 @@ def run_once() -> bool:
         process_forest_job(forest_job_id)
         return True
     _material_jobs_since_forest += 1
+    _material_jobs_since_asset += 1
+    _jobs_since_generation += 1
     process_material(job_id)
     return True
 
@@ -149,6 +204,9 @@ def main() -> None:
             if time.monotonic() >= next_attachment_cleanup:
                 try:
                     with SessionLocal() as db:
+                        reconcile_staged_images(db)
+                        reconcile_staged_document_assets(db)
+                        collect_detached_assets(db)
                         prune_unreferenced_attachments(db)
                         prune_deleted_notebook_directories(db)
                         prune_stray_attachment_files(db)

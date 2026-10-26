@@ -7,14 +7,25 @@ from sqlalchemy.orm import Session
 from app.api.v1.shared import ensure_course
 from app.db.database import get_db
 from app.db.models import (
+    Asset,
     Course,
     Material,
     Note,
     Notebook,
+    NotebookAsset,
     NotebookAttachment,
+    NotebookCoverAsset,
     NotebookReadingPosition,
+    NotebookRelation,
+    NotebookRevisionAsset,
     ProcessingJob,
     utc_now,
+)
+from app.notes.assets import (
+    AssetUnavailable,
+    assert_notebook_asset,
+    has_live_asset_references,
+    storage_path,
 )
 from app.notes.attachments import (
     MAX_ATTACHMENT_BYTES,
@@ -44,6 +55,8 @@ from app.schemas.notebook import (
     NotebookMoveRequest,
     NotebookOrderUpdate,
     NotebookRead,
+    NotebookRelationCreate,
+    NotebookRelationRead,
     NotebookRestoreDeletedRequest,
     NotebookRestoreRequest,
     NotebookRevisionRead,
@@ -56,6 +69,148 @@ from app.schemas.notebook import (
 )
 
 router = APIRouter()
+
+
+def _ensure_document_image_ownership(db: Session, notebook_id: str, content: dict) -> None:
+    stack = [content]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "image":
+            attrs = node.get("attrs") or {}
+            attachment_id = attrs.get("attachmentId")
+            asset_id = attrs.get("assetId")
+            if attachment_id:
+                attachment = db.get(NotebookAttachment, attachment_id)
+                if attachment is None or attachment.notebook_id != notebook_id:
+                    raise HTTPException(422, "图片附件不属于当前笔记")
+                if attachment.asset_id:
+                    try:
+                        assert_notebook_asset(db, attachment.asset_id, notebook_id)
+                    except AssetUnavailable as exc:
+                        raise HTTPException(422, "图片附件资源不属于当前笔记或不可用") from exc
+            elif asset_id:
+                try:
+                    assert_notebook_asset(db, asset_id, notebook_id)
+                except AssetUnavailable as exc:
+                    raise HTTPException(422, "图片资源不属于当前笔记或不可用") from exc
+        stack.extend(node.get("content") or [])
+
+
+def _restore_document_image_ownership(
+    db: Session, notebook_id: str, content: dict, source_revision_id: str,
+) -> None:
+    """Reactivate only assets pinned by the exact revision being restored."""
+    for reference_id in attachment_ids(content):
+        attachment = db.get(NotebookAttachment, reference_id)
+        if attachment is not None and attachment.notebook_id != notebook_id:
+            raise HTTPException(422, "历史版本包含其他笔记的图片附件")
+        asset_id = attachment.asset_id if attachment is not None and attachment.asset_id else reference_id
+        asset = db.get(Asset, asset_id)
+        if asset is None:
+            # Legacy attachments that were intentionally left unmapped remain
+            # readable through the compatibility route and are not Asset IDs.
+            if attachment is not None:
+                continue
+            raise HTTPException(422, "历史版本引用的资源不存在")
+        owner = db.scalar(select(NotebookAsset).where(
+            NotebookAsset.notebook_id == notebook_id,
+            NotebookAsset.asset_id == asset_id,
+            NotebookAsset.is_owner.is_(True),
+        ))
+        if owner is None:
+            raise HTTPException(422, "历史版本引用的资源不属于当前笔记")
+        if owner.detached_at is not None:
+            pinned = db.scalar(select(NotebookRevisionAsset.id).where(
+                NotebookRevisionAsset.revision_id == source_revision_id,
+                NotebookRevisionAsset.notebook_id == notebook_id,
+                NotebookRevisionAsset.owner_link_id == owner.id,
+                NotebookRevisionAsset.asset_id == asset_id,
+            ))
+            if pinned is None:
+                raise HTTPException(422, "历史版本没有权限恢复已解除的图片资源")
+        if asset.state != "ready":
+            raise HTTPException(409, "历史版本图片当前不可用，无法恢复")
+        try:
+            storage_path(asset)
+        except AssetUnavailable as exc:
+            raise HTTPException(409, "历史版本图片文件缺失，无法恢复") from exc
+        owner.detached_at = None
+
+
+@router.get("/notebooks/{notebook_id}/relations", response_model=list[NotebookRelationRead])
+def list_notebook_relations(notebook_id: str, db: Session = Depends(get_db)):
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    outgoing = db.scalars(select(NotebookRelation).where(
+        NotebookRelation.source_notebook_id == notebook_id,
+    )).all()
+    incoming = db.scalars(select(NotebookRelation).where(
+        NotebookRelation.target_notebook_id == notebook_id,
+    )).all()
+    relations = [
+        {"id": rel.id, "source_notebook_id": rel.source_notebook_id,
+         "target_notebook_id": rel.target_notebook_id,
+         "related_notebook_id": rel.target_notebook_id,
+         "related_notebook_title": db.get(Notebook, rel.target_notebook_id).title,
+         "direction": "outgoing", "relation_type": rel.relation_type,
+         "description": rel.description, "created_at": rel.created_at}
+        for rel in outgoing
+    ]
+    relations.extend(
+        {"id": rel.id, "source_notebook_id": rel.source_notebook_id,
+         "target_notebook_id": rel.target_notebook_id,
+         "related_notebook_id": rel.source_notebook_id,
+         "related_notebook_title": db.get(Notebook, rel.source_notebook_id).title,
+         "direction": "incoming", "relation_type": rel.relation_type,
+         "description": rel.description, "created_at": rel.created_at}
+        for rel in incoming
+    )
+    return sorted(relations, key=lambda rel: (rel["created_at"], rel["id"]), reverse=True)
+
+
+@router.post("/notebooks/{notebook_id}/relations", response_model=NotebookRelationRead,
+             status_code=201)
+def create_notebook_relation(notebook_id: str, payload: NotebookRelationCreate,
+                             db: Session = Depends(get_db)):
+    source = db.get(Notebook, notebook_id)
+    target = db.get(Notebook, payload.target_notebook_id)
+    if source is None or source.deleted_at is not None:
+        raise HTTPException(404, "源笔记不存在")
+    if target is None or target.deleted_at is not None:
+        raise HTTPException(404, "目标笔记不存在")
+    if source.id == target.id:
+        raise HTTPException(422, "笔记不能关联到自身")
+    relation = NotebookRelation(
+        source_notebook_id=source.id, target_notebook_id=target.id,
+        relation_type=payload.relation_type.strip(), description=payload.description,
+    )
+    db.add(relation)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, "该关系已存在") from exc
+    db.refresh(relation)
+    return {"id": relation.id, "source_notebook_id": source.id,
+            "target_notebook_id": target.id, "related_notebook_id": target.id,
+            "related_notebook_title": target.title, "direction": "outgoing",
+            "relation_type": relation.relation_type, "description": relation.description,
+            "created_at": relation.created_at}
+
+
+@router.delete("/notebooks/{notebook_id}/relations/{relation_id}", status_code=204)
+def delete_notebook_relation(notebook_id: str, relation_id: str,
+                             db: Session = Depends(get_db)):
+    relation = db.get(NotebookRelation, relation_id)
+    if relation is None or notebook_id not in (
+        relation.source_notebook_id, relation.target_notebook_id,
+    ):
+        raise HTTPException(404, "笔记关系不存在")
+    db.delete(relation)
+    db.commit()
 
 
 def _cover_url(book: Notebook) -> str | None:
@@ -132,11 +287,7 @@ def put_unbound_document(notebook_id: str, payload: NotebookDocumentUpdate,
             validate_document(legacy_blocks_to_document([block.model_dump() for block in payload.blocks or []]))
     except DocumentValidationError as exc:
         raise HTTPException(422, str(exc)) from exc
-    if attachment_ids(content):
-        for attachment_id in attachment_ids(content):
-            attachment = db.get(NotebookAttachment, attachment_id)
-            if attachment is None or attachment.notebook_id != notebook_id:
-                raise HTTPException(422, "图片附件不属于当前笔记")
+    _ensure_document_image_ownership(db, notebook_id, content)
     now = utc_now()
     next_revision = payload.expected_revision + 1
     result = db.execute(update(Notebook).where(
@@ -205,6 +356,11 @@ def restore_unbound_revision(notebook_id: str, revision: int,
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(409, "笔记已在别处更新，请先刷新后再恢复")
+    try:
+        _restore_document_image_ownership(db, notebook_id, content, snapshot.id)
+    except HTTPException:
+        db.rollback()
+        raise
     record_snapshot(db, notebook_id, next_revision, content, origin="restore")
     db.commit()
     return {"schema_version": 2, "content": content,
@@ -232,10 +388,6 @@ def bind_notebook(notebook_id: str, payload: NotebookBindRequest, db: Session = 
     book.tree_slot = 0 if slot is None else slot + 1
     book.display_order = book.tree_slot
     book.order_revision = next_order_revision
-    db.execute(update(NotebookAttachment).where(
-        NotebookAttachment.notebook_id == book.id,
-        NotebookAttachment.course_id.is_(None),
-    ).values(course_id=course.id))
     db.flush()
     bound_book = book
     db.commit()
@@ -258,9 +410,6 @@ def unbind_notebook(notebook_id: str, db: Session = Depends(get_db)):
     book.display_order = 0
     book.order_revision = 0
     book.is_default = False
-    db.execute(update(NotebookAttachment).where(
-        NotebookAttachment.notebook_id == notebook_id,
-    ).values(course_id=None))
     db.commit()
     db.refresh(book)
     return _summary(book)
@@ -302,10 +451,11 @@ def create_notebook(course_id: str, payload: NotebookTitleUpdate, db: Session = 
 @router.put("/notebooks/{notebook_id}/cover")
 async def upload_notebook_cover(notebook_id: str, file: UploadFile = File(...),
                                 db: Session = Depends(get_db)):
+    import hashlib
     import uuid
 
-    from app.core.config import settings
     from app.notes.attachments import MAX_ATTACHMENT_BYTES, sniff_image_mime
+    from app.services.image_assets import finalize_staged_image, write_staged_image
 
     book = db.get(Notebook, notebook_id)
     if book is None or book.deleted_at is not None:
@@ -316,39 +466,85 @@ async def upload_notebook_cover(notebook_id: str, file: UploadFile = File(...),
         raise HTTPException(413 if len(data) > MAX_ATTACHMENT_BYTES else 422,
                             "封面需为不超过 10 MB 的 PNG、JPEG、WebP 或 GIF 图片")
     extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}[mime]
-    directory = settings.data_dir / "notebook-covers"
-    directory.mkdir(parents=True, exist_ok=True)
-    name = f"{notebook_id}-{uuid.uuid4().hex}{extension}"
-    (directory / name).write_bytes(data)
-    old_name = book.cover_filename
+    asset_id = str(uuid.uuid4())
+    name = f"{notebook_id}-{asset_id}{extension}"
+    staging_path = write_staged_image(asset_id, data)
+    old_cover = db.get(NotebookCoverAsset, notebook_id)
+    asset = Asset(
+        id=asset_id, source_type="user_upload", media_type="image", mime_type=mime,
+        extension=extension, original_name=(file.filename or "cover")[:255],
+        storage_key=f"notebook-covers/{notebook_id}/{asset_id}{extension}", byte_size=len(data),
+        sha256=hashlib.sha256(data).hexdigest(), state="staging",
+        created_at=utc_now(), verified_at=None,
+    )
+    db.add(asset)
+    db.flush()
+    owner_link = NotebookAsset(notebook_id=notebook_id, asset_id=asset_id, role="cover",
+                               is_owner=True, created_at=utc_now())
+    db.add(owner_link)
+    db.flush()
+    if old_cover:
+        old_link = db.scalar(select(NotebookAsset).where(
+            NotebookAsset.notebook_id == notebook_id,
+            NotebookAsset.asset_id == old_cover.asset_id,
+            NotebookAsset.is_owner.is_(True), NotebookAsset.detached_at.is_(None),
+        ))
+        if old_link:
+            old_link.detached_at = utc_now()
+        db.delete(old_cover)
+    db.add(NotebookCoverAsset(notebook_id=notebook_id, asset_id=asset_id,
+                              owner_link_id=owner_link.id, created_at=utc_now()))
     book.cover_filename, book.cover_mime = name, mime
-    db.commit()
-    if old_name:
-        (directory / old_name).unlink(missing_ok=True)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        staging_path.unlink(missing_ok=True)
+        raise
+    finalize_staged_image(db, asset)
     return {"cover_url": _cover_url(book)}
 
 
 @router.get("/notebooks/{notebook_id}/cover")
 def get_notebook_cover(notebook_id: str, db: Session = Depends(get_db)):
-    from app.core.config import settings
     book = db.get(Notebook, notebook_id)
     if book is None or book.deleted_at is not None or book.cover_filename is None:
         raise HTTPException(404, "笔记封面不存在")
-    path = (settings.data_dir / "notebook-covers" / book.cover_filename).resolve()
-    if not path.is_relative_to((settings.data_dir / "notebook-covers").resolve()) or not path.is_file():
+    cover = db.get(NotebookCoverAsset, notebook_id)
+    asset = db.get(Asset, cover.asset_id) if cover else None
+    try:
+        owned = db.scalar(select(NotebookAsset.id).where(
+            NotebookAsset.notebook_id == notebook_id,
+            NotebookAsset.asset_id == asset.id if asset is not None else False,
+            NotebookAsset.is_owner.is_(True), NotebookAsset.detached_at.is_(None),
+        )) if asset is not None else None
+        path = storage_path(asset) if asset is not None and asset.state == "ready" and owned else None
+    except AssetUnavailable:
+        path = None
+    if path is None:
         raise HTTPException(404, "笔记封面不存在")
-    return FileResponse(path, media_type=book.cover_mime or "application/octet-stream",
+    return FileResponse(path, media_type=asset.mime_type,
                         headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.delete("/notebooks/{notebook_id}/cover", status_code=204)
 def delete_notebook_cover(notebook_id: str, db: Session = Depends(get_db)):
-    from app.core.config import settings
     book = db.get(Notebook, notebook_id)
     if book is None:
         raise HTTPException(404, "笔记不存在")
-    if book.cover_filename:
-        (settings.data_dir / "notebook-covers" / book.cover_filename).unlink(missing_ok=True)
+    cover = db.get(NotebookCoverAsset, notebook_id)
+    asset = db.get(Asset, cover.asset_id) if cover else None
+    if cover:
+        link = db.scalar(select(NotebookAsset).where(
+            NotebookAsset.notebook_id == notebook_id,
+            NotebookAsset.asset_id == cover.asset_id,
+            NotebookAsset.is_owner.is_(True), NotebookAsset.detached_at.is_(None),
+        ))
+        if link:
+            link.detached_at = utc_now()
+        db.delete(cover)
+    if asset:
+        asset.state = "delete_pending"
     book.cover_filename = book.cover_mime = None
     db.commit()
 
@@ -369,7 +565,6 @@ def move_notebook(notebook_id: str, payload: NotebookMoveRequest, db: Session = 
     book.display_order = book.tree_slot
     book.order_revision = course.notebook_order_revision + 1
     book.is_default = slot is None
-    db.execute(update(NotebookAttachment).where(NotebookAttachment.notebook_id == book.id).values(course_id=course.id))
     db.commit()
     db.refresh(book)
     return _summary(book)
@@ -427,8 +622,6 @@ def restore_deleted_notebook(notebook_id: str, payload: NotebookRestoreDeletedRe
     book.deleted_at = None
     db.execute(update(Course).where(Course.id == course.id).values(
         notebook_order_revision=Course.notebook_order_revision + 1))
-    db.execute(update(NotebookAttachment).where(NotebookAttachment.notebook_id == book.id).values(
-        course_id=course.id))
     db.commit(); db.refresh(book)
     return _summary(book)
 
@@ -476,10 +669,7 @@ def put_notebook_document(course_id: str, notebook_id: str, payload: NotebookDoc
     except DocumentValidationError as exc:
         raise HTTPException(422, str(exc)) from exc
 
-    for attachment_id in attachment_ids(content):
-        attachment = db.get(NotebookAttachment, attachment_id)
-        if attachment is None or attachment.notebook_id != notebook_id:
-            raise HTTPException(422, "图片附件不属于当前笔记")
+    _ensure_document_image_ownership(db, notebook_id, content)
 
     now = utc_now()
     next_revision = payload.expected_revision + 1
@@ -543,6 +733,11 @@ def restore_notebook_revision(course_id: str, notebook_id: str, revision: int,
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(409, "笔记已在别处更新，请刷新后再恢复")
+    try:
+        _restore_document_image_ownership(db, notebook_id, content, snapshot.id)
+    except HTTPException:
+        db.rollback()
+        raise
     record_snapshot(db, notebook_id, next_revision, content, origin="restore")
     db.commit()
     return {"schema_version": 2, "content": content,
@@ -558,7 +753,7 @@ async def upload_notebook_attachment(course_id: str, notebook_id: str,
     ensure_notebook(db, course_id, notebook_id)
     data = await file.read(MAX_ATTACHMENT_BYTES + 1)
     try:
-        attachment = store_attachment(db, course_id=course_id, notebook_id=notebook_id,
+        attachment = store_attachment(db, notebook_id=notebook_id,
                                       filename=file.filename or "image", data=data)
     except AttachmentRejected as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
@@ -579,7 +774,7 @@ async def upload_unbound_notebook_attachment(notebook_id: str,
         raise HTTPException(404, "未分类笔记不存在")
     data = await file.read(MAX_ATTACHMENT_BYTES + 1)
     try:
-        attachment = store_attachment(db, course_id=None, notebook_id=notebook_id,
+        attachment = store_attachment(db, notebook_id=notebook_id,
                                       filename=file.filename or "image", data=data)
     except AttachmentRejected as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
@@ -595,10 +790,32 @@ def get_notebook_attachment(attachment_id: str, db: Session = Depends(get_db)):
     attachment = db.get(NotebookAttachment, attachment_id)
     if attachment is None:
         raise HTTPException(404, "附件不存在")
-    try:
-        path = attachment_path(attachment)
-    except AttachmentRejected as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+    if attachment.asset_id:
+        try:
+            owner = db.scalar(select(NotebookAsset).where(
+                NotebookAsset.asset_id == attachment.asset_id,
+                NotebookAsset.notebook_id == attachment.notebook_id,
+                NotebookAsset.is_owner.is_(True),
+            ))
+            retained = bool(owner and db.scalar(select(func.count()).select_from(
+                NotebookRevisionAsset
+            ).where(
+                NotebookRevisionAsset.notebook_id == attachment.notebook_id,
+                NotebookRevisionAsset.asset_id == attachment.asset_id,
+            )))
+            if owner is None or (owner.detached_at is not None and not retained):
+                raise AssetUnavailable("附件没有有效引用")
+            asset = db.get(Asset, attachment.asset_id)
+            if asset is None or asset.state != "ready":
+                raise AssetUnavailable("附件资源不可用")
+            path = storage_path(asset)
+        except AssetUnavailable as exc:
+            raise HTTPException(404, str(exc)) from exc
+    else:
+        try:
+            path = attachment_path(attachment)
+        except AttachmentRejected as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
     if not path.is_file():
         raise HTTPException(404, "附件文件不存在")
     return FileResponse(path, media_type=attachment.mime,
@@ -606,9 +823,57 @@ def get_notebook_attachment(attachment_id: str, db: Session = Depends(get_db)):
                                  "Content-Disposition": "inline"})
 
 
+@router.get("/assets/{asset_id}/content")
+@router.get("/notebooks/{notebook_id}/assets/{asset_id}/content")
+def get_asset_content(
+    asset_id: str, notebook_id: str | None = None, db: Session = Depends(get_db),
+):
+    """Read a ready Notebook-owned asset using its stable resource ID.
+
+    This local single-user app has no authenticated owner boundary; the owner
+    link check enforces Notebook data integrity, not multi-user authorization.
+    """
+    if notebook_id is not None:
+        notebook = db.get(Notebook, notebook_id)
+        if notebook is None or notebook.deleted_at is not None:
+            raise HTTPException(404, "笔记不存在")
+        owner = db.scalar(select(NotebookAsset).where(
+            NotebookAsset.asset_id == asset_id,
+            NotebookAsset.notebook_id == notebook_id,
+            NotebookAsset.is_owner.is_(True),
+        ))
+    else:
+        owner = db.scalar(select(NotebookAsset).where(
+            NotebookAsset.asset_id == asset_id,
+            NotebookAsset.is_owner.is_(True),
+            NotebookAsset.detached_at.is_(None),
+        ))
+    if owner is None:
+        raise HTTPException(404, "资源不存在")
+    if notebook_id is None:
+        notebook_id = owner.notebook_id
+    asset = db.get(Asset, asset_id)
+    if asset is None or asset.state != "ready":
+        raise HTTPException(404, "资源不存在")
+    if owner.detached_at is not None and not has_live_asset_references(db, asset, notebook_id):
+        raise HTTPException(404, "资源已解除关联")
+    try:
+        path = storage_path(asset)
+    except AssetUnavailable as exc:
+        if "文件不存在" in str(exc):
+            asset_row = db.get(Asset, asset_id)
+            if asset_row is not None and asset_row.state == "ready":
+                asset_row.state = "missing"
+                db.commit()
+        raise HTTPException(404, str(exc)) from exc
+    return FileResponse(path, media_type=asset.mime_type,
+                        headers={"Cache-Control": "private, max-age=86400",
+                                 "Content-Disposition": "inline"})
+
+
 def chapter_content(db: Session, course_id: str, book: Notebook, material_id: str):
     material = db.get(Material, material_id)
-    if (material is None or material.course_id != course_id or material.notebook_id != book.id
+    if (material is None or material.notebook_id != book.id or book.course_id != course_id
             or material.deleted_at is not None):
         raise HTTPException(404, "该笔记本中的章节不存在或已移除")
     return {"material_id": material_id, "sections": db.scalars(select(Note).where(
@@ -628,8 +893,7 @@ def reorder(db: Session, course_id: str, book: Notebook, payload: NotebookOrderU
     if result.rowcount != 1:
         db.rollback()
         raise HTTPException(409, "章节已变化，请刷新目录后重新排序")
-    materials = db.scalars(select(Material).where(Material.course_id == course_id,
-                                                 Material.notebook_id == book.id,
+    materials = db.scalars(select(Material).where(Material.notebook_id == book.id,
                                                  Material.deleted_at.is_(None))).all()
     ids = payload.material_ids
     if len(set(ids)) != len(ids) or set(ids) != {m.id for m in materials}:

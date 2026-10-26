@@ -76,6 +76,11 @@ def extract_material_knowledge(db: Session, material_id: str) -> list[KnowledgeN
             continue
 
         source_refs = ensure_source_refs(db, page.blocks, parser_version=material.parser_version)
+        if material.course_id is None:
+            # The legacy knowledge graph is course-scoped. Notebook resource
+            # parsing still completes and persists MaterialPage evidence, but
+            # must not invent a course or route content into another Notebook.
+            continue
         draft = extract_page_draft(
             page.title or f"第 {page.page_number} 页",
             page.raw_text,
@@ -119,7 +124,8 @@ def extract_material_knowledge(db: Session, material_id: str) -> list[KnowledgeN
         ensure_note(db, material.course_id, node, note_content, source_refs,
                     material_id=material.id,
                     section_key=page.stable_location_key or f"page:{page.page_number}",
-                    section_order=page.page_number)
+                    section_order=page.page_number,
+                    notebook_id=material.notebook_id)
         create_knowledge_proposal(
             db,
             course_id=material.course_id,

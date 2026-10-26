@@ -45,18 +45,84 @@ def _snapshot(database: Path, destination: Path) -> None:
         source.backup(target)
 
 
+def _asset_source_path(data_dir: Path, storage_key: str) -> Path:
+    if (not isinstance(storage_key, str) or not storage_key or "\\" in storage_key
+            or ":" in storage_key or Path(storage_key).is_absolute()
+            or ".." in Path(storage_key).parts or len(Path(storage_key).parts) < 2
+            or storage_key in {".env", "notebook.sqlite3"}):
+        raise ValueError("unsafe Asset storage key")
+    root = data_dir.resolve()
+    candidate = root / storage_key
+    source = candidate.resolve()
+    if not source.is_relative_to(root) or source == root:
+        raise ValueError("Asset storage key escapes the data directory")
+    current = candidate
+    while current != root:
+        if current.is_symlink():
+            raise ValueError("Asset storage path contains a symlink")
+        current = current.parent
+    return source
+
+
+def _asset_entries(database: Path, data_dir: Path) -> list[dict[str, Any]]:
+    with closing(sqlite3.connect(database)) as connection:
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        if "assets" not in tables:
+            return []
+        rows = connection.execute(
+            "SELECT storage_key FROM assets WHERE state NOT IN ('deleted','missing') "
+            "ORDER BY storage_key"
+        ).fetchall()
+    entries = []
+    for (key,) in rows:
+        source = _asset_source_path(data_dir, key)
+        if not source.is_file():
+            raise ValueError(f"Asset missing or not a file: {key}")
+        entries.append({"key": key, "bytes": source.stat().st_size, "sha256": _sha256(source)})
+    return entries
+
+
 def _filter_snapshot_to_course(database: Path, course_id: str) -> None:
     with closing(sqlite3.connect(database)) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
         if connection.execute("SELECT 1 FROM courses WHERE id = ?", (course_id,)).fetchone() is None:
             raise ValueError("course does not exist in backup snapshot")
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "notebooks" in tables and "materials" in tables:
+            # Course is only a grouping. Keep Materials owned by this course's
+            # Notebooks, plus genuinely legacy course-only rows; do not let
+            # ON DELETE SET NULL turn other courses' Materials into unowned
+            # rows that survive in this package.
+            connection.execute("""
+                DELETE FROM materials
+                WHERE (notebook_id IS NOT NULL AND notebook_id NOT IN
+                       (SELECT id FROM notebooks WHERE course_id = ?))
+                   OR (notebook_id IS NULL AND (course_id IS NULL OR course_id != ?))
+            """, (course_id, course_id))
+            connection.execute(
+                "DELETE FROM notebooks WHERE course_id IS NULL OR course_id != ?",
+                (course_id,),
+            )
         # Forest jobs and plans coordinate the whole curriculum; no partial export
         # may carry external course references in their JSON or evidence snapshots.
         for table in ("cross_course_relations", "forest_jobs", "curriculum_imports"):
             if table in tables:
                 connection.execute(f"DELETE FROM {table}")
+        if "asset_migration_issues" in tables:
+            # Migration reconciliation is global operational metadata and is
+            # not part of a course content package.
+            connection.execute("DELETE FROM asset_migration_issues")
         connection.execute("DELETE FROM courses WHERE id != ?", (course_id,))
+        if "assets" in tables and "notebook_assets" in tables:
+            connection.execute("""
+                DELETE FROM assets
+                WHERE id NOT IN (SELECT asset_id FROM notebook_assets)
+                  AND id NOT IN (SELECT asset_id FROM materials WHERE asset_id IS NOT NULL)
+                  AND id NOT IN (SELECT asset_id FROM notebook_attachments WHERE asset_id IS NOT NULL)
+                  AND id NOT IN (SELECT asset_id FROM notebook_cover_assets)
+            """)
         connection.commit()
 
 
@@ -83,6 +149,7 @@ def create_backup_archive(data_dir: Path, destination: Path, *, course_id: str |
         if course_id:
             _filter_snapshot_to_course(snapshot, course_id)
         names, course_count, material_count = _original_names(snapshot)
+        assets = _asset_entries(snapshot, data_dir)
         files: list[dict] = []
         for name in names:
             validate_original_name(name)
@@ -97,6 +164,7 @@ def create_backup_archive(data_dir: Path, destination: Path, *, course_id: str |
             "course_count": course_count,
             "material_count": material_count,
             "originals": files,
+            "assets": assets,
             "derived_indexes": "omitted; rebuild from SQLite pages",
         }
         with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -104,6 +172,8 @@ def create_backup_archive(data_dir: Path, destination: Path, *, course_id: str |
             archive.write(snapshot, "notebook.sqlite3")
             for entry in files:
                 archive.write(originals_dir / entry["name"], f"originals/{entry['name']}")
+            for entry in assets:
+                archive.write(data_dir / entry["key"], f"resources/{entry['key']}")
     preview_backup(destination)
     return manifest
 
@@ -127,6 +197,25 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict[str, Any]:
         validate_original_name(name)
         if not entry.get("sha256") or not isinstance(entry.get("bytes"), int):
             raise ValueError(f"backup manifest contains an unsafe original: {name}")
+    assets = manifest.get("assets", [])
+    if not isinstance(assets, list):
+        raise TypeError("backup manifest assets must be a list")
+    asset_keys = set()
+    for entry in assets:
+        if not isinstance(entry, dict) or not isinstance(entry.get("key"), str):
+            raise TypeError("backup manifest contains an invalid Asset entry")
+        key = entry["key"]
+        if key in asset_keys:
+            raise ValueError("backup manifest contains duplicate Asset keys")
+        asset_keys.add(key)
+        if not entry.get("sha256") or not isinstance(entry.get("bytes"), int):
+            raise ValueError("backup manifest contains an unsafe Asset entry")
+        # Validate the archive member form and the destination-relative key.
+        validate_archive_member(f"resources/{key}")
+        if ("\\" in key or ":" in key or Path(key).is_absolute()
+                or ".." in Path(key).parts or len(Path(key).parts) < 2
+                or key in {".env", "notebook.sqlite3"}):
+            raise ValueError("backup manifest contains an unsafe Asset storage key")
     return manifest
 
 
@@ -203,6 +292,25 @@ def preview_backup(path: Path, *, current_database: Path | None = None) -> dict:
                 continue
             if size != entry.get("bytes") or digest != entry.get("sha256"):
                 errors.append(f"original hash mismatch: {entry['name']}")
+        asset_entries = manifest.get("assets", [])
+        manifest_asset_keys = {entry["key"] for entry in asset_entries}
+        archive_asset_keys = {
+            name.removeprefix("resources/")
+            for name in names
+            if name.startswith("resources/") and not name.endswith("/")
+        }
+        for extra in sorted(archive_asset_keys - manifest_asset_keys):
+            errors.append(f"Asset not listed in manifest: {extra}")
+        for missing in sorted(manifest_asset_keys - archive_asset_keys):
+            errors.append(f"missing Asset: {missing}")
+        for entry in asset_entries:
+            member = f"resources/{entry['key']}"
+            try:
+                digest, size = _archive_sha256(archive, member)
+            except KeyError:
+                continue
+            if size != entry["bytes"] or digest != entry["sha256"]:
+                errors.append(f"Asset hash mismatch: {entry['key']}")
         database = archive.read("notebook.sqlite3")
         with tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False) as temp:
             temp.write(database)
@@ -220,6 +328,15 @@ def preview_backup(path: Path, *, current_database: Path | None = None) -> dict:
                     references = referenced_original_names(connection, include_removed=False)
                     missing = sorted(references - manifest_names)
                     errors.extend(f"database references missing original: {name}" for name in missing[:50])
+                    db_asset_keys = set()
+                    if "assets" in tables:
+                        db_asset_keys = {row[0] for row in connection.execute(
+                            "SELECT storage_key FROM assets WHERE state NOT IN ('deleted','missing')"
+                        )}
+                    for key in sorted(db_asset_keys - manifest_asset_keys):
+                        errors.append(f"database references missing Asset: {key}")
+                    for key in sorted(manifest_asset_keys - db_asset_keys):
+                        errors.append(f"backup lists unreferenced Asset: {key}")
                     conflicts.extend(_course_conflicts(temp_path, current_database))
                 else:
                     errors.append("sqlite schema is missing courses or materials")
@@ -232,7 +349,12 @@ def preview_backup(path: Path, *, current_database: Path | None = None) -> dict:
             "course_count": manifest.get("course_count", 0),
             "material_count": manifest.get("material_count", 0),
             "original_count": len(manifest.get("originals", [])),
-            "total_bytes": sum(int(item.get("bytes", 0)) for item in manifest.get("originals", [])),
+            "assets": manifest.get("assets", []),
+            "asset_count": len(manifest.get("assets", [])),
+            "total_bytes": (
+                sum(int(item.get("bytes", 0)) for item in manifest.get("originals", []))
+                + sum(int(item.get("bytes", 0)) for item in manifest.get("assets", []))
+            ),
             "conflicts": conflicts,
             "errors": errors,
         }
@@ -254,6 +376,13 @@ def restore_backup_to_empty(path: Path, destination: Path) -> dict:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(info) as source, target.open("wb") as output:
                     shutil.copyfileobj(source, output)
+        for entry in preview.get("assets", []):
+            key = entry["key"]
+            member = f"resources/{key}"
+            target = destination / key
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
     return preview
 
 
