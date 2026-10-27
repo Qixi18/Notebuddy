@@ -924,6 +924,11 @@ class NoteSuggestion(Base):
 
     note: Mapped[Note] = relationship()
 
+    @property
+    def note_title(self) -> str | None:
+        """目标笔记标题快照：多目标建议卡与改动栏显示用（from_attributes 不会自动生成）。"""
+        return self.note.title if self.note else None
+
 
 class Feedback(Base):
     __tablename__ = "feedback"

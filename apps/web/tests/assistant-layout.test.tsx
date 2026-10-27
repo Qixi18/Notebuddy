@@ -11,9 +11,15 @@ vi.mock('../src/api', () => ({
       original: 'red-black tree', common_translations: ['红黑树'], discipline: '数据结构',
       explanation: '一种自平衡二叉搜索树。', source_note: '课程资料', uncertain: false, sources: [],
     })),
+    /* P4：答疑页挂载即按课程拉待确认建议（空列表即可） */
+    listCourseSuggestions: vi.fn(async () => []),
+    getNote: vi.fn(),
+    /* P6：消息全文搜索 */
+    searchMessages: vi.fn(async () => []),
   },
 }))
 
+import { api } from '../src/api'
 import type { ConversationMessage } from '../src/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { AssistantPage } from '../src/pages/AssistantPage'
@@ -21,7 +27,7 @@ import { AssistantPage } from '../src/pages/AssistantPage'
 afterEach(cleanup)
 
 const course = { id: 'c1', name: '数据结构与算法', description: null, created_at: '2026-01-01T00:00:00Z' }
-const material = { id: 'm1', course_id: 'c1', lecture_title: '第 3 讲 树与二叉树', topic_title: null, original_filename: 'l3.pptx', media_type: 'pptx', size_bytes: 1, status: 'ready', page_count: 30, created_at: '2026-01-01T00:00:00Z' }
+const material = { id: 'm1', course_id: 'c1', lecture_title: '第 3 讲 树与二叉树', topic_title: null, original_filename: 'l3.pptx', media_type: 'pptx', size_bytes: 1, status: 'completed', page_count: 30, created_at: '2026-01-01T00:00:00Z' }
 const page = { id: 'p1', material_id: 'm1', page_number: 1, title: '红黑树', raw_text: '', parse_status: 'ok', warning: null, location_type: 'page', location_label: null, stable_location_key: null, extraction_method: 'text', confidence: 1 }
 
 const greeting: ConversationMessage = {
@@ -143,7 +149,7 @@ test('三区骨架渲染：左栏课程历史、中栏上下文条与对话、�
   renderPage()
   expect(screen.getByLabelText('桌宠与会话')).toBeTruthy()
   expect(screen.getByLabelText('课程答疑对话')).toBeTruthy()
-  expect(screen.getByLabelText('本次改动')).toBeTruthy()
+  expect(screen.getByLabelText('待确认改动')).toBeTruthy()
   /* 上下文条：可见的「上下文」二字已去掉，靠 aria-label 定位 */
   expect(screen.getByLabelText('提问上下文')).toBeTruthy()
   expect(screen.getByText('数据结构与算法')).toBeTruthy()
@@ -315,4 +321,92 @@ test('用户气泡显示提问时间', () => {
   renderPage({ messages: [greeting, asked, answered] })
   /* 时间标签跟着运行环境时区走，这里只断言「提问气泡上确实有时间」 */
   expect(document.querySelectorAll('.workspace-msg-user time').length).toBe(1)
+})
+
+/* ---- P6 消息全文搜索 ---- */
+
+test('搜索面板消息命中：显示命中片段，点击带定位目标切换会话', async () => {
+  vi.mocked(api.searchMessages).mockResolvedValueOnce([
+    {
+      conversation_id: 'conv-0', conversation_title: '堆排序的时间复杂度',
+      message_id: 'msg-hit-1', message_role: 'user',
+      snippet: '……复杂度分析里提到的红黑树旋转可以类比……', created_at: '2026-10-20T14:01:00Z',
+    },
+  ])
+  const { conversation } = renderPage()
+  fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
+  fireEvent.change(screen.getByLabelText('搜索会话标题'), { target: { value: '旋转' } })
+
+  /* 标题不命中的关键词走消息级搜索：高亮关键词 + 显示会话名（标题命中的会话组照常显示） */
+  await waitFor(() => {
+    const mark = document.querySelector('.workspace-palette-snippet mark')
+    expect(mark?.textContent).toBe('旋转')
+  })
+  const groups = document.querySelectorAll('.workspace-palette-group')
+  expect([...groups].map((node) => node.textContent)).toEqual(['会话', '消息'])
+  expect(document.querySelector('.workspace-palette-hit-title')?.textContent).toBe('堆排序的时间复杂度')
+
+  fireEvent.click(document.querySelector('.workspace-palette-snippet')?.closest('button') as Element)
+  expect(conversation.selectConversation).toHaveBeenCalledWith('conv-0', 'msg-hit-1')
+})
+
+/* ---- P3 课件收窄 ---- */
+/* 「整门课程」是两步：先选档（展开课程子菜单），再点当前课程落档 */
+function pickCourseScope() {
+  fireEvent.click(screen.getAllByTitle('修改提问范围')[0])
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '整门课程' }))
+  const coursePick = document.querySelector('.workspace-scope-pick')
+  if (!coursePick) throw new Error('课程子菜单未展开')
+  fireEvent.click(coursePick)
+}
+
+function pickGlobalScope() {
+  fireEvent.click(screen.getAllByTitle('修改提问范围')[0])
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '全局可查' }))
+}
+
+test('课件收窄控件仅在「整门课程」档显示，点开列出当前课程课件', () => {
+  renderPage()
+  /* 默认全局可查：没有收窄入口 */
+  expect(screen.queryByRole('button', { name: /课件 · / })).toBeNull()
+
+  pickCourseScope()
+  const chip = screen.getByRole('button', { name: /课件 · / })
+  expect(chip.textContent).toContain('全部')
+  fireEvent.click(chip)
+  const menu = screen.getByRole('menu', { name: '选择收窄课件' })
+  expect(menu.textContent).toContain('全部课件')
+  expect(menu.textContent).toContain('第 3 讲 树与二叉树')
+})
+
+test('选中课件后 payload 带消息级 material_id，范围仍是 course；切回全局档即复位', async () => {
+  const askAgent = vi.fn(async () => true)
+  renderPage({ askAgent, conversationId: undefined, conversations: [] })
+
+  pickCourseScope()
+  fireEvent.click(screen.getByRole('button', { name: /课件 · / }))
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '第 3 讲 树与二叉树' }))
+  /* 选中态：chip 标题切到该讲并高亮 */
+  expect(screen.getByRole('button', { name: /课件 · 第 3 讲 树与二叉树/ }).className).toContain('is-active')
+
+  const textarea = screen.getByLabelText('课程问题') as HTMLTextAreaElement
+  fireEvent.change(textarea, { target: { value: '这一讲的核心是什么？' } })
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  await waitFor(() => expect(askAgent).toHaveBeenCalled())
+  expect(askAgent.mock.calls[0][1]).toMatchObject({ scope: 'course', materialId: 'm1' })
+
+  /* 切回全局档：收窄复位，payload 不再带 materialId */
+  pickGlobalScope()
+  expect(screen.queryByRole('button', { name: /课件 · / })).toBeNull()
+  fireEvent.change(textarea, { target: { value: '全局问题' } })
+  fireEvent.keyDown(textarea, { key: 'Enter' })
+  await waitFor(() => expect(askAgent).toHaveBeenCalledTimes(2))
+  expect(askAgent.mock.calls[1][1]).toMatchObject({ scope: 'global' })
+  expect(askAgent.mock.calls[1][1]).not.toHaveProperty('materialId')
+})
+
+test('没有已完成课件时不显示收窄控件', () => {
+  renderPage({ materials: [{ ...material, status: 'processing' }] })
+  pickCourseScope()
+  expect(screen.queryByRole('button', { name: /课件 · / })).toBeNull()
 })

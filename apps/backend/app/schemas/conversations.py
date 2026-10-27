@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.assistant import AssistantSource
 
@@ -47,6 +47,17 @@ class ConversationTitleUpdate(BaseModel):
         if not stripped:
             raise ValueError("标题不能为空白")
         return stripped
+
+
+class ConversationMessageHit(BaseModel):
+    """课程内消息全文搜索的命中项（P6）：命中片段已按关键词截窗，前端负责高亮渲染。"""
+
+    conversation_id: str
+    conversation_title: str
+    message_id: str
+    message_role: str
+    snippet: str
+    created_at: datetime
 
 
 class MessageEvidenceRead(BaseModel):
@@ -131,3 +142,13 @@ class AgentMessageCreate(BaseModel):
     teacher_persona: TeacherPersonaId = "elf"
     reading_context: ReadingContext | None = None
     notebook_context: NotebookDocumentContext | None = None
+    # 发现开关（P4）：允许 agent 自主定位课程内任意笔记并对其提交修改建议。
+    # 默认 False——悬浮坞不传即行为不变；答疑页传 True。同时是 kill switch。
+    allow_note_discovery: bool = False
+
+    @model_validator(mode="after")
+    def _material_id_only_for_course_scope(self) -> "AgentMessageCreate":
+        """课件收窄是「整门课程」档的消息级参数：global 语义矛盾、note 已是笔记级聚焦，携带即 422。"""
+        if self.material_id and self.scope != "course":
+            raise ValueError("material_id 仅在 scope='course' 时可用")
+        return self

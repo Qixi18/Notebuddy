@@ -155,6 +155,7 @@ def send_agent_message(
                 learning_goal=payload.learning_goal,
                 history=history,
                 teacher_persona=payload.teacher_persona,
+                allow_note_discovery=payload.allow_note_discovery,
             ):
                 if event["type"] == "final":
                     final_event = event

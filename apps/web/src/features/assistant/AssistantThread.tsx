@@ -108,7 +108,10 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
   }
 
   return (
-    <article className={`workspace-msg workspace-msg-assistant${message.status === 'failed' ? ' is-failed' : ''}`}>
+    <article
+      className={`workspace-msg workspace-msg-assistant${message.status === 'failed' ? ' is-failed' : ''}`}
+      data-message-id={message.id}
+    >
       <span className="workspace-msg-mark" aria-hidden="true"><PetMark /></span>
       <div className="workspace-msg-body">
         <header className="workspace-msg-head">
@@ -182,7 +185,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
 }
 
 /** 对话主线：欢迎态 / 用户气泡 / 回答卡（角标 + 依据行 + 反馈）/ agent 实时块 */
-export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onRetry, onFollowUp, agentRun, extras }: {
+export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onRetry, onFollowUp, agentRun, extras, highlightMessageId, onHighlightConsumed }: {
   ready: boolean
   busy: boolean
   messages: ConversationMessage[]
@@ -200,6 +203,9 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
   agentRun?: AgentRunState | null
   /** 对话流末尾的附加内容（agent 产出的建议卡片等） */
   extras?: ReactNode
+  /** P6：搜索命中的定位目标——历史就绪后滚动到该条并闪烁高亮，随后回调消费 */
+  highlightMessageId?: string
+  onHighlightConsumed?: () => void
 }) {
   const threadRef = useRef<HTMLDivElement>(null)
   const prevConversation = useRef<string | undefined>(undefined)
@@ -214,6 +220,22 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
     }
     return undefined
   }
+
+  /* P6 搜索定位：目标消息出现在历史里 → 滚到视野中央 + 闪烁高亮 → 消费掉定位目标 */
+  useEffect(() => {
+    if (!highlightMessageId) return
+    if (!messages.some((message) => message.id === highlightMessageId)) return
+    const timer = window.setTimeout(() => {
+      const node = document.querySelector<HTMLElement>(`[data-message-id="${highlightMessageId}"]`)
+      if (node) {
+        node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        node.classList.add('is-flash')
+        window.setTimeout(() => node.classList.remove('is-flash'), 1800)
+      }
+      onHighlightConsumed?.()
+    }, 60)
+    return () => window.clearTimeout(timer)
+  }, [highlightMessageId, messages, onHighlightConsumed])
 
   useEffect(() => {
     /* 只滚对话容器，不调用 scrollIntoView —— 后者在移动端会把整页往下拽一屏。 */
@@ -272,7 +294,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
             onFollowUp={onFollowUp}
           />
         ) : (
-          <article className="workspace-msg workspace-msg-user" key={`${message.id}-${index}`}>
+          <article className="workspace-msg workspace-msg-user" key={`${message.id}-${index}`} data-message-id={message.id}>
             {messageTimeLabel(message) && <time>{messageTimeLabel(message)}</time>}
             <span aria-hidden="true">你</span>
             <p>{message.content}</p>

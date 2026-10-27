@@ -12,6 +12,8 @@ export const noteApi = {
     body: JSON.stringify({ content_markdown: contentMarkdown, expected_revision_number: expectedRevisionNumber }),
   }),
   listSuggestions: (noteId: string) => request<Array<{ id: string; note_id: string; proposed_markdown: string; impact: string; status: string }>>(`/api/v1/notes/${noteId}/suggestions`),
+  // P4 课程级待确认建议：改动栏语义是「本课程的待确认改动」（不承诺只属于本会话）
+  listCourseSuggestions: (courseId: string) => request<Array<{ id: string; note_id: string; proposed_markdown: string; impact: string; status: string; note_title?: string }>>(`/api/v1/courses/${courseId}/note-suggestions?status=pending`),
   reviewSuggestion: (noteId: string, suggestionId: string, decision: 'confirm' | 'reject', note?: string, finalMarkdown?: string) => request<Note>(`/api/v1/notes/${noteId}/suggestions/${suggestionId}/review`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     // final_markdown：逐块审查后前端拼装的最终正文（部分采纳）；undefined 时后端沿用建议原文

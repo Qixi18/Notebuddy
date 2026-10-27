@@ -72,6 +72,8 @@ export type AgentQuestionPayload = {
   idempotency_key?: string
   reading_context?: AgentReadingContext
   notebook_context?: AgentNotebookContext
+  /** P4 发现开关：允许 agent 自主定位课程内任意笔记并提交修改建议；只有答疑页传 true */
+  allow_note_discovery?: boolean
 }
 
 export type AgentStreamHandlers = {

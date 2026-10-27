@@ -53,12 +53,23 @@ def build_tool_specs(
     scope: AgentScope,
     editable_note: bool,
     allow_web: bool = True,
+    material_id: str | None = None,
+    allow_note_discovery: bool = False,
 ) -> list[dict]:
-    """按作用范围装配工具集：``note`` 只保留聚焦工具，``global`` 才解锁跨课程检索。"""
+    """按作用范围装配工具集：``note`` 只保留聚焦工具，``global`` 才解锁跨课程检索。
+
+    传入 ``material_id`` 表示用户已把检索收窄到某一份课件：``search_course`` 的
+    说明改为「已固定」，且不再挂 ``get_note_coverage``（覆盖率口径与「只看这讲」冲突）。
+    """
+    search_course_desc = (
+        "在当前课程的课件（PPT/PDF/DOCX 解析块）中检索相关片段。回答需要课件依据时先调用它。"
+        if not material_id
+        else "在用户指定的课件（本会话已固定，无需也不允许再选其他课件）中检索相关片段。回答需要课件依据时调用它。"
+    )
     specs: list[dict] = [
         _spec(
             "search_course",
-            "在当前课程的课件（PPT/PDF/DOCX 解析块）中检索相关片段。回答需要课件依据时先调用它。",
+            search_course_desc,
             {"query": {"type": "string", "description": "检索关键词或短语"}, "material_id": {"type": "string", "description": "可选：限定某份课件"}},
             ["query"],
         ),
@@ -77,20 +88,24 @@ def build_tool_specs(
             {"query": {"type": "string", "description": "搜索关键词"}}, ["query"],
         ))
     if scope in ("course", "global"):
-        specs.extend([
-            _spec("list_course_notes", "列出当前课程全部笔记的标题与 ID，用于定位要读的笔记。", {}, []),
-            _spec(
+        specs.append(_spec("list_course_notes", "列出当前课程全部笔记的标题与 ID，用于定位要读的笔记。", {}, []))
+        if not material_id:
+            specs.append(_spec(
                 "get_note_coverage",
                 "查询某份课件的逐页收录覆盖情况（哪些页已有笔记引用、哪些页待核对）。用户问覆盖/遗漏时使用。",
                 {"material_id": {"type": "string", "description": "课件 ID"}}, ["material_id"],
-            ),
-        ])
-    if scope == "global":
+            ))
+    if scope == "global" and not material_id:
+        # material 收窄只允许在 course 档（schema 层 422 拦掉 global+material），
+        # 这里不挂 search_forest 只是兜底：跨课程工具与「只看这讲」永远不该共存。
         specs.append(_spec(
             "search_forest",
             "跨全部课程搜索笔记（知识森林全局检索）。问题可能与其他课程相关时使用；结果会标明所属课程。",
             {"query": {"type": "string", "description": "课程名或知识点关键词"}}, ["query"],
         ))
+    # P4 发现模式：开关开且 scope 为 course/global 时，即使没有打开的笔记，
+    # 也注册 propose_note_edits（模型必须先定位再带 note_id 提交）。开关关时行为与旧版逐字节一致。
+    discovery_mode = allow_note_discovery and scope in ("course", "global")
     if editable_note:
         specs.append(_spec(
             "propose_note_edits",
@@ -130,6 +145,36 @@ def build_tool_specs(
                 },
                 ["candidate_name", "candidate_summary", "rationale"],
             ))
+    elif discovery_mode:
+        specs.append(_spec(
+            "propose_note_edits",
+            "对课程内任意一篇笔记提交结构化修改建议（pending，用户确认后才生效，不会直接改动正文）。"
+            "必须先用 list_course_notes 或 read_note 定位目标笔记、拿到真实 note_id，再在 note_id 参数里传入；"
+            "禁止凭标题猜测 ID。不要提交整篇重写：只提交真正需要变更的操作。"
+            "anchor 填目标笔记中某个标题的原文（不含 # 号），不确定时先 read_note 查看结构。",
+            {
+                "note_id": {"type": "string", "description": "目标笔记 ID（必须先用 list_course_notes / read_note 定位获得）"},
+                "rationale": {"type": "string", "description": "一句话说明这批改动做什么，并说明定位依据"},
+                "edits": {
+                    "type": "array",
+                    "description": "1-8 个操作，按笔记从头到尾的顺序给出、依次执行",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "op": {
+                                "type": "string",
+                                "enum": ["append", "insert_after_heading", "replace_section", "remove_section"],
+                                "description": "append=文末追加；insert_after_heading=在 anchor 小节末尾插入；replace_section=替换 anchor 小节正文（保留标题行）；remove_section=删除 anchor 小节（含标题与子小节）",
+                            },
+                            "anchor": {"type": "string", "description": "目标小节的标题原文（append 不需要）"},
+                            "content": {"type": "string", "description": "Markdown 正文（remove_section 不需要；只能包含笔记本身，禁止对话文字）"},
+                        },
+                        "required": ["op"],
+                    },
+                },
+            },
+            ["note_id", "rationale", "edits"],
+        ))
     return specs
 
 
@@ -166,16 +211,35 @@ def _propose_note_edits(
     course_id: str,
     editable_note_id: str | None,
     arguments: dict[str, Any],
+    scope: AgentScope = "course",
+    allow_note_discovery: bool = False,
 ) -> ToolOutcome:
-    if not editable_note_id:
+    """目标笔记 = 显式 note_id 或可编辑笔记；课程护栏由 ``load_note`` 兜底。
+
+    - note 档：目标必须是锁定的那一篇（发现开关也救不了）；
+    - 发现关闭：目标必须等于打开/锁定的笔记（坞的旧行为，逐字节一致）；
+    - 发现开启 + course/global：允许定位课程内任意笔记。
+    """
+    requested = str(arguments.get("note_id") or "").strip()
+    target_id = requested or editable_note_id
+    if not target_id:
+        if allow_note_discovery and scope in ("course", "global"):
+            return ToolOutcome(
+                "未指定目标笔记",
+                "请先用 list_course_notes 或 read_note 定位要修改的笔记、拿到真实 note_id，"
+                "再带上它重新调用 propose_note_edits；禁止凭标题猜测 ID。",
+            )
         return ToolOutcome(
             "没有可编辑的笔记",
             "当前没有锁定或打开的笔记，无法提交修改建议。请告诉用户：进入「课程笔记本」页面，"
             "在目录里点开一个具体小节（即打开笔记）后，再回到悬浮坞选择「锁定当前笔记」并重新提出修改要求。",
         )
-    if str(arguments.get("note_id") or editable_note_id) != editable_note_id:
-        return ToolOutcome("超出可编辑范围", "只能对当前打开（或锁定）的笔记提交修改建议；其他笔记请提示用户自行打开。")
-    note, error = load_note(db, course_id, editable_note_id)
+    if target_id != editable_note_id and not (allow_note_discovery and scope in ("course", "global")):
+        return ToolOutcome(
+            "超出可编辑范围",
+            "只能对当前打开（或锁定）的笔记提交修改建议；其他笔记请提示用户自行打开。",
+        )
+    note, error = load_note(db, course_id, target_id)
     if note is None:
         return ToolOutcome("读取失败", error)
     edits = arguments.get("edits")
@@ -268,7 +332,7 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "get_note_coverage": ("course_id", "arguments"),
     "explain_term": ("course_id", "arguments"),
     "web_search": ("course_id", "arguments", "allow_web"),
-    "propose_note_edits": ("course_id", "arguments", "editable_note_id"),
+    "propose_note_edits": ("course_id", "arguments", "editable_note_id", "scope", "allow_note_discovery"),
     "propose_knowledge_node": ("course_id", "arguments"),
 }
 
@@ -283,16 +347,32 @@ def execute_tool(
     locked_note_id: str | None = None,
     editable_note_id: str | None = None,
     allow_web: bool = True,
+    material_id: str | None = None,
+    allow_note_discovery: bool = False,
 ) -> ToolOutcome:
     """执行一个工具调用；任何异常都折算成错误文本回给模型，绝不让循环中断。
 
     每个工具显式声明自己接收的参数（``_EXECUTOR_PARAMS``），分发时按白名单
     组装 kwargs——此前"给所有执行器统一塞 ``arguments``"的写法让不接收它的
     ``list_course_notes`` 每次调用都 TypeError。
+
+    传入 ``material_id``（用户已收窄到某份课件）时：``search_course`` 未带
+    material_id 就注入当前值；模型显式传了别的课件则直接拒绝——收窄是用户
+    的显式选择，不允许模型自行扩大检索范围。
     """
     handler = _EXECUTORS.get(name)
     if handler is None:
         return ToolOutcome(f"未知工具 {name}", f"工具 {name} 不存在；可用工具见系统提示。")
+    if name == "search_course" and material_id:
+        requested = str(arguments.get("material_id") or "").strip()
+        if requested and requested != material_id:
+            return ToolOutcome(
+                "超出限定课件",
+                "用户已限定只关注当前课件，不能检索其他课件。请只用当前课件的内容回答，"
+                "并如实说明其他资料未被纳入本次检索范围。",
+            )
+        if not requested:
+            arguments = {**arguments, "material_id": material_id}
     available: dict[str, Any] = {
         "course_id": course_id,
         "arguments": arguments,
@@ -300,6 +380,7 @@ def execute_tool(
         "locked_note_id": locked_note_id,
         "editable_note_id": editable_note_id,
         "allow_web": allow_web,
+        "allow_note_discovery": allow_note_discovery,
     }
     kwargs = {key: available[key] for key in _EXECUTOR_PARAMS.get(name, ())}
     try:

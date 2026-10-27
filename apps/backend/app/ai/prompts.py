@@ -222,6 +222,21 @@ AGENT_SCOPE_LABELS = {
     "global": "全部课程（可跨课程检索，但只能建议修改当前打开的笔记）",
 }
 
+# P4 发现模式的范围标签与补充规则：只在「开关开 + course/global」时使用；
+# 提示词与工具集必须同步条件化——只改这里不改工具集，坞会自相矛盾（计划 §4 第三根承重墙）。
+AGENT_DISCOVERY_SCOPE_LABELS = {
+    "course": "整门课程（可检索课程全部课件与笔记，可定位并建议修改课程内任意笔记）",
+    "global": "全部课程（可跨课程检索笔记，可定位并建议修改课程内任意笔记）",
+}
+
+AGENT_DISCOVERY_RULES = """
+发现模式补充规则（硬性）：
+- 允许定位并建议修改课程内任意笔记：先用 list_course_notes 或 read_note 确定目标笔记的真实 ID，
+  再在 propose_note_edits 的 note_id 参数里传入；禁止凭标题猜测 ID。
+- 提交的建议仍是 pending：用户会在建议卡上逐块审阅后才生效，你不能宣称已直接修改笔记。
+- 定位有歧义（多篇标题相近）时，在 rationale 里写明定位依据，并在回答中请用户确认目标笔记。
+""".strip()
+
 
 def build_agent_messages(
     question: str,
@@ -233,11 +248,15 @@ def build_agent_messages(
     persona: str | None = None,
     history: list[tuple[str, str]] | None = None,
     reading_context: str = "",
+    material_title: str | None = None,
+    allow_note_discovery: bool = False,
 ) -> list[dict[str, str]]:
     """agent 循环的首轮消息：人设 + agent 规范 + 范围指令与上下文。
 
     与 ``build_answer_messages`` 的差别：不预置检索结果（由模型调用工具获取），
     输出也不是 JSON 而是可直接流式渲染的 Markdown。
+    传入 ``material_title`` 表示用户已把检索收窄到该课件，追加限定声明。
+    ``allow_note_discovery`` + course/global 时切换为发现模式的范围标签，并追加发现规则。
     """
     persona_object = resolve_persona(persona)
     history_text = render_history(history)
@@ -247,16 +266,29 @@ def build_agent_messages(
         else "会话历史：这是本段会话的第一个问题，之前没有任何发言。"
     )
     reading_section = reading_context.strip() or "当前没有正在阅读的笔记。"
+    discovery_mode = allow_note_discovery and scope in ("course", "global")
+    scope_label = AGENT_DISCOVERY_SCOPE_LABELS.get(scope) if discovery_mode else None
+    scope_label = scope_label or AGENT_SCOPE_LABELS.get(scope, AGENT_SCOPE_LABELS['course'])
+    context_lines = [
+        f"- 课程：{course_name}",
+        f"- 作用范围：{scope_label}",
+    ]
+    if material_title:
+        context_lines.append(
+            f"- 课件限定：用户已把本次提问收窄到《{material_title}》这一讲；检索与课件依据只来自该课件，"
+            "引用其他课件的内容必须说明理由。"
+        )
+    context_lines.extend([
+        f"- 学习目标：{learning_goal}",
+        f"- 学科提示：{discipline}",
+        f"- 当前授课人格：{persona_object.name}（{persona_object.title} · {persona_object.style}）",
+    ])
     user = f"""
 用户问题：
 {question}
 
 教学上下文：
-- 课程：{course_name}
-- 作用范围：{AGENT_SCOPE_LABELS.get(scope, AGENT_SCOPE_LABELS['course'])}
-- 学习目标：{learning_goal}
-- 学科提示：{discipline}
-- 当前授课人格：{persona_object.name}（{persona_object.title} · {persona_object.style}）
+{chr(10).join(context_lines)}
 
 正在阅读的笔记：
 {reading_section}
@@ -268,5 +300,6 @@ def build_agent_messages(
     return [
         {"role": "system", "content": persona_system_prompt(persona_object.id)},
         {"role": "system", "content": AGENT_SYSTEM},
+        *([{"role": "system", "content": AGENT_DISCOVERY_RULES}] if discovery_mode else []),
         {"role": "user", "content": user},
     ]

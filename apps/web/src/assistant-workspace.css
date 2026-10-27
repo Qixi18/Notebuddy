@@ -84,6 +84,7 @@
 }
 
 .workspace-history-head[aria-expanded="false"] .workspace-history-chevron,
+.workspace-history-sub[aria-expanded="false"] .workspace-history-chevron,
 .workspace-history-sub-note[aria-expanded="false"] .workspace-history-chevron { transform: rotate(-90deg); }
 
 .workspace-history-body { padding-left: 10px; }
@@ -381,11 +382,118 @@
 .workspace-conv-title { font-size: 12.5px; }
 .workspace-msg-head strong { font-size: 12px; }
 
+/* ---- 答疑页的 agent 实时块：步骤时间线 + 流式正文（与悬浮坞同一套能力） ---- */
+.workspace-agent-live .workspace-msg-head em { color: var(--nb-forest); }
+.workspace-agent-notice {
+  margin: 0;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: #8a6d3b;
+  background: #faf3e3;
+  font-size: 11px;
+}
+.workspace-agent-streaming {
+  color: var(--nb-ink);
+  font-size: 13.5px;
+  line-height: 1.9;
+}
+
+/* ---- P3 课件收窄：composer 工具区的消息级收窄控件（仅 course 档显示） ----
+   菜单复用 .workspace-scope-option 的条目样式；composer 在页面底部，菜单向上弹。 */
+.workspace-material-wrap { position: relative; min-width: 0; }
+.workspace-composer-tool.is-active {
+  color: var(--nb-forest-deep);
+  border-color: var(--nb-sage);
+  background: #eef4ef;
+}
+.workspace-composer-tool .workspace-material-label {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-material-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--nb-line);
+  border-radius: 12px;
+  box-shadow: var(--nb-shadow-float);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.assistant-page .workspace-material-menu { animation: nb-pop-in 150ms var(--nb-ease) both; transform-origin: bottom left; }
+
 /* ---- P1 中断：停止按钮 + 「已中断」态 ---- */
 .workspace-composer-stop { background: var(--nb-clay); border-color: var(--nb-clay); color: #fff; }
 .workspace-composer-stop:hover { background: #9a553c; border-color: #9a553c; color: #fff; }
 .workspace-agent-live.is-aborted .workspace-msg-head em { color: var(--nb-clay-ink); }
 .workspace-agent-aborted-note { margin: 0 0 6px; color: var(--nb-clay-ink); font-size: 11px; line-height: 1.6; }
+
+/* ---- P6 搜索：面板两级结果 + 命中高亮 + 消息定位闪烁 ---- */
+.workspace-palette-group {
+  margin: 2px 0 4px;
+  color: var(--nb-muted);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+}
+.workspace-palette-list ul { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.workspace-palette-hit-title {
+  display: block;
+  font-weight: 600;
+  color: var(--nb-forest-deep);
+  font-size: 12px;
+}
+.workspace-palette-snippet {
+  display: block;
+  color: var(--nb-muted-strong, #46544a);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.workspace-palette-snippet mark {
+  background: #fdf3d8;
+  color: #8a6d3b;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.workspace-msg.is-flash {
+  animation: nb-msg-flash 1.6s var(--nb-ease, ease) both;
+}
+@keyframes nb-msg-flash {
+  0%, 55% { background: #fdf3d8; box-shadow: 0 0 0 3px #fdf3d8; }
+  100% { background: transparent; box-shadow: 0 0 0 3px transparent; }
+}
+
+/* ---- P4 多目标建议：卡片标注目标笔记 + 改动栏按笔记分组 ---- */
+.agent-card-note {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #eef4ef;
+  color: var(--nb-forest-deep);
+  font-weight: 600;
+}
+.workspace-change-group {
+  margin: 8px 0 2px;
+  color: var(--nb-muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-change-group:first-child { margin-top: 0; }
 
 /* ---- P2 回答卡二次操作：复制 / 重试 / 追问 chips / 用户气泡时间 ---- */
 .workspace-msg-copy {
@@ -441,3 +549,164 @@
   cursor: pointer;
 }
 .assistant-dock-stop:hover { background: #fdf4f0; }
+
+/* ---- 整篇笔记预览弹窗 ---- */
+.note-preview {
+  width: min(100%, 760px);
+  max-height: min(84vh, 720px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+.note-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--nb-line);
+}
+.note-preview-head h3 { font-size: 18px; }
+.note-preview-sub { margin: 4px 0 0; color: var(--nb-muted); font-size: 11.5px; }
+.note-preview-tabs { display: flex; gap: 4px; flex: none; }
+.note-preview-tabs button {
+  border: 1px solid var(--nb-line);
+  border-radius: 7px;
+  background: var(--nb-white);
+  color: var(--nb-muted);
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.note-preview-tabs button.is-active {
+  border-color: var(--nb-forest);
+  background: #eef4ef;
+  color: var(--nb-forest-deep);
+  font-weight: 600;
+}
+.note-preview-body {
+  flex: 1;
+  min-height: 180px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--nb-mist);
+}
+.note-preview-diff {
+  max-height: none;
+  border-color: var(--nb-line);
+  background: var(--nb-white);
+}
+.note-preview-plain {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--nb-ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-preview-hint { margin-right: auto; color: var(--nb-muted); font-size: 11.5px; }
+.note-preview .modal-actions { padding: 12px 20px 16px; }
+
+/* ---- 锁定笔记的选择框：按课程筛 + 按名称搜 ---- */
+.note-picker {
+  width: min(100%, 520px);
+  max-height: min(78vh, 640px);
+  padding: 22px 22px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.note-picker h3 { font-size: 20px; }
+
+.note-picker-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.note-picker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 190px;
+  min-width: 0;
+}
+.note-picker-field > span {
+  color: var(--nb-muted);
+  font-size: 11px;
+}
+.note-picker-field select,
+.note-picker-field input {
+  width: 100%;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--nb-ink);
+  font-size: 13px;
+  padding: 7px 9px;
+}
+.note-picker-field select:focus-visible,
+.note-picker-field input:focus-visible {
+  outline: 2px solid var(--nb-forest);
+  outline-offset: 1px;
+  border-color: var(--nb-forest);
+}
+
+.note-picker-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--nb-line);
+  border-radius: 10px;
+  background: var(--nb-mist);
+}
+.note-picker-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.note-picker-item:hover { background: #e7f0e7; }
+.note-picker-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--nb-ink);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-picker-course {
+  flex: none;
+  color: var(--nb-muted);
+  font-size: 11px;
+}
+.note-picker-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--nb-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+.note-picker-count {
+  margin-right: auto;
+  color: var(--nb-muted);
+  font-size: 11.5px;
+}
