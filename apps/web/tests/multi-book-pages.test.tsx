@@ -7,6 +7,7 @@ import { HomePage } from '../src/pages/HomePage'
 
 vi.mock('../src/api', () => ({ api: {
   getNotebook: vi.fn(), getNotebookById: vi.fn(), getReadingPosition: vi.fn(), saveReadingPosition: vi.fn(),
+  listNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
   getChapter: vi.fn(), getNotebookChapter: vi.fn(), getNote: vi.fn(), getForest: vi.fn(), getCourseTree: vi.fn(),
   getForestRelations: vi.fn().mockResolvedValue([]), getLatestForestJob: vi.fn().mockResolvedValue(null),
   listMaterials: vi.fn().mockResolvedValue([]), listNotes: vi.fn().mockResolvedValue([]), listNotebooks: vi.fn(), createNotebook: vi.fn(),

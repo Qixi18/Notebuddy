@@ -249,6 +249,52 @@ class Material(Base):
 
 
 
+class NotebookUploadBatch(Base):
+    """Durable grouping and close marker for source uploads."""
+
+    __tablename__ = "notebook_upload_batches"
+    __table_args__ = (Index("ix_notebook_upload_batches_notebook", "notebook_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class NotebookGenerationInput(Base):
+    """Per-Asset idempotency and recovery state; generation snapshots remain on the job."""
+
+    __tablename__ = "notebook_generation_inputs"
+    __table_args__ = (
+        Index("ix_notebook_generation_inputs_batch_state", "batch_id", "status", "created_at"),
+        Index("ix_notebook_generation_inputs_status", "status", "updated_at"),
+        CheckConstraint(
+            "status IN ('waiting_parse','parsing','parse_failed','ready','generating',"
+            "'generation_failed','completed')",
+            name="ck_notebook_generation_input_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, unique=True)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("notebook_upload_batches.id", ondelete="CASCADE"), nullable=False)
+    parse_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    parse_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    parse_result_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    generation_job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notebook_generation_jobs.id", ondelete="SET NULL"), nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="waiting_parse")
+    error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
 class Asset(Base):
     """Stable metadata for a file owned by one Notebook or a legacy record."""
 
@@ -271,6 +317,9 @@ class Asset(Base):
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
     byte_size: Mapped[int] = mapped_column(nullable=False)
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    upload_batch_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notebook_upload_batches.id", ondelete="SET NULL"), nullable=True,
+    )
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="ready", server_default="ready")
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(nullable=True)

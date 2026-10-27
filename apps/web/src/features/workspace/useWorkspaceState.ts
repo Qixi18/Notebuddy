@@ -199,17 +199,19 @@ export function useWorkspaceState() {
     return created
   }
 
-  async function uploadMaterial(file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false) {
+  async function uploadMaterial(file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false, batchId?: string) {
     if (!courseId) throw new Error('请先选择课程')
     try {
       setBusy(true)
       setError(undefined)
-      const result = await api.uploadMaterial(courseId, file, lectureTitle, notebookId, topicTitle, allowDuplicate)
-      if (currentCourseId.current !== courseId) return
-      setJob(result.job)
-      setSelectedMaterialId(result.material.id)
-      await refreshMaterials(courseId)
-      setSelectedMaterialId(result.material.id)
+      const result = await api.uploadMaterial(courseId, file, lectureTitle, notebookId, topicTitle, allowDuplicate, undefined, batchId)
+      if (currentCourseId.current === courseId) {
+        setJob(result.job)
+        setSelectedMaterialId(result.material.id)
+        await refreshMaterials(courseId)
+        setSelectedMaterialId(result.material.id)
+      }
+      return result
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '资料上传失败'
       setError(message)

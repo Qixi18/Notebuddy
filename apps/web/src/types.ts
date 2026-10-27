@@ -8,6 +8,7 @@ export type Course = {
 }
 
 export type Material = {
+  asset_id?: string | null
   notebook_id: string
   chapter_order?: number
   id: string
@@ -115,6 +116,29 @@ export type Coverage = {
 export type UploadResponse = {
   material: Material
   job: Job
+  upload_batch_id?: string | null
+}
+
+export type NotebookGenerationInputStatus = {
+  asset_id: string
+  parse_job_id: string | null
+  parse_result_fingerprint: string | null
+  generation_job_id: string | null
+  status: 'waiting_parse' | 'parsing' | 'parse_failed' | 'ready' | 'generating' | 'generation_failed' | 'completed'
+  error_code: string | null
+  error_message: string | null
+  retry_count: number
+}
+
+export type NotebookUploadBatch = {
+  id: string
+  notebook_id: string
+  status: 'open' | 'waiting_parse' | 'parsing' | 'generating' | 'partial_failure' | 'completed'
+  created_at: string
+  updated_at: string
+  closed_at: string | null
+  inputs: NotebookGenerationInputStatus[]
+  generation_jobs: Array<{ id: string; status: string }>
 }
 
 export type AssetResource = {

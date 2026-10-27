@@ -12,6 +12,7 @@ class MaterialRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    asset_id: str | None = None
     course_id: str | None = None
     notebook_id: str | None = None
     lecture_title: str
@@ -88,6 +89,7 @@ class SourceRefRead(BaseModel):
 class UploadMaterialResponse(BaseModel):
     material: MaterialRead
     job: JobRead
+    upload_batch_id: str | None = None
 
 
 

@@ -16,7 +16,7 @@ test('a root target book remains selected through upload and planned state only 
   fireEvent.change(container.querySelector('input[type=file]')!, { target: { files: [new File(['source'], 'source.docx')] } })
   fireEvent.click(screen.getByRole('button', { name: '上传并解析' }))
   await screen.findByText(/要将森林中的这门课设为“在学”/)
-  expect(upload.mock.calls[0][4]).toBe('b2')
+  expect(upload.mock.calls[0][2]).toBe('b2')
   expect(api.updateForestCourse).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: '开始学习' }))
   await waitFor(() => expect(api.updateForestCourse).toHaveBeenCalledWith('c', { expected_revision: 7, learning_state: 'learning' }))

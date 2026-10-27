@@ -118,7 +118,10 @@ def finalize_staged_image(db: Session, asset: Asset) -> AssetProcessingJob | Non
     return job
 
 
-def ingest_source_image(db: Session, *, notebook_id: str, filename: str, data: bytes) -> tuple[Asset, AssetProcessingJob | None]:
+def ingest_source_image(
+    db: Session, *, notebook_id: str, filename: str, data: bytes,
+    upload_batch_id: str | None = None,
+) -> tuple[Asset, AssetProcessingJob | None]:
     notebook = db.get(Notebook, notebook_id)
     if notebook is None or notebook.deleted_at is not None:
         raise ImageUploadRejected("笔记不存在", 404)
@@ -142,7 +145,7 @@ def ingest_source_image(db: Session, *, notebook_id: str, filename: str, data: b
         id=asset_id, source_type="user_upload", media_type="image", mime_type=mime,
         extension=extension, original_name=Path(filename or "image").name[:255],
         storage_key=storage_key, byte_size=len(data), sha256=hashlib.sha256(data).hexdigest(),
-        state="staging", created_at=now,
+        state="staging", created_at=now, upload_batch_id=upload_batch_id,
     )
     db.add_all([asset, NotebookAsset(
         notebook_id=notebook_id, asset_id=asset_id, role="source_material",

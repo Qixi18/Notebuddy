@@ -3,9 +3,11 @@ import { request } from './http'
 
 export const materialApi = {
   listNotebookAssets: (notebookId: string) => request<AssetResource[]>(`/api/v1/notebooks/${notebookId}/assets`),
-  uploadNotebookAsset: (notebookId: string, file: File) => {
+  uploadNotebookAsset: (notebookId: string, file: File, batchId?: string) => {
     const body = new FormData(); body.append('file', file)
-    return request<{ asset: AssetResource; processing_job: AssetProcessingJob | null }>(`/api/v1/notebooks/${notebookId}/assets`, { method: 'POST', body })
+    return request<{ asset: AssetResource; processing_job: AssetProcessingJob | null; upload_batch_id?: string }>(`/api/v1/notebooks/${notebookId}/assets`, {
+      method: 'POST', headers: batchId ? { 'X-Upload-Batch-ID': batchId } : undefined, body,
+    })
   },
   useAssetInline: (notebookId: string, assetId: string) => request<AssetResource>(`/api/v1/notebooks/${notebookId}/assets/${assetId}/inline`, { method: 'POST' }),
   listNotebookAssetJobs: (notebookId: string, assetId: string) => request<AssetProcessingJob[]>(`/api/v1/notebooks/${notebookId}/assets/${assetId}/processing-jobs`),
@@ -16,7 +18,7 @@ export const materialApi = {
   previewMaterialDeletion: (id: string) => request<DeletionPreview>(`/api/v1/materials/${id}/deletion-preview`),
   deleteMaterial: (id: string) => request<DeletionPreview>(`/api/v1/materials/${id}`, { method: 'DELETE' }),
   restoreMaterial: (id: string) => request<Material>(`/api/v1/materials/${id}/restore`, { method: 'POST' }),
-  uploadMaterial: (courseId: string, file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID()) => {
+  uploadMaterial: (courseId: string, file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID(), batchId?: string) => {
     const form = new FormData()
     form.append('file', file)
     form.append('lecture_title', lectureTitle)
@@ -24,17 +26,17 @@ export const materialApi = {
     form.append('allow_duplicate', String(allowDuplicate))
     form.append('notebook_id', notebookId)
     return request<UploadResponse>(`/api/v1/courses/${courseId}/materials`, {
-      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: form,
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey, ...(batchId ? { 'X-Upload-Batch-ID': batchId } : {}) }, body: form,
     })
   },
-  uploadNotebookFile: (notebookId: string, file: File, lectureTitle = file.name, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID()) => {
+  uploadNotebookFile: (notebookId: string, file: File, lectureTitle = file.name, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID(), batchId?: string) => {
     const form = new FormData()
     form.append('file', file)
     form.append('lecture_title', lectureTitle)
     form.append('topic_title', topicTitle)
     form.append('allow_duplicate', String(allowDuplicate))
     return request<UploadResponse>(`/api/v1/notebooks/${notebookId}/files`, {
-      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: form,
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey, ...(batchId ? { 'X-Upload-Batch-ID': batchId } : {}) }, body: form,
     })
   },
   getJob: (jobId: string) => request<Job>(`/api/v1/jobs/${jobId}`),

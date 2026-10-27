@@ -32,8 +32,8 @@ test('jumping from a source in another lecture retains its requested page', asyn
 test('target book is carried through workspace upload to the multipart API boundary', async () => {
   const { result } = renderHook(() => useWorkspaceState(), { wrapper: ({ children }) => <MemoryRouter initialEntries={['/courses/c/materials?notebook=b2']}>{children}</MemoryRouter> })
   await waitFor(() => expect(result.current.course?.id).toBe('c'))
-  await act(() => result.current.uploadMaterial(new File(['source'], 'source.docx'), '第二讲', '', false, 'b2'))
-  expect(vi.mocked(api.uploadMaterial).mock.calls.at(-1)?.[6]).toBe('b2')
+  await act(() => result.current.uploadMaterial(new File(['source'], 'source.docx'), '第二讲', 'b2', '', false))
+  expect(vi.mocked(api.uploadMaterial).mock.calls.at(-1)?.[3]).toBe('b2')
   expect(result.current.selectedMaterialId).toBe('m2')
 })
 test('forest display and directory browsing do not visit a course; entering its book does', async () => {

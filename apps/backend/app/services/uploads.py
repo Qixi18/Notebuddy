@@ -203,6 +203,7 @@ def ingest_document(
     lecture_title: str, topic_title: str, media_type: str | None,
     allow_duplicate: bool = False, idempotency_key: str | None = None,
     notebook_id: str | None = None,
+    upload_batch_id: str | None = None,
 ) -> tuple[Material, ProcessingJob]:
     extension = Path(filename).suffix.lower()
     if extension not in settings.allowed_extensions:
@@ -282,7 +283,7 @@ def ingest_document(
             mime_type=DOCUMENT_MIME_TYPES[extension], extension=extension,
             original_name=Path(filename).name[:255], storage_key=storage_key,
             byte_size=size, sha256=content_hash, state="staging",
-            created_at=created_at, verified_at=None,
+            created_at=created_at, verified_at=None, upload_batch_id=upload_batch_id,
         )
         material = Material(
             id=material_id, asset_id=material_id, course_id=None, notebook_id=notebook_id,

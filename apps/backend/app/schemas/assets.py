@@ -33,3 +33,4 @@ class AssetProcessingJobRead(BaseModel):
 class AssetUploadRead(BaseModel):
     asset: AssetRead
     processing_job: AssetProcessingJobRead | None = None
+    upload_batch_id: str | None = None

@@ -242,10 +242,13 @@ def test_record_snapshot_pins_detached_owner_for_historical_restore(db):
 def test_original_image_is_parsed_and_used_in_reviewable_generation(db, monkeypatch, tmp_path):
     from sqlalchemy.orm import sessionmaker
 
-    from app.api.v1.generation import apply_generation_candidate, create_generation_job
+    from app.api.v1.generation import create_generation_job
+    from app.db.model_utils import new_id
+    from app.db.models import NotebookUploadBatch
     from app.notes import assets as asset_store
-    from app.schemas.generation import NotebookGenerationApply, NotebookGenerationCreate
+    from app.schemas.generation import NotebookGenerationCreate
     from app.services import image_assets
+    from app.services.notebook_generation_inputs import register_generation_input
     from app.workers import asset_worker, notebook_generation_worker
 
     engine = db.get_bind()
@@ -256,7 +259,17 @@ def test_original_image_is_parsed_and_used_in_reviewable_generation(db, monkeypa
     monkeypatch.setattr(notebook_generation_worker, "SessionLocal", session_factory)
 
     notebook = _notebook("原始图片解析")
+    original_doc = {"type": "doc", "content": [
+        {"type": "heading", "attrs": {"level": 1, "blockId": "user-heading"},
+         "content": [{"type": "text", "text": "用户修改后的原正文"}]},
+    ]}
+    from app.notes.document import dump_document
+    notebook.document_json = dump_document(original_doc)
+    notebook.document_revision = 4
     db.add(notebook)
+    db.commit()
+    batch = NotebookUploadBatch(id=new_id(), notebook_id=notebook.id)
+    db.add(batch)
     db.commit()
     png = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/"
@@ -264,7 +277,14 @@ def test_original_image_is_parsed_and_used_in_reviewable_generation(db, monkeypa
     )
     asset, parse_job = image_assets.ingest_source_image(
         db, notebook_id=notebook.id, filename="作业.png", data=png,
+        upload_batch_id=batch.id,
     )
+    input_row = register_generation_input(
+        db, notebook_id=notebook.id, asset_id=asset.id, batch_id=batch.id,
+        parse_kind="image", parse_job_id=parse_job.id,
+    )
+    batch.closed_at = utc_now()
+    db.commit()
     assert asset.state == "ready" and parse_job is not None
     assert parse_job.status == "pending"
     assert asset_worker.claim_next_asset_job() == parse_job.id
@@ -297,14 +317,25 @@ def test_original_image_is_parsed_and_used_in_reviewable_generation(db, monkeypa
     assert notebook_generation_worker.claim_next_generation_job() == generated["id"]
     notebook_generation_worker.process_generation_job(generated["id"])
     job = db.get(NotebookGenerationJob, generated["id"])
-    assert job.status == "candidate_ready"
-    applied = apply_generation_candidate(
-        notebook.id, job.id, NotebookGenerationApply(expected_revision=0), db,
-    )
+    assert job.status == "completed"
     db.refresh(notebook)
-    assert applied["status"] == "applied"
-    assert notebook.document_revision == 1
+    assert notebook.document_revision == 5
+    assert "光程差" in notebook.document_json and "Δ=2d cosθ" in notebook.document_json
+    from app.notes.document import load_document
+    stored = load_document(notebook.document_json).content
+    assert stored["content"][0] == original_doc["content"][0]
+    assert job.status == "completed"
     assert db.scalar(select(NotebookDocumentRevision).where(
         NotebookDocumentRevision.notebook_id == notebook.id,
-        NotebookDocumentRevision.revision == 1,
+        NotebookDocumentRevision.revision == 5,
+    )).origin == "ai_append"
+    db.refresh(input_row)
+    assert input_row.status == "completed" and input_row.generation_job_id == job.id
+    assert db.query(NotebookGenerationCandidate).filter_by(job_id=job.id).count() == 0
+    notebook_generation_worker.process_generation_job(generated["id"])
+    db.refresh(notebook)
+    assert notebook.document_revision == 5
+    assert db.scalar(select(NotebookDocumentRevision).where(
+        NotebookDocumentRevision.notebook_id == notebook.id,
+        NotebookDocumentRevision.revision == 5,
     )) is not None

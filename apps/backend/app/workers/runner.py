@@ -15,7 +15,14 @@ from sqlalchemy import or_, select, update
 from app.core.config import settings
 from app.db.database import SessionLocal
 from app.db.migrate import migrate_database
-from app.db.models import Asset, AssetProcessingJob, Material, NotebookGenerationJob, ProcessingJob
+from app.db.models import (
+    Asset,
+    AssetProcessingJob,
+    Material,
+    NotebookGenerationInput,
+    NotebookGenerationJob,
+    ProcessingJob,
+)
 from app.forest.jobs import (
     claim_next_forest_job,
     mark_interrupted_forest_jobs,
@@ -28,6 +35,7 @@ from app.notes.attachments import (
     prune_unreferenced_attachments,
 )
 from app.services.image_assets import reconcile_staged_images
+from app.services.notebook_generation_inputs import coordinate_generation_inputs
 from app.services.uploads import reconcile_staged_document_assets
 from app.workers.asset_worker import claim_next_asset_job, process_asset_job
 from app.workers.material_worker import process_material
@@ -43,6 +51,8 @@ _material_jobs_since_forest = 0
 _material_jobs_since_asset = 0
 _jobs_since_generation = 0
 FOREST_CHECK_INTERVAL = 3
+GENERATION_COORDINATION_INTERVAL = 1.0
+_last_generation_coordination = 0.0
 
 
 def _stop(*_: object) -> None:
@@ -84,6 +94,15 @@ def mark_interrupted_jobs(*, force: bool = False) -> int:
             job.error_message = "生成进程中断；可使用相同输入重新尝试"
             job.finished_at = datetime.now(UTC)
             job.updated_at = job.finished_at
+            db.query(NotebookGenerationInput).filter(
+                NotebookGenerationInput.generation_job_id == job.id,
+                NotebookGenerationInput.status == "generating",
+            ).update({
+                NotebookGenerationInput.status: "generation_failed",
+                NotebookGenerationInput.error_code: "interrupted",
+                NotebookGenerationInput.error_message: "生成进程中断；可安全重试",
+                NotebookGenerationInput.updated_at: job.finished_at,
+            }, synchronize_session=False)
         db.commit()
         return len(jobs)
 
@@ -114,6 +133,15 @@ def claim_next_job() -> str | None:
 
 def run_once() -> bool:
     global _material_jobs_since_forest, _material_jobs_since_asset, _jobs_since_generation
+    global _last_generation_coordination
+    now = time.monotonic()
+    if now - _last_generation_coordination >= GENERATION_COORDINATION_INTERVAL:
+        try:
+            with SessionLocal() as db:
+                coordinate_generation_inputs(db)
+        except Exception:
+            logger.exception("Notebook generation input coordination failed")
+        _last_generation_coordination = now
     if _jobs_since_generation >= 3:
         generation_id = claim_next_generation_job()
         if generation_id is not None:

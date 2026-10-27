@@ -8,6 +8,8 @@ import { NotebookPage } from '../src/pages/NotebookPage'
 vi.mock('../src/api', () => ({ api: {
   getNotebookById: vi.fn(), getNotebookDocument: vi.fn(), getNotebookChapter: vi.fn(),
   saveNotebookDocument: vi.fn(), listNotebookRevisions: vi.fn(),
+  listNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
+  getNotebookUploadBatch: vi.fn(), getNotebookGenerationJob: vi.fn(), listNotebookAssetJobs: vi.fn().mockResolvedValue([]),
 } }))
 
 const { replaceContent } = vi.hoisted(() => ({ replaceContent: vi.fn() }))

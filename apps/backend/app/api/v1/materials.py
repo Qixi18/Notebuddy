@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -21,6 +21,8 @@ from app.db.models import (
     Notebook,
     NotebookAsset,
     NotebookAttachment,
+    NotebookGenerationInput,
+    NotebookUploadBatch,
     PageBlock,
     ProcessingJob,
     SourceRef,
@@ -48,6 +50,14 @@ from app.services.deletion import (
     soft_delete_material,
 )
 from app.services.image_assets import ImageUploadRejected, ingest_source_image
+from app.services.notebook_generation_inputs import (
+    batch_status as notebook_upload_batch_status,
+)
+from app.services.notebook_generation_inputs import (
+    close_upload_batch,
+    ensure_upload_batch,
+    register_generation_input,
+)
 from app.services.uploads import UploadRejected, ingest_document
 
 router = APIRouter()
@@ -123,6 +133,7 @@ def delete_notebook_asset(notebook_id: str, asset_id: str, db: Session = Depends
 async def upload_notebook_asset(
     notebook_id: str,
     file: UploadFile = File(...),
+    upload_batch_id: str | None = Header(default=None, alias="X-Upload-Batch-ID"),
     db: Session = Depends(get_db),
 ):
     filename = file.filename or "upload"
@@ -132,28 +143,50 @@ async def upload_notebook_asset(
         notebook = db.get(Notebook, notebook_id)
         if notebook is None or notebook.deleted_at is not None:
             raise HTTPException(404, "笔记不存在")
+        batch = ensure_upload_batch(
+            db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+        )
         try:
-            material, _document_job = ingest_document(
+            material, document_job = ingest_document(
                 db, course_id=notebook.course_id, notebook_id=notebook_id,
                 source=BytesIO(data), filename=filename,
                 lecture_title=filename, topic_title="",
-                media_type=file.content_type,
+                media_type=file.content_type, upload_batch_id=batch.id,
             )
         except UploadRejected as exc:
             raise HTTPException(exc.status_code, str(exc)) from exc
         asset = db.get(Asset, material.asset_id)
         if asset is None:
             raise HTTPException(500, "资源元数据未创建")
-        return {"asset": _asset_read(asset, "source_material", notebook_id), "processing_job": None}
+        register_generation_input(
+            db, notebook_id=notebook_id, asset_id=asset.id, batch_id=batch.id,
+            parse_kind="material", parse_job_id=document_job.id,
+        )
+        db.commit()
+        return {"asset": _asset_read(asset, "source_material", notebook_id),
+                "processing_job": None, "upload_batch_id": batch.id}
     data = await file.read(20 * 1024 * 1024 + 1)
     try:
+        notebook = db.get(Notebook, notebook_id)
+        if notebook is None or notebook.deleted_at is not None:
+            raise HTTPException(404, "笔记不存在")
+        batch = ensure_upload_batch(
+            db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+        )
         asset, job = ingest_source_image(
             db, notebook_id=notebook_id, filename=filename, data=data,
+            upload_batch_id=batch.id,
         )
     except ImageUploadRejected as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
+    register_generation_input(
+        db, notebook_id=notebook_id, asset_id=asset.id, batch_id=batch.id,
+        parse_kind="image", parse_job_id=job.id if job else None,
+    )
+    db.commit()
     return {
         "asset": _asset_read(asset, "source_material", notebook_id),
+        "upload_batch_id": batch.id,
         "processing_job": ({
             "id": job.id, "asset_id": job.asset_id, "status": job.status,
             "attempt_count": job.attempt_count, "error_code": job.error_code,
@@ -161,6 +194,39 @@ async def upload_notebook_asset(
             "finished_at": job.finished_at,
         } if job else None),
     }
+
+
+@router.post("/notebooks/{notebook_id}/upload-batches/{batch_id}/complete")
+def complete_notebook_upload_batch(notebook_id: str, batch_id: str,
+                                   db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    batch = close_upload_batch(db, notebook_id, batch_id)
+    return notebook_upload_batch_status(db, batch)
+
+
+@router.get("/notebooks/{notebook_id}/upload-batches/{batch_id}")
+def get_notebook_upload_batch(notebook_id: str, batch_id: str,
+                              db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    batch = db.get(NotebookUploadBatch, batch_id)
+    if batch is None or batch.notebook_id != notebook_id:
+        raise HTTPException(404, "上传批次不存在")
+    return notebook_upload_batch_status(db, batch)
+
+
+@router.get("/notebooks/{notebook_id}/upload-batches")
+def list_notebook_upload_batches(notebook_id: str, db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    batches = db.scalars(select(NotebookUploadBatch).where(
+        NotebookUploadBatch.notebook_id == notebook_id,
+    ).order_by(NotebookUploadBatch.created_at.desc()).limit(30)).all()
+    return [notebook_upload_batch_status(db, batch) for batch in batches]
 
 
 @router.get("/assets/{asset_id}/parse-results")
@@ -216,6 +282,15 @@ def retry_asset_parse(asset_id: str, db: Session = Depends(get_db)):
         status="pending", attempt_count=0,
     )
     db.add(job)
+    db.flush()
+    input_row = db.scalar(select(NotebookGenerationInput).where(
+        NotebookGenerationInput.asset_id == asset_id,
+    ))
+    if input_row is not None and input_row.status != "completed":
+        input_row.parse_job_id = job.id
+        input_row.status = "waiting_parse"
+        input_row.retry_count += 1
+        input_row.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(job)
     return job
@@ -377,20 +452,31 @@ def upload_material(
     allow_duplicate: bool = Form(default=False),
     notebook_id: str | None = Form(default=None),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    upload_batch_id: str | None = Header(default=None, alias="X-Upload-Batch-ID"),
     db: Session = Depends(get_db),
 ) -> UploadMaterialResponse:
     ensure_course(db, course_id)
+    batch = ensure_upload_batch(
+        db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+    ) if notebook_id is not None else None
     try:
         material, job = ingest_document(
             db, course_id=course_id, source=file.file,
             filename=file.filename or "upload", lecture_title=lecture_title,
             topic_title=topic_title, media_type=file.content_type,
             allow_duplicate=allow_duplicate, idempotency_key=idempotency_key,
-            notebook_id=notebook_id,
+            notebook_id=notebook_id, upload_batch_id=batch.id if batch else None,
         )
     except UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    return UploadMaterialResponse(material=material, job=job)
+    if batch is not None and material.asset_id is not None:
+        register_generation_input(
+            db, notebook_id=batch.notebook_id, asset_id=material.asset_id, batch_id=batch.id,
+            parse_kind="material", parse_job_id=job.id,
+        )
+        db.commit()
+    return UploadMaterialResponse(material=material, job=job,
+                                  upload_batch_id=batch.id if batch else None)
 
 
 @router.get("/notebooks/{notebook_id}/files", response_model=list[MaterialRead])
@@ -412,11 +498,15 @@ def upload_notebook_file(
     topic_title: str = Form(default=""),
     allow_duplicate: bool = Form(default=False),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    upload_batch_id: str | None = Header(default=None, alias="X-Upload-Batch-ID"),
     db: Session = Depends(get_db),
 ) -> UploadMaterialResponse:
     notebook = db.get(Notebook, notebook_id)
     if notebook is None or notebook.deleted_at is not None:
         raise HTTPException(404, "笔记不存在")
+    batch = ensure_upload_batch(
+        db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+    )
     try:
         material, job = ingest_document(
             db, course_id=notebook.course_id, notebook_id=notebook.id,
@@ -424,10 +514,16 @@ def upload_notebook_file(
             lecture_title=lecture_title or (file.filename or "资料"),
             topic_title=topic_title, media_type=file.content_type,
             allow_duplicate=allow_duplicate, idempotency_key=idempotency_key,
+            upload_batch_id=batch.id,
         )
     except UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
-    return UploadMaterialResponse(material=material, job=job)
+    register_generation_input(
+        db, notebook_id=notebook.id, asset_id=material.asset_id, batch_id=batch.id,
+        parse_kind="material", parse_job_id=job.id,
+    )
+    db.commit()
+    return UploadMaterialResponse(material=material, job=job, upload_batch_id=batch.id)
 
 
 
@@ -441,6 +537,16 @@ def retry_material(material_id: str, db: Session = Depends(get_db)) -> Processin
     material.status = "pending"
     job = ProcessingJob(material_id=material.id, kind="parse_material")
     db.add(job)
+    db.flush()
+    if material.asset_id:
+        input_row = db.scalar(select(NotebookGenerationInput).where(
+            NotebookGenerationInput.asset_id == material.asset_id,
+        ))
+        if input_row is not None and input_row.status != "completed":
+            input_row.parse_job_id = job.id
+            input_row.status = "waiting_parse"
+            input_row.retry_count += 1
+            input_row.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(job)
     return job
@@ -464,6 +570,16 @@ def reparse_material(material_id: str, db: Session = Depends(get_db)) -> Process
     material.status = "pending"
     job = ProcessingJob(material_id=material.id, kind="reparse_material")
     db.add(job)
+    db.flush()
+    if material.asset_id:
+        input_row = db.scalar(select(NotebookGenerationInput).where(
+            NotebookGenerationInput.asset_id == material.asset_id,
+        ))
+        if input_row is not None and input_row.status not in {"completed", "generating"}:
+            input_row.parse_job_id = job.id
+            input_row.status = "waiting_parse"
+            input_row.retry_count += 1
+            input_row.updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(job)
     return job

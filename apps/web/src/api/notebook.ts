@@ -2,6 +2,7 @@ import type {
   DocNode, Note, Notebook, NotebookAttachment, NotebookDocumentResponse, NotebookRead,
   NotebookRevision, NotebookRevisionSummary, NotebookSummary,
   NotebookGenerationJob,
+  NotebookUploadBatch,
 } from '../types'
 import { request } from './http'
 
@@ -79,15 +80,21 @@ export const notebookApi = {
   }),
   visitCourse: (courseId: string) => request<{ last_opened_at: string }>(`/api/v1/courses/${courseId}/visit`, { method: 'POST' }),
   getNotebook: (courseId: string) => request<Notebook>(`/api/v1/courses/${courseId}/notebook`),
-  createNotebookGenerationJob: (notebookId: string, assetIds: string[] = []) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': crypto.randomUUID() },
+  createNotebookGenerationJob: async (notebookId: string, assetIds: string[] = []) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': await generationKey(notebookId, assetIds) },
     body: JSON.stringify({ asset_ids: assetIds }),
   }),
   getNotebookGenerationJob: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}`),
-  applyNotebookGenerationCandidate: (notebookId: string, jobId: string, expectedRevision: number) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/apply`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: expectedRevision }),
-  }),
-  rejectNotebookGenerationCandidate: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/reject`, { method: 'POST' }),
+  listNotebookUploadBatches: (notebookId: string) => request<NotebookUploadBatch[]>(`/api/v1/notebooks/${notebookId}/upload-batches`),
+  getNotebookUploadBatch: (notebookId: string, batchId: string) => request<NotebookUploadBatch>(`/api/v1/notebooks/${notebookId}/upload-batches/${batchId}`),
+  closeNotebookUploadBatch: (notebookId: string, batchId: string) => request<NotebookUploadBatch>(`/api/v1/notebooks/${notebookId}/upload-batches/${batchId}/complete`, { method: 'POST' }),
   cancelNotebookGenerationJob: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/cancel`, { method: 'POST' }),
   retryNotebookGenerationJob: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}/retry`, { method: 'POST' }),
+}
+
+async function generationKey(notebookId: string, assetIds: string[]): Promise<string> {
+  const value = new TextEncoder().encode(`${notebookId}:${[...new Set(assetIds)].sort().join(',')}`)
+  const digest = await crypto.subtle.digest('SHA-256', value)
+  const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `notebook-input-${hex}`
 }

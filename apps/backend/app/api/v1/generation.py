@@ -21,6 +21,7 @@ from app.db.models import (
     NotebookAsset,
     NotebookAttachment,
     NotebookGenerationCandidate,
+    NotebookGenerationInput,
     NotebookGenerationJob,
 )
 from app.notes.assets import AssetUnavailable, assert_notebook_asset
@@ -43,10 +44,6 @@ router = APIRouter()
 
 
 def _job_read(db: Session, job: NotebookGenerationJob) -> dict:
-    candidate = db.scalar(select(NotebookGenerationCandidate).where(
-        NotebookGenerationCandidate.job_id == job.id,
-    ))
-    candidate_document = load_document(candidate.document_json) if candidate else None
     return {
         "id": job.id, "notebook_id": job.notebook_id, "status": job.status,
         "base_document_revision": job.base_document_revision, "model": job.model,
@@ -54,13 +51,7 @@ def _job_read(db: Session, job: NotebookGenerationJob) -> dict:
         "error_code": job.error_code, "error_message": job.error_message,
         "created_at": job.created_at, "updated_at": job.updated_at,
         "finished_at": job.finished_at,
-        "candidate": ({
-            "id": candidate.id, "job_id": candidate.job_id,
-            "notebook_id": candidate.notebook_id,
-            "document": candidate_document.content,
-            "status": candidate.status, "created_at": candidate.created_at,
-            "expires_at": candidate.expires_at,
-        } if candidate else None),
+        "candidate": None,
     }
 
 
@@ -71,7 +62,7 @@ def _same_generation_request(
     asset_ids: list[str],
     base_revision: int,
 ) -> bool:
-    if job.notebook_id != notebook_id or job.base_document_revision != base_revision:
+    if job.notebook_id != notebook_id:
         return False
     try:
         snapshot = json.loads(job.input_snapshot_json)
@@ -373,22 +364,46 @@ def retry_generation_job(notebook_id: str, job_id: str, db: Session = Depends(ge
     ))
     if job is None:
         raise HTTPException(404, "生成任务不存在")
-    if job.status not in {"failed", "conflict"} or job.attempt_count >= 3:
-        raise HTTPException(409, "任务当前不可重试或已达到 3 次执行上限")
+    if job.status not in {"failed", "conflict"}:
+        raise HTTPException(409, "任务当前不可重试")
+    snapshot = json.loads(job.input_snapshot_json)
+    source_ids = [
+        source.get("asset_id") for source in snapshot.get("sources", [])
+        if isinstance(source, dict) and isinstance(source.get("asset_id"), str)
+    ]
+    tracked_inputs = db.scalars(select(NotebookGenerationInput).where(
+        NotebookGenerationInput.asset_id.in_(source_ids),
+    )).all() if source_ids else []
+    if tracked_inputs and any(
+        row.generation_job_id != job.id or row.status != "generation_failed"
+        for row in tracked_inputs
+    ):
+        raise HTTPException(409, "该任务的资料已由其他任务占用或完成")
     notebook = db.get(Notebook, notebook_id)
     if notebook is None or notebook.deleted_at is not None:
         raise HTTPException(404, "笔记不存在")
     job.status = "pending"
     job.base_document_revision = notebook.document_revision
-    snapshot = json.loads(job.input_snapshot_json)
     current = load_document(notebook.document_json)
     snapshot["base_document_revision"] = notebook.document_revision
     snapshot["current_document"] = current.content
     job.input_snapshot_json = json.dumps(snapshot, ensure_ascii=False)
     job.error_code = None
     job.error_message = None
+    job.attempt_count = 0
     job.finished_at = None
     job.updated_at = datetime.now(UTC)
+    db.query(NotebookGenerationInput).filter(
+        NotebookGenerationInput.generation_job_id == job.id,
+        NotebookGenerationInput.status == "generation_failed",
+    ).update({
+        NotebookGenerationInput.status: "generating",
+        NotebookGenerationInput.retry_count: NotebookGenerationInput.retry_count + 1,
+        NotebookGenerationInput.error_code: None,
+        NotebookGenerationInput.error_message: None,
+        NotebookGenerationInput.finished_at: None,
+        NotebookGenerationInput.updated_at: job.updated_at,
+    }, synchronize_session=False)
     db.commit()
     return _job_read(db, job)
 
