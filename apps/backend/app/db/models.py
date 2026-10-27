@@ -825,12 +825,27 @@ class ConversationMessage(Base):
     model_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
     failure_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # agent 过程轨迹（思维链文本 + 工具步骤与耗时），随消息持久化；标准问答/旧消息为 NULL
+    process_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     evidence: Mapped[list[MessageEvidence]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
+
+    @property
+    def process(self) -> dict | None:
+        """解析后的过程轨迹；pydantic from_attributes 直接读取本属性。"""
+        import json as _json
+
+        if not self.process_json:
+            return None
+        try:
+            data = _json.loads(self.process_json)
+        except ValueError:
+            return None
+        return data if isinstance(data, dict) else None
 
 
 class MessageEvidence(Base):

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
-import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent } from '../../api/agent'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent } from '../../api/agent'
 import type { TeacherCharacterId } from '../../components/TeacherCharacter'
 import type { Conversation, ConversationMessage } from '../../types'
 import { teacherPersonaMeta } from '../persona/personas'
@@ -27,10 +27,15 @@ export type AskScope = {
   targetTitle?: string
 }
 
-/** agent 执行中的实时状态：步骤时间线 + 流式文本 + 最终事件 */
+/** agent 执行时间线的一行：wire 事件 + 本地掐表（running→done 的耗时由前端记，wire 不带时间戳） */
+export type AgentRunStep = AgentStepEvent & { startedAt?: number; durationMs?: number }
+
+/** agent 执行中的实时状态：思考流 + 步骤时间线 + 流式文本 + 最终事件 */
 export type AgentRunState = {
-  steps: AgentStepEvent[]
+  steps: AgentRunStep[]
   streamingText: string
+  /** 思维链累计文本（所有轮次拼接）；仅展示用，不持久化 */
+  thinking: string
   notice?: string
   final?: AgentFinalEvent
   /** 用户主动中断：保留已收到的正文，实时块改渲染成「已中断」而不是一直「执行中」 */
@@ -64,6 +69,14 @@ export type ConversationState = {
   error?: string
   /** agent 执行中的实时状态；非 agent 提问时为 null */
   agentRun: AgentRunState | null
+  /**
+   * 本会话累计的 agent 产出建议，**按产生它的助手消息 id 分桶**：
+   * 渲染时挂回对应那轮回答的下方（该是哪轮就是哪轮），而不是全部堆在对话底部。
+   * 会话级而非单次提问级：继续提问不清空——agentRun 是单次提问的临时状态，
+   * 挂在它上面的卡片会随下一次提问陪葬（v6 用户反馈 bug）。
+   * 只有换会话/换课程/删会话才重置；刷新页面后仍会丢失（建议未持久化，属已知边界）。
+   */
+  agentSuggestionsByMessage: Record<string, AgentSuggestion[]>
   /** 搜索命中消息带来的定位目标：历史加载完后由线程滚动高亮，消费后清除（P6） */
   pendingMessageId?: string
   selectConversation: (id: string, pendingMessageId?: string) => Promise<void>
@@ -115,6 +128,7 @@ export function useConversation(
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string>()
   const [agentRun, setAgentRun] = useState<AgentRunState | null>(null)
+  const [agentSuggestionsByMessage, setAgentSuggestionsByMessage] = useState<Record<string, AgentSuggestion[]>>({})
   const [pendingMessageId, setPendingMessageId] = useState<string>()
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
@@ -141,6 +155,7 @@ export function useConversation(
     setHistory([])
     setError(undefined)
     setAgentRun(null)
+    setAgentSuggestionsByMessage({})
     setPendingMessageId(undefined)
     setReady(false)
     creatingRef.current = null
@@ -174,6 +189,7 @@ export function useConversation(
     abortRef.current?.abort()
     abortRef.current = null
     setAgentRun(null)
+    setAgentSuggestionsByMessage({})
     setConversationId(id)
     /* P6：带消息命中的跳转记录定位目标；普通切换传 undefined 顺带清掉遗留目标 */
     setPendingMessageId(pendingMessageId)
@@ -245,6 +261,7 @@ export function useConversation(
     abortRef.current?.abort()
     abortRef.current = null
     setAgentRun(null)
+    setAgentSuggestionsByMessage({})
     setPendingMessageId(undefined)
     try {
       const created = await api.createConversation(requestCourseId, '新对话', ownership)
@@ -371,7 +388,7 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
-    setAgentRun({ steps: [], streamingText: '' })
+    setAgentRun({ steps: [], streamingText: '', thinking: '' })
     let targetId = ''
     const historyRequest = historyRequestRef.current
     /* 中断器：用户点「停止」时 abort 本次请求（signal 铺在 fetch 上，见 api/agent.ts） */
@@ -416,7 +433,27 @@ export function useConversation(
           在新会话线程里渲染旧会话的流式块 */
       onStep: (event: AgentStepEvent) => {
         if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
-        setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current)
+        setAgentRun((current) => {
+          if (!current) return current
+          if (event.status === 'running') {
+            return { ...current, steps: [...current.steps, { ...event, startedAt: Date.now() }] }
+          }
+          /* done：替换最后一个同名 running 行并记耗时（并行同名工具按完成顺序对号，展示够用）；
+              没有对应 running（异常重放等）就原样追加 */
+          const steps = [...current.steps]
+          for (let index = steps.length - 1; index >= 0; index -= 1) {
+            const running = steps[index]
+            if (running.status === 'running' && running.tool === event.tool) {
+              steps[index] = { ...event, durationMs: running.startedAt ? Date.now() - running.startedAt : undefined }
+              return { ...current, steps }
+            }
+          }
+          return { ...current, steps: [...steps, event] }
+        })
+      },
+      onThinking: (event: AgentThinkingEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => current ? { ...current, thinking: current.thinking + event.text } : current)
       },
       onDelta: (event: AgentDeltaEvent) => {
         if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
@@ -430,6 +467,18 @@ export function useConversation(
         onFinal: (final: AgentFinalEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
           setAgentRun((current) => current ? { ...current, final } : current)
+          /* 建议按产生它的助手消息 id 分桶累计（桶内按 id 去重）：技能卡跟随对应那轮回答渲染，
+              生命周期跟随会话，不随下一次提问的 agentRun 重置而消失。
+              key 与下方入历史消息的 id 同源，历史重载（服务端 id）后依然对得上。 */
+          if (final.suggestions?.length) {
+            const bucketKey = final.message_id ?? `local-agent-${askedAt}`
+            setAgentSuggestionsByMessage((current) => {
+              const seen = new Set((current[bucketKey] ?? []).map((item) => item.id))
+              const fresh = final.suggestions?.filter((item) => !seen.has(item.id)) ?? []
+              if (!fresh.length) return current
+              return { ...current, [bucketKey]: [...(current[bucketKey] ?? []), ...fresh] }
+            })
+          }
           setHistory((current) => [...current, {
             id: final.message_id ?? `local-agent-${askedAt}`,
             conversation_id: targetId,
@@ -443,6 +492,7 @@ export function useConversation(
             evidence: [],
             mode: final.mode,
             sources: final.sources ?? [],
+            process: final.process ?? null,
           }])
           // 同步后端回写的标题（仅标题；scope 分组字段不在流里回传，且只在首轮生效，
           // 避免把中途改范围错误反映成分组迁移——下次载入会话列表会自洽）。
@@ -503,5 +553,5 @@ export function useConversation(
     [history, conversationId, greeting],
   )
 
-  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, pendingMessageId, selectConversation, consumePendingMessage, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
+  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, agentSuggestionsByMessage, pendingMessageId, selectConversation, consumePendingMessage, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
 }

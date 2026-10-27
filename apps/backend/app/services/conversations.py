@@ -124,11 +124,15 @@ def persist_assistant_message(
     chunks: list,
     web_results: list[dict],
     claims: list[dict],
+    process: dict | None = None,
 ) -> ConversationMessage:
     """Commit a complete assistant answer and its evidence in one transaction."""
+    import json as _json
+
     assistant = ConversationMessage(
         conversation_id=conversation.id, role="assistant", content=content,
         learning_goal=learning_goal, status="completed", model_version=model_version,
+        process_json=_json.dumps(process, ensure_ascii=False) if process else None,
     )
     db.add(assistant)
     db.flush()

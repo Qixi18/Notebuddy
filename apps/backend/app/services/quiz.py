@@ -71,29 +71,32 @@ def validate_quiz_payload(payload: Any, *, expected_count: int) -> list[dict[str
 
 
 def _quiz_source(db: Session, *, course_id: str, material_id: str | None, note_markdown: str) -> str:
-    """出题素材：笔记正文优先，其次收窄课件的原文页拼合。"""
+    """出题素材：笔记正文优先，其次收窄课件的原文页拼合；
+    两者都没有时回退到课程小节笔记——「考考我」不该因为没选课件就哑火。"""
     if note_markdown.strip():
         return note_markdown[:QUIZ_SOURCE_MAX_CHARS]
-    if not material_id:
-        return ""
-    material = db.get(Material, material_id)
-    if material is None or material.course_id != course_id or material.deleted_at is not None:
-        return ""
-    pages = list(db.scalars(
-        select(MaterialPage)
-        .where(MaterialPage.material_id == material_id, MaterialPage.parse_status == "parsed")
-        .order_by(MaterialPage.page_number)
-        .limit(6)
-    ).all())
-    parts: list[str] = []
-    used = 0
-    for page in pages:
-        text = f"【第 {page.page_number} 页】{page.raw_text or ''}".strip()
-        if used + len(text) > QUIZ_SOURCE_MAX_CHARS:
-            break
-        parts.append(text)
-        used += len(text)
-    return "\n\n".join(parts)
+    if material_id:
+        material = db.get(Material, material_id)
+        if material is not None and material.course_id == course_id and material.deleted_at is None:
+            pages = list(db.scalars(
+                select(MaterialPage)
+                .where(MaterialPage.material_id == material_id, MaterialPage.parse_status == "parsed")
+                .order_by(MaterialPage.page_number)
+                .limit(6)
+            ).all())
+            parts: list[str] = []
+            used = 0
+            for page in pages:
+                text = f"【第 {page.page_number} 页】{page.raw_text or ''}".strip()
+                if used + len(text) > QUIZ_SOURCE_MAX_CHARS:
+                    break
+                parts.append(text)
+                used += len(text)
+            if parts:
+                return "\n\n".join(parts)
+    from app.services.skills import _skill_source
+
+    return _skill_source(db, course_id=course_id, material_id=None, note_id=None)
 
 
 QUIZ_GENERATION_SYSTEM = """你是课程自测题出题器。根据给定的课程材料出题，输出严格 JSON：

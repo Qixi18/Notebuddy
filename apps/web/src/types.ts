@@ -418,6 +418,12 @@ export type ConversationMessage = {
   sources?: AssistantSource[]
   /** 首条问题触发后由后端回写的会话标题；用于即时刷新历史列表（替代「新对话」） */
   conversation_title?: string
+  /** agent 过程轨迹（思维链 + 工具步骤耗时），渲染成可展开的「过程」折叠块 */
+  process?: {
+    thinking: string
+    thinking_ms?: number
+    steps: { tool: string; detail: string; duration_ms?: number | null }[]
+  } | null
 }
 
 export type KnowledgeProposal = {

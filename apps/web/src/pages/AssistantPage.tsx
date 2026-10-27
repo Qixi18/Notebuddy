@@ -9,7 +9,7 @@ import { AssistantContextBar, type ScopeNext } from '../features/assistant/Assis
 import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
 import { NoteScopePicker } from '../features/assistant/NoteScopePicker'
-import { KnowledgeProposalCards, NoteSuggestionCards, QuizCards } from '../features/assistant/AgentCards'
+import { NoteSuggestionCards } from '../features/assistant/AgentCards'
 import { useNoteSuggestions } from '../features/assistant/useNoteSuggestions'
 import { NotePreviewDialog } from '../features/assistant/NotePreviewDialog'
 import { ChangesPanel, type NoteChangeItem } from '../features/assistant/ChangesPanel'
@@ -87,19 +87,6 @@ export function AssistantPage() {
     agentFinalId: agentRun?.final?.message_id,
     resetKey: conversation.conversationId,
   })
-  const knowledgeProposals = useMemo(
-    () => (agentRun?.final?.suggestions ?? []).filter(
-      (item): item is Extract<typeof item, { type: 'knowledge_proposal' }> => item.type === 'knowledge_proposal',
-    ),
-    [agentRun?.final?.suggestions],
-  )
-
-  const quizSuggestions = useMemo(
-    () => (agentRun?.final?.suggestions ?? []).filter(
-      (item): item is Extract<typeof item, { type: 'quiz' }> => item.type === 'quiz',
-    ),
-    [agentRun?.final?.suggestions],
-  )
 
   /* 答疑页的范围语义 → agent 的请求语义。
      答疑页的「整门课程」= agent 的 course 且不收窄到某份课件（agent 的 course 档可带 material_id）；
@@ -525,6 +512,9 @@ export function AssistantPage() {
           onRetry={retryQuestion}
           onFollowUp={useStarter}
           agentRun={agentRun}
+          suggestionsByMessage={conversation.agentSuggestionsByMessage}
+          skillCourseId={courseId}
+          onSkillAsk={useStarter}
           highlightMessageId={conversation.pendingMessageId}
           onHighlightConsumed={conversation.consumePendingMessage}
           extras={(
@@ -537,8 +527,6 @@ export function AssistantPage() {
                 onReview={(suggestion, decision, finalMarkdown) => void noteSuggestions.review(suggestion, decision, finalMarkdown)}
                 onUndo={(suggestion) => void noteSuggestions.undo(suggestion)}
               />
-              <KnowledgeProposalCards suggestions={knowledgeProposals} />
-              <QuizCards quizzes={quizSuggestions} courseId={courseId} />
               {noteSuggestions.notice ? <p className="workspace-agent-notice">{noteSuggestions.notice}</p> : null}
             </>
           )}

@@ -18,12 +18,40 @@ export type AgentStepEvent = {
 
 export type AgentDeltaEvent = { type: 'delta'; text: string }
 
+export type AgentThinkingEvent = { type: 'thinking'; text: string }
+
 export type AgentNoticeEvent = { type: 'notice'; text: string }
 
 export type AgentSuggestion =
   | { type: 'note_suggestion'; id: string; note_id: string; note_title: string; impact: string }
   | { type: 'knowledge_proposal'; id: string; name: string }
   | { type: 'quiz'; id: string; quiz_id: string; title: string; item_count: number }
+  | {
+      type: 'review_outline'
+      id: string
+      title: string
+      module_count: number
+      item_count: number
+      modules: { title: string; priority: 'high' | 'medium' | 'low'; items: { point: string; ref?: string }[] }[]
+    }
+  | {
+      type: 'concept_contrast'
+      id: string
+      pair_count: number
+      pairs: {
+        a: string
+        b: string
+        core: string
+        dimensions: { name: string; a: string; b: string }[]
+        anchor?: string
+      }[]
+    }
+
+export type AgentProcessTrace = {
+  thinking: string
+  thinking_ms?: number
+  steps: { tool: string; detail: string; duration_ms?: number | null }[]
+}
 
 export type AgentFinalEvent = {
   type: 'final'
@@ -35,6 +63,8 @@ export type AgentFinalEvent = {
   message_id?: string
   fallback?: boolean
   reason?: string
+  /** agent 过程轨迹（服务端计时持久化），前端随消息渲染成可展开折叠块 */
+  process?: AgentProcessTrace | null
   /** 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表 */
   conversation_title?: string
 }
@@ -44,6 +74,7 @@ export type AgentErrorEvent = { type: 'error'; message: string }
 export type AgentEvent =
   | AgentStepEvent
   | AgentDeltaEvent
+  | AgentThinkingEvent
   | AgentNoticeEvent
   | AgentFinalEvent
   | AgentErrorEvent
@@ -84,6 +115,7 @@ export type AgentQuestionPayload = {
 export type AgentStreamHandlers = {
   onStep?: (event: AgentStepEvent) => void
   onDelta?: (event: AgentDeltaEvent) => void
+  onThinking?: (event: AgentThinkingEvent) => void
   onNotice?: (event: AgentNoticeEvent) => void
   onFinal?: (event: AgentFinalEvent) => void
   onError?: (event: AgentErrorEvent) => void

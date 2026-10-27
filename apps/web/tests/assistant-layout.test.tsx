@@ -72,6 +72,8 @@ function renderPage(overrides: {
   hasMessages?: boolean
   busy?: boolean
   agentRun?: unknown
+  agentSuggestionsByMessage?: unknown
+  messages?: unknown
   stopAgent?: ReturnType<typeof vi.fn>
   ask?: ReturnType<typeof vi.fn>
   askAgent?: ReturnType<typeof vi.fn>
@@ -91,6 +93,7 @@ function renderPage(overrides: {
     ready: true,
     error: undefined as string | undefined,
     agentRun: (overrides.agentRun ?? null) as never,
+    agentSuggestionsByMessage: (overrides.agentSuggestionsByMessage ?? {}) as never,
     selectConversation: vi.fn(async () => {}),
     startNewConversation: vi.fn(async () => {}),
     ask: overrides.ask ?? vi.fn(async () => true),
@@ -444,6 +447,19 @@ test('自测卷：拉题、作答、交卷判分', async () => {
     score: '0/1',
   })
   renderPage({
+    /* 技能卡按消息 id 分桶，挂在产生它的那轮回答下方（数据源 agentSuggestionsByMessage） */
+    messages: [
+      greeting,
+      {
+        id: 'msg-quiz-1', conversation_id: 'conv-1', role: 'assistant',
+        content: '我出了一道题，请在卡片上作答。', learning_goal: null, status: 'completed',
+        model_version: 'test', failure_type: null, created_at: new Date().toISOString(),
+        evidence: [], mode: 'agent', sources: [],
+      },
+    ] as never,
+    agentSuggestionsByMessage: {
+      'msg-quiz-1': [{ type: 'quiz', id: 's1', quiz_id: 'q1', title: '行列式小测', item_count: 1 }],
+    } as never,
     agentRun: {
       steps: [], streamingText: '',
       final: {

@@ -2,13 +2,14 @@
 
 每次调用产出的事件流（经 SSE 转发给前端）：
 - ``{"type": "step", "tool", "detail", "status": "running"|"done"}`` 工具执行时间线；
+- ``{"type": "thinking", "text"}`` 思维链增量（仅展示用，不进入正文、历史与证据）；
 - ``{"type": "delta", "text"}`` 回答文本增量（可直接渲染）；
 - ``{"type": "final", "answer", "sources", "suggestions", "mode", "model_version", ...}``
   收尾事件，携带证据与建议；
 - ``{"type": "error", "message"}`` 失败事件，由 API 层回退旧问答管线。
 
 安全设计：
-- 思考模型的思维链不外发（只内部回填），前端仅有 busy 指示；
+- 思维链只作 thinking 展示流外发，持久化的只有正文 delta；
 - 每轮都携带完整工具集（思考模型在缺少 tools 时会把工具调用内联成文本）；
 - 工具失败折算为文本回给模型继续，绝不中断流；
 - 最多 ``MAX_TOOL_ROUNDS`` 轮：倒数第二轮注入收敛提示，耗尽后基于已收集证据
@@ -50,11 +51,14 @@ _TOOL_WORKERS = 4
 
 
 def _tool_timeout(name: str) -> int:
-    """联网检索比库内工具慢；写工具涉及提交建议，也放宽一档。"""
+    """联网检索比库内工具慢；写工具涉及提交建议，也放宽一档；
+    技能工具（出题/提纲/对比）是 JSON 生成还可能带 critique 重试，最坏两轮，给最长墙。"""
     if name == "web_search":
         return 40
     if name.startswith("propose_"):
         return 30
+    if name in ("generate_quiz", "generate_review_outline", "generate_concept_contrast"):
+        return 60
     return TOOL_TIMEOUT_SECONDS
 
 
@@ -172,7 +176,9 @@ def run_agent(
             tool_call_event: dict[str, Any] | None = None
             for event in client.chat_stream(messages, tools=specs, max_tokens=2400):
                 if event["type"] == "reasoning":
-                    continue  # 思维链不外发，仅在结束事件中带回用于回填
+                    # 思维链增量原样放行为 thinking 事件（仅展示用，不进入正文与历史）
+                    yield {"type": "thinking", "text": event["text"]}
+                    continue
                 if event["type"] == "delta":
                     round_text.append(event["text"])
                     total_text.append(event["text"])

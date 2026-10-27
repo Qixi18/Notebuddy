@@ -50,6 +50,7 @@ function renderPage() {
     ready: true,
     error: undefined as string | undefined,
     agentRun: null,
+    agentSuggestionsByMessage: {},
     selectConversation: vi.fn(async () => {}),
     startNewConversation: vi.fn(async () => {}),
     ask: vi.fn(async () => true),

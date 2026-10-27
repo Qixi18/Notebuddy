@@ -319,3 +319,46 @@ def test_persist_unfinished_assistant_covers_partial_and_empty(tmp_path) -> None
             assert rows[1].failure_type == "ClientDisconnected"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_agent_endpoint_persists_process_trace(tmp_path, monkeypatch) -> None:
+    """思考流 + 工具步骤随消息持久化：final 事件带回 process，历史读取也返回。"""
+    import json as _json
+
+    client, factory, ids = _client_with_db(tmp_path)
+    try:
+        monkeypatch.setattr(agent_endpoint, "run_agent", _fake_run_agent([
+            {"type": "thinking", "text": "先检索资料。"},
+            {"type": "thinking", "text": "需要行列式的定义。"},
+            {"type": "step", "tool": "search_course", "detail": "检索「行列式」", "status": "running"},
+            {"type": "step", "tool": "search_course", "detail": "命中 2 条", "status": "done"},
+            {"type": "delta", "text": "回答正文。"},
+            {"type": "final", "answer": "回答正文。", "mode": "agent", "model_version": "agent-test",
+             "chunks": [], "web_results": [], "suggestions": []},
+        ]))
+        response = client.post(
+            f"/api/v1/conversations/{ids['conversation']}/agent-messages",
+            json={"question": "什么是行列式", "scope": "course", "idempotency_key": "k-proc"},
+        )
+        assert response.status_code == 200, response.text
+        assert '"thinking"' in response.text, "final 事件应带回 process"
+
+        with factory() as db:
+            assistant = db.query(ConversationMessage).filter_by(
+                conversation_id=ids["conversation"], role="assistant",
+            ).one()
+            assert assistant.process_json is not None
+            process = _json.loads(assistant.process_json)
+            assert "行列式的定义" in process["thinking"]
+            assert process["thinking_ms"] >= 0
+            assert process["steps"][0]["tool"] == "search_course"
+            assert process["steps"][0]["detail"] == "命中 2 条"
+            assert "duration_ms" in process["steps"][0], "done 应与 running 配对记耗时"
+            assert "started" not in process["steps"][0], "内部计时字段不得外泄"
+
+        listing = client.get(f"/api/v1/conversations/{ids['conversation']}/messages")
+        assert listing.status_code == 200
+        assistant_rows = [m for m in listing.json() if m["role"] == "assistant"]
+        assert assistant_rows and assistant_rows[0]["process"]["steps"], "历史读取应带 process"
+    finally:
+        app.dependency_overrides.clear()

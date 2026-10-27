@@ -119,7 +119,7 @@ test('agent 执行中显示步骤时间线与流式文本', () => {
     ask: async () => true, askAgent, startNewConversation: async () => {},
   } })
 
-  expect(screen.getByText(/检索课程课件/)).toBeTruthy()
+  expect(screen.getByText(/检索课程资料/)).toBeTruthy()
   expect(screen.getByText(/命中 2 条课件片段/)).toBeTruthy()
   expect(screen.getByText(/行列式是线性代数的基本工具/)).toBeTruthy()
   expect(document.querySelector('.assistant-dock-cursor')).toBeTruthy()

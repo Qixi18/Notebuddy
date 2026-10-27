@@ -29,9 +29,11 @@ from app.ai.agent_read_tools import (
 )
 from app.ai.agent_tool_types import AgentScope, ToolOutcome
 from app.ai.note_edits import apply_note_edits
+from app.db.model_utils import new_id
 from app.db.models import Course
 from app.knowledge.proposals import create_knowledge_proposal, create_note_suggestion
 from app.services.quiz import QuizSchemaError
+from app.services.skills import SkillSchemaError
 
 NOTE_SUGGESTION_MAX_CHARS = 20000
 _MAX_EDITS = 8
@@ -86,6 +88,12 @@ def build_tool_specs(
         ),
         _spec("explain_term", "在课程课件原文中定位一个术语出现的原文摘录（用于解释概念时给出课程语境）。", {"term": {"type": "string", "description": "术语"}}, ["term"]),
     ]
+    # 展示型技能与笔记修改的边界：整理/提纲/对比/出题类请求走技能工具，禁止用写笔记来承载
+    _skill_boundary = (
+        "注意：「复习提纲/易混概念对比/出题」等展示型技能请求必须交给对应技能工具"
+        "（generate_review_outline / generate_concept_contrast / generate_quiz），"
+        "不要用笔记修改来承载这类产出。"
+    )
     if allow_web:
         specs.append(_spec(
             "web_search",
@@ -129,6 +137,8 @@ def build_tool_specs(
         specs.append(_spec(
             "propose_note_edits",
             "对当前打开的笔记提交结构化修改建议（pending，用户确认后才生效，不会直接改动正文）。"
+            "适用场景：用户要求润色、纠错、补充或重构笔记本身。"
+            + _skill_boundary +
             "不要提交整篇重写：只提交真正需要变更的操作。anchor 填笔记中某个标题的原文（不含 # 号）。",
             {
                 "rationale": {"type": "string", "description": "一句话说明这批改动做什么"},
@@ -168,6 +178,8 @@ def build_tool_specs(
         specs.append(_spec(
             "propose_note_edits",
             "对课程内任意一篇笔记提交结构化修改建议（pending，用户确认后才生效，不会直接改动正文）。"
+            "适用场景：用户明确要求修改/补充/润色某篇笔记本身。"
+            + _skill_boundary +
             "必须先用 list_course_notes 或 read_note 定位目标笔记、拿到真实 note_id，再在 note_id 参数里传入；"
             "禁止凭标题猜测 ID。不要提交整篇重写：只提交真正需要变更的操作。"
             "anchor 填目标笔记中某个标题的原文（不含 # 号），不确定时先 read_note 查看结构。",
@@ -194,11 +206,17 @@ def build_tool_specs(
             },
             ["note_id", "rationale", "edits"],
         ))
-    if allow_quiz and scope in ("course", "global"):
+    if allow_quiz:
+        # 答疑页的技能工具族共用 allow_quiz 开关（kill switch 一并生效）：
+        # 出题、复习提纲、易混概念都是「素材 → 结构化产出 → 前端技能卡」的同模式只读技能。
+        # note 档也注册：锁定笔记时由执行器自动以该笔记为素材，不让「考考我」在锁笔记会话里哑火。
         specs.append(_spec(
             "generate_quiz",
             "根据课程材料出一组自测题（选择题+简答题），学生在前端作答、系统自动判分讲评。"
-            "用户说「考考我/出几道题/测测我掌握得怎么样」时调用；用户指定某一讲时把 material_id 传给它。"
+            "用户说「考考我/出几道题/测测我掌握得怎么样」时必须调用本工具，"
+            "不要在回答文本里直接写题——那样没有作答卡和判分。"
+            "用户指定某一讲时把 material_id 传给它；没指定课件时直接调用（会自动用课程笔记兜底）；"
+            "锁定笔记的会话里自动针对该笔记出题，无需传 note_id。"
             "不要在用户没要求测试时主动出题。",
             {
                 "material_id": {"type": "string", "description": "可选：只针对某份课件出题"},
@@ -208,10 +226,35 @@ def build_tool_specs(
             },
             [],
         ))
+        specs.append(_spec(
+            "generate_review_outline",
+            "把课程内容整理成结构化复习提纲（分模块、带优先级与来源，前端渲染成可勾选进度的清单卡）。"
+            "用户说「复习提纲/整理成复习提纲/帮我整理/梳理一下」时必须优先调用本工具——"
+            "它是纯展示技能，产出前端卡片，不改任何笔记；不要把这类请求用 propose_note_edits 写进笔记来满足。"
+            "用户指定某一讲时把 material_id 传给它。",
+            {
+                "material_id": {"type": "string", "description": "可选：只针对某份课件整理"},
+                "note_id": {"type": "string", "description": "可选：只针对某篇笔记整理"},
+                "focus": {"type": "string", "description": "可选：提纲重点"},
+            },
+            [],
+        ))
+        specs.append(_spec(
+            "generate_concept_contrast",
+            "从课程材料中找出易混淆的概念对，生成左右对比卡（核心区别、分维度对比、记忆锚点）。"
+            "用户说「易混概念/对比说明/XX和XX有什么区别」时优先调用本工具（纯展示技能，不改笔记）。"
+            "用户指定某一讲时把 material_id 传给它。",
+            {
+                "material_id": {"type": "string", "description": "可选：只从某份课件中找"},
+                "note_id": {"type": "string", "description": "可选：只从某篇笔记中找"},
+                "focus": {"type": "string", "description": "可选：指定要辨析的概念或范围"},
+            },
+            [],
+        ))
     return specs
 
 
-def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None = None) -> ToolOutcome:
+def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None = None, scope: AgentScope = "course", locked_note_id: str | None = None) -> ToolOutcome:
     """出自测卷（v6 P10）：素材 → 模型产出 → schema 硬门槛 → 落库 → suggestion 回前端。
 
     schema 不合格由服务层带具体原因重试；重试仍不合格折算为文本回模型（不中断流）。
@@ -224,6 +267,8 @@ def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], co
 
     material_id = str(arguments.get("material_id") or "") or None
     note_id = str(arguments.get("note_id") or "") or None
+    if scope == "note" and locked_note_id and not note_id:
+        note_id = locked_note_id  # 锁定笔记会话：素材自动落到该笔记
     try:
         count = int(arguments.get("count") or 3)
     except (TypeError, ValueError):
@@ -268,6 +313,94 @@ def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], co
         suggestions=[{
             "type": "quiz", "id": quiz.id, "quiz_id": quiz.id,
             "title": quiz.title, "item_count": len(payload["items"]),
+        }],
+    )
+
+
+def _generate_review_outline(db: Session, *, course_id: str, arguments: dict[str, Any], scope: AgentScope = "course", locked_note_id: str | None = None) -> ToolOutcome:
+    """整理复习提纲（技能卡）：素材 → 模型结构化 JSON → schema 硬门槛 → suggestion 回前端。
+
+    纯展示物，不落库；schema 不合格折算文本回模型（不中断流），与 quiz 同策略。
+    """
+    from app.services.skills import generate_review_outline_payload
+
+    material_id = str(arguments.get("material_id") or "") or None
+    note_id = str(arguments.get("note_id") or "") or None
+    if scope == "note" and locked_note_id and not note_id:
+        note_id = locked_note_id  # 锁定笔记会话：素材自动落到该笔记
+    focus = str(arguments.get("focus") or "").strip()[:200]
+
+    from app.services.skills import _skill_source
+    source = _skill_source(db, course_id=course_id, material_id=material_id, note_id=note_id)
+    if not source.strip():
+        return ToolOutcome(
+            "没有可整理的材料",
+            "这门课还没有可用的笔记或解析完成的课件。请先提示用户上传课程资料，或指定一篇已有笔记。",
+        )
+    course = db.get(Course, course_id)
+    try:
+        payload = generate_review_outline_payload(source, course_name=course.name if course else "课程", focus=focus)
+    except SkillSchemaError as exc:
+        return ToolOutcome(
+            "提纲未通过校验",
+            f"整理的提纲未通过质量校验（{exc}）。请向用户如实说明本次整理失败，建议换个重点再试。",
+        )
+    except Exception as exc:  # DeepSeekError 等 → 文本降级，不断流
+        return ToolOutcome(
+            "提纲整理失败",
+            f"提纲服务暂时不可用（{type(exc).__name__}）。请向用户说明并建议稍后再试。",
+        )
+    module_count = len(payload["modules"])
+    item_count = sum(len(module["items"]) for module in payload["modules"])
+    return ToolOutcome(
+        f"整理出 {module_count} 个模块 / {item_count} 条要点的复习提纲",
+        f"已生成复习提纲《{payload['title']}》（{module_count} 个模块，{item_count} 条要点，含优先级与来源）。"
+        "请在回答里用一两句话介绍提纲怎么用：前端卡片上可勾选进度、按条目追问。",
+        suggestions=[{
+            "type": "review_outline", "id": new_id(), "title": payload["title"],
+            "module_count": module_count, "item_count": item_count, "modules": payload["modules"],
+        }],
+    )
+
+
+def _generate_concept_contrast(db: Session, *, course_id: str, arguments: dict[str, Any], scope: AgentScope = "course", locked_note_id: str | None = None) -> ToolOutcome:
+    """辨析易混概念（技能卡）：素材 → 结构化 JSON → 硬门槛 → suggestion 回前端。不落库。"""
+    from app.services.skills import generate_concept_contrast_payload
+
+    material_id = str(arguments.get("material_id") or "") or None
+    note_id = str(arguments.get("note_id") or "") or None
+    if scope == "note" and locked_note_id and not note_id:
+        note_id = locked_note_id  # 锁定笔记会话：素材自动落到该笔记
+    focus = str(arguments.get("focus") or "").strip()[:200]
+
+    from app.services.skills import _skill_source
+    source = _skill_source(db, course_id=course_id, material_id=material_id, note_id=note_id)
+    if not source.strip():
+        return ToolOutcome(
+            "没有可辨析的材料",
+            "这门课还没有可用的笔记或解析完成的课件。请先提示用户上传课程资料，或指定一篇已有笔记。",
+        )
+    course = db.get(Course, course_id)
+    try:
+        payload = generate_concept_contrast_payload(source, course_name=course.name if course else "课程", focus=focus)
+    except SkillSchemaError as exc:
+        return ToolOutcome(
+            "辨析未通过校验",
+            f"概念辨析未通过质量校验（{exc}）。请向用户如实说明本次辨析失败，建议换个重点再试。",
+        )
+    except Exception as exc:  # DeepSeekError 等 → 文本降级，不断流
+        return ToolOutcome(
+            "概念辨析失败",
+            f"辨析服务暂时不可用（{type(exc).__name__}）。请向用户说明并建议稍后再试。",
+        )
+    pair_names = "、".join(f"「{pair['a']} vs {pair['b']}」" for pair in payload["pairs"])
+    return ToolOutcome(
+        f"辨析了 {len(payload['pairs'])} 组易混概念",
+        f"已生成概念辨析：{pair_names}，每组含一句话核心区别、2-5 个维度对比与记忆锚点。"
+        "请在回答里点出最关键的一组区别，完整对比在前端卡片上展示；学生可就任一组继续要求出题。",
+        suggestions=[{
+            "type": "concept_contrast", "id": new_id(), "pair_count": len(payload["pairs"]),
+            "pairs": payload["pairs"],
         }],
     )
 
@@ -416,6 +549,8 @@ _EXECUTORS = {
     "explain_term": _explain_term,
     "web_search": _web_search,
     "generate_quiz": _generate_quiz,
+    "generate_review_outline": _generate_review_outline,
+    "generate_concept_contrast": _generate_concept_contrast,
     "propose_note_edits": _propose_note_edits,
     "propose_knowledge_node": _propose_knowledge_node,
 }
@@ -431,7 +566,9 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "get_note_coverage": ("course_id", "arguments"),
     "explain_term": ("course_id", "arguments"),
     "web_search": ("course_id", "arguments", "allow_web"),
-    "generate_quiz": ("course_id", "arguments", "conversation_id"),
+    "generate_quiz": ("course_id", "arguments", "conversation_id", "scope", "locked_note_id"),
+    "generate_review_outline": ("course_id", "arguments", "scope", "locked_note_id"),
+    "generate_concept_contrast": ("course_id", "arguments", "scope", "locked_note_id"),
     "propose_note_edits": ("course_id", "arguments", "editable_note_id", "scope", "allow_note_discovery"),
     "propose_knowledge_node": ("course_id", "arguments"),
 }

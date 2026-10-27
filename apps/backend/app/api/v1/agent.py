@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -53,6 +54,7 @@ def _sse(event: dict[str, Any]) -> str:
 
 def _persist_unfinished_assistant(
     db: Session, conversation: Conversation, partial_text: str, learning_goal: str | None,
+    process: dict[str, Any] | None = None,
 ) -> None:
     """客户端中途断开（停止/刷新/切会话）时的兜底：把已生成的部分落库。
 
@@ -60,17 +62,21 @@ def _persist_unfinished_assistant(
     不会执行，留下「有问无答」的孤儿提问。这里在生成器清理阶段补一条 aborted/failed
     的 assistant 消息，使历史形态完整、前端「已中断」有据可渲染。
     """
+    import json as _json
+
+    process_json = _json.dumps(process, ensure_ascii=False) if process else None
     partial = partial_text.strip()
     if partial:
         row = ConversationMessage(
             conversation_id=conversation.id, role="assistant", content=partial,
-            learning_goal=learning_goal, status="aborted",
+            learning_goal=learning_goal, status="aborted", process_json=process_json,
         )
     else:
         row = ConversationMessage(
             conversation_id=conversation.id, role="assistant",
             content="本次回答已中断，没有收到内容；请重新提问。",
             learning_goal=learning_goal, status="failed", failure_type="ClientDisconnected",
+            process_json=process_json,
         )
     db.add(row)
     conversation.updated_at = datetime.now(UTC)
@@ -174,6 +180,25 @@ def send_agent_message(
         error_message: str | None = None
         delta_text: list[str] = []
         persisted = False
+        # 过程轨迹（v6 追加轮）：思维链文本 + 工具步骤，随消息持久化，前端历史里可展开回看。
+        # 计时在服务端做（running→done 配对），前端只负责渲染。
+        process: dict[str, Any] = {"thinking": "", "thinking_ms": 0, "steps": []}
+        thinking_started: list[float] = []
+
+        def stop_thinking_clock() -> None:
+            if thinking_started:
+                process["thinking_ms"] += int((time.monotonic() - thinking_started.pop()) * 1000)
+
+        def process_public() -> dict[str, Any]:
+            return {
+                "thinking": process["thinking"][:20000],
+                "thinking_ms": process["thinking_ms"],
+                "steps": [
+                    {k: v for k, v in step.items() if k != "started"}
+                    for step in process["steps"][:60]
+                ],
+            }
+
         try:
             try:
                 for event in run_agent(
@@ -201,7 +226,37 @@ def send_agent_message(
                         error_message = str(event.get("message") or "agent 执行失败")
                     else:
                         if event["type"] == "delta":
+                            stop_thinking_clock()
                             delta_text.append(str(event.get("text") or ""))
+                        elif event["type"] == "thinking":
+                            if not thinking_started:
+                                thinking_started.append(time.monotonic())
+                            process["thinking"] += str(event.get("text") or "")
+                        elif event["type"] == "step":
+                            stop_thinking_clock()
+                            if event.get("status") == "running":
+                                process["steps"].append({
+                                    "tool": str(event.get("tool") or ""),
+                                    "detail": str(event.get("detail") or ""),
+                                    "started": time.monotonic(),
+                                })
+                            else:
+                                # done：与最后一个同名未完成步骤配对记耗时；落空的 done 原样收录
+                                for step in reversed(process["steps"]):
+                                    if step.get("tool") == event.get("tool") and "duration_ms" not in step:
+                                        started = step.pop("started", None)
+                                        step["duration_ms"] = (
+                                            int((time.monotonic() - started) * 1000) if started is not None else None
+                                        )
+                                        if event.get("detail"):
+                                            step["detail"] = str(event.get("detail"))
+                                        break
+                                else:
+                                    process["steps"].append({
+                                        "tool": str(event.get("tool") or ""),
+                                        "detail": str(event.get("detail") or ""),
+                                        "duration_ms": None,
+                                    })
                         yield _sse(event)
             except Exception as exc:  # 流内异常必须降级为错误事件，不能断流
                 error_message = f"{type(exc).__name__}: {exc}"
@@ -221,6 +276,7 @@ def send_agent_message(
                         "chunk_indexes": list(range(len(chunks))),
                         "web_indexes": list(range(len(web_results))),
                     }],
+                    process=process_public() if (process["thinking"] or process["steps"]) else None,
                 )
                 persisted = True
                 yield _sse({
@@ -231,6 +287,7 @@ def send_agent_message(
                     "sources": sources_from_evidence(db, assistant),
                     "suggestions": final_event.get("suggestions") or [],
                     "message_id": assistant.id,
+                    "process": assistant.process,
                     "conversation_title": conversation.title,
                 })
                 return
@@ -289,10 +346,11 @@ def send_agent_message(
                 yield _sse({"type": "error", "message": f"问答执行失败（{type(exc).__name__}），请稍后重试"})
         except GeneratorExit:
             # 客户端断开（停止/刷新/切会话）：生成器末尾的持久化不会执行，补落已生成部分，
-            # 避免「有问无答」的孤儿提问（真机走查结论，v6 P2）
+            # 避免「有问无答」的孤儿提问（真机走查结论，v6 P2）；已发生的过程轨迹一并保留
             if not persisted:
                 try:
-                    _persist_unfinished_assistant(db, conversation, "".join(delta_text), payload.learning_goal)
+                    process_trace = process_public() if (process["thinking"] or process["steps"]) else None
+                    _persist_unfinished_assistant(db, conversation, "".join(delta_text), payload.learning_goal, process_trace)
                 except Exception:
                     db.rollback()
             raise

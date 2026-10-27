@@ -88,6 +88,8 @@ class ConversationMessageRead(BaseModel):
     # 会话消息落库时只存了 evidence，这里在读取时从 evidence 反推，避免加表字段与迁移。
     mode: str = ""
     sources: list[AssistantSource] = Field(default_factory=list)
+    # agent 过程轨迹（思维链 + 工具步骤耗时），前端渲染成可展开的「过程」折叠块；无则为 None。
+    process: dict | None = None
     # 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表，避免仍显示「新对话」。
     conversation_title: str = "新对话"
 

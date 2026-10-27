@@ -11,6 +11,7 @@ const streamState = vi.hoisted(() => ({
   captured: {} as {
     signal?: AbortSignal
     handlers?: Record<string, (event: unknown) => void>
+    settle?: (value?: unknown) => void
   },
 }))
 
@@ -31,11 +32,13 @@ vi.mock('../src/api/agent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/api/agent')>()
   return {
     ...actual,
-    // 模拟一条长流：记录 handlers/signal，收到 abort 才以 AbortError 结束
+    // 模拟一条长流：记录 handlers/signal，收到 abort 才以 AbortError 结束；
+    // settle() 供用例主动正常收尾（模拟 final 后流结束）
     streamAgentMessage: vi.fn((_cid: string, _payload: unknown, handlers: Record<string, (event: unknown) => void>, signal?: AbortSignal) => {
       streamState.captured.handlers = handlers
       streamState.captured.signal = signal
-      return new Promise((_, reject) => {
+      return new Promise((resolve, reject) => {
+        streamState.captured.settle = resolve
         signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')))
       })
     }),
@@ -128,4 +131,39 @@ test('流式期间 startNewConversation 被单飞守门拦截（UI 同时禁用�
   expect(getConv().conversationId).toBe('conv-a')
   expect(streamState.captured.signal?.aborted).toBe(false)
   expect(getConv().busy).toBe(true)
+})
+
+test('同会话继续提问：上一轮技能建议保留，不随 agentRun 重置消失', async () => {
+  const getConv = await renderReady()
+
+  await act(async () => { void getConv().askAgent('第一问', { scope: 'global' }) })
+  await act(async () => {
+    streamState.captured.handlers?.onFinal?.({
+      type: 'final', answer: '第一轮回答', mode: 'agent', model_version: null,
+      sources: [], message_id: 'msg-1',
+      suggestions: [{ type: 'quiz', id: 'quiz-1', quiz_id: 'quiz-1', title: '行列式小测', item_count: 2 }],
+    })
+    streamState.captured.settle?.()
+  })
+  await waitFor(() => expect(getConv().busy).toBe(false))
+  expect(getConv().agentSuggestionsByMessage['msg-1']).toHaveLength(1)
+
+  /* 第二问重置 agentRun，但会话级建议必须原样保留（v6 用户反馈 bug 的回归用例） */
+  await act(async () => { void getConv().askAgent('第二问', { scope: 'global' }) })
+  expect(getConv().agentRun).not.toBeNull()
+  expect(getConv().agentRun?.final).toBeUndefined()
+  expect(getConv().agentSuggestionsByMessage['msg-1']).toHaveLength(1)
+
+  await act(async () => {
+    streamState.captured.handlers?.onFinal?.({
+      type: 'final', answer: '第二轮回答', mode: 'agent', model_version: null,
+      sources: [], message_id: 'msg-2',
+      suggestions: [{ type: 'review_outline', id: 'o-1', title: '提纲', module_count: 1, item_count: 1, modules: [] }],
+    })
+    streamState.captured.settle?.()
+  })
+  await waitFor(() => expect(getConv().busy).toBe(false))
+  /* 各轮建议按消息分桶、互不覆盖 */
+  expect(getConv().agentSuggestionsByMessage['msg-1']).toHaveLength(1)
+  expect(getConv().agentSuggestionsByMessage['msg-2']).toHaveLength(1)
 })
