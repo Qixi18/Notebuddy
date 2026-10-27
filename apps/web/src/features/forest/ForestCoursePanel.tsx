@@ -103,7 +103,9 @@ export function ForestCoursePanel({
       </p>
       <div className="forest-course-reading-links">
         {book && <Link to={`/courses/${course.course_id}/notebooks/${book.id}`}>继续阅读此本</Link>}
-        <Link to={`/courses/${course.course_id}/materials${book ? `?notebook=${book.id}` : ''}`}>上传下一讲</Link>
+        {book
+          ? <Link to={`/courses/${course.course_id}/notebooks/${book.id}?upload=1`}>上传下一讲</Link>
+          : <Link to={`/courses/${course.course_id}`}>选择笔记本后上传</Link>}
         <button type="button" onClick={onFit}>
           适应展开内容
         </button>

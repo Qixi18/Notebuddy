@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
@@ -8,8 +8,9 @@ import { NotebookPage } from '../src/pages/NotebookPage'
 vi.mock('../src/api', () => ({ api: {
   getNotebookById: vi.fn(), getNotebookDocument: vi.fn(), getNotebookChapter: vi.fn(),
   saveNotebookDocument: vi.fn(), listNotebookRevisions: vi.fn(),
-  listNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
+  listNotebookAssets: vi.fn().mockResolvedValue([]), listDetachedNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
   getNotebookUploadBatch: vi.fn(), getNotebookGenerationJob: vi.fn(), listNotebookAssetJobs: vi.fn().mockResolvedValue([]),
+  listDeletedMaterials: vi.fn().mockResolvedValue([]),
 } }))
 
 const { replaceContent } = vi.hoisted(() => ({ replaceContent: vi.fn() }))
@@ -64,17 +65,24 @@ beforeEach(() => {
   }) as never)
   vi.mocked(api.listNotebookRevisions).mockResolvedValue([])
 })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.useRealTimers() })
 
-test('an import response cannot replace text typed while the request was pending', async () => {
-  let finishChapter!: (value: unknown) => void
-  vi.mocked(api.getNotebookChapter).mockImplementationOnce(() => new Promise((resolve) => { finishChapter = resolve }))
+test('generation completion preserves an unsaved local Notebook draft', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  const batch = {
+    id: 'batch-1', status: 'generating', inputs: [],
+    generation_jobs: [{ id: 'generation-1', status: 'processing' }],
+  }
+  vi.mocked(api.listNotebookUploadBatches).mockResolvedValue([batch] as never)
+  vi.mocked(api.getNotebookUploadBatch).mockResolvedValue(batch as never)
+  vi.mocked(api.getNotebookGenerationJob)
+    .mockResolvedValueOnce({ id: 'generation-1', status: 'processing' } as never)
+    .mockResolvedValueOnce({ id: 'generation-1', status: 'completed' } as never)
   mount()
-  fireEvent.click(await screen.findByRole('button', { name: '导入已有分节笔记' }))
-  await waitFor(() => expect(api.getNotebookChapter).toHaveBeenCalled())
+  await waitFor(() => expect(api.getNotebookGenerationJob).toHaveBeenCalledTimes(1))
   fireEvent.click(screen.getByRole('button', { name: '模拟编辑正文' }))
-  finishChapter({ sections: [{ id: 'section', title: '旧段落', content_markdown: '旧内容' }] })
-  expect(await screen.findByText(/导入期间正文发生了变化/)).toBeTruthy()
+  await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+  expect(screen.getByText(/当前有未保存的本地编辑，已保留草稿/)).toBeTruthy()
   expect(replaceContent).not.toHaveBeenCalled()
 })
 

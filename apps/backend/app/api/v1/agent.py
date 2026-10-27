@@ -32,6 +32,7 @@ from app.db.database import get_db
 from app.db.models import (
     ConversationMessage,
     Material,
+    Note,
     Notebook,
 )
 from app.schemas.api import AgentMessageCreate
@@ -58,6 +59,12 @@ def send_agent_message(
 ) -> StreamingResponse:
     conversation = ensure_conversation(db, conversation_id)
     course = ensure_course(db, conversation.course_id)
+    is_first_turn = not any(message.role == "user" for message in conversation.messages)
+    effective_scope = payload.scope if is_first_turn else (
+        conversation.scope or conversation.default_scope or "course"
+    )
+    if not is_first_turn and payload.scope != effective_scope:
+        raise HTTPException(409, "本会话的提问范围已锁定，请新建对话后切换范围")
 
     if payload.idempotency_key:
         existing = db.scalar(select(ConversationMessage).where(
@@ -83,8 +90,16 @@ def send_agent_message(
         )
     notebook_context = payload.notebook_context
     locked_notebook_id = notebook_context.notebook_id if notebook_context else None
-    if payload.scope == "note" and not locked_notebook_id:
+    if effective_scope == "note" and not locked_notebook_id:
         raise HTTPException(status_code=422, detail="锁定当前笔记模式需要先打开一本笔记")
+    if (not is_first_turn and effective_scope == "note"
+            and conversation.note_id != locked_notebook_id):
+        legacy_note = db.get(Note, conversation.note_id) if conversation.note_id else None
+        if legacy_note is None or legacy_note.notebook_id != locked_notebook_id:
+            raise HTTPException(409, "本会话锁定的笔记与当前笔记不一致，请新建对话")
+        # Older conversations stored a Note ID. Upgrade the compatibility field
+        # only after proving that the legacy Note belongs to the supplied Notebook.
+        conversation.note_id = locked_notebook_id
 
     notebook_title = ""
     if notebook_context is not None:
@@ -98,7 +113,6 @@ def send_agent_message(
         notebook_title = (notebook_context.title or book.title or "未命名笔记")[:200]
 
     history = [(message.role, message.content) for message in conversation.messages]
-    is_first_turn = not any(message.role == "user" for message in conversation.messages)
     user = ConversationMessage(
         conversation_id=conversation_id, role="user", content=payload.question.strip(),
         learning_goal=payload.learning_goal, status="completed", idempotency_key=payload.idempotency_key,
@@ -106,7 +120,7 @@ def send_agent_message(
     db.add(user)
     # 范围是会话级属性：仅首轮落库，之后沿用建会话时的范围（与 /messages 一致）
     if is_first_turn:
-        new_scope = payload.scope or "course"
+        new_scope = effective_scope
         conversation.default_scope = new_scope
         conversation.scope = new_scope
         if new_scope == "note":
@@ -147,8 +161,8 @@ def send_agent_message(
                 course_id=conversation.course_id,
                 course_name=course.name,
                 question=payload.question,
-                scope=payload.scope,
-                locked_notebook_id=locked_notebook_id if payload.scope == "note" else None,
+                scope=effective_scope,
+                locked_notebook_id=locked_notebook_id if effective_scope == "note" else None,
                 editable_notebook_id=locked_notebook_id,
                 reading_context=reading_section,
                 material_id=payload.material_id,

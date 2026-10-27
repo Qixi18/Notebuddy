@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -100,8 +101,11 @@ def persist_assistant_message(
                     message_id=assistant.id,
                     notebook_id=chunk.notebook_id,
                     document_block_id=chunk.document_block_id,
+                    document_block_ids_json=json.dumps(list(chunk.document_block_ids), ensure_ascii=False),
+                    page_numbers_json=json.dumps(list(chunk.page_numbers), ensure_ascii=False),
                     parse_run_id=chunk.parse_run_id,
                     body_block_id=chunk.block_id,
+                    notebook_revision=chunk.notebook_revision,
                     source_title=chunk.lecture_title,
                     location_label=chunk.location_label,
                     snippet=chunk.text[:600],

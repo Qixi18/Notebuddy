@@ -49,6 +49,9 @@ class RetrievedChunk:
     parse_run_id: str | None = None
     block_id: str | None = None
     notebook_revision: int | None = None
+    asset_id: str | None = None
+    page_numbers: tuple[int, ...] = ()
+    document_block_ids: tuple[str, ...] = ()
 
 
 def retrieve(
@@ -66,7 +69,9 @@ def retrieve(
         db, course_id=course_id, terms=terms, query_vector=query_vector,
         material_id=material_id, page_number=page_number,
     )
-    notebooks = _retrieve_notebooks(
+    # A material-scoped question means exactly that source asset. Do not silently
+    # mix unrelated Notebook body chunks into the result set.
+    notebooks = [] if material_id else _retrieve_notebooks(
         db, course_id=course_id, terms=terms, query_vector=query_vector,
     )
     merged = sorted(documents + notebooks, key=lambda item: item.score, reverse=True)
@@ -101,7 +106,7 @@ def _retrieve_documents(
     page_number: int | None,
 ) -> list[RetrievedChunk]:
     query = (
-        select(DocumentChunk, Asset, Notebook)
+        select(DocumentChunk, Asset, Notebook, Material)
         .join(DocumentParseRun, DocumentParseRun.id == DocumentChunk.parse_run_id)
         .join(Asset, Asset.id == DocumentParseRun.asset_id)
         .join(NotebookAsset, and_(
@@ -110,6 +115,7 @@ def _retrieve_documents(
             NotebookAsset.detached_at.is_(None),
         ))
         .join(Notebook, Notebook.id == NotebookAsset.notebook_id)
+        .outerjoin(Material, Material.asset_id == Asset.id)
         .where(
             Notebook.course_id == course_id,
             Notebook.deleted_at.is_(None),
@@ -119,13 +125,11 @@ def _retrieve_documents(
     )
     if material_id:
         material = db.get(Material, material_id)
-        query = query.where(or_(
-            Asset.id == material_id,
-            Asset.id == (material.asset_id if material is not None else None),
-        ))
+        asset_id = material.asset_id if material is not None else material_id
+        query = query.where(or_(Material.id == material_id, Asset.id == asset_id))
     rows = db.execute(query).all()
     results: list[RetrievedChunk] = []
-    for chunk, asset, notebook in rows:
+    for chunk, asset, notebook, material in rows:
         page_numbers = _json_list(chunk.page_numbers_json)
         if page_number and page_number not in page_numbers:
             continue
@@ -139,22 +143,29 @@ def _retrieve_documents(
         score = vector * 10 + lexical
         if score <= 0:
             continue
-        body_block_ids = _json_list(chunk.block_ids_json)
+        body_block_ids = [str(value) for value in _json_list(chunk.block_ids_json) if value]
+        stable_pages = tuple(sorted({int(value) for value in page_numbers if str(value).isdigit() and int(value) > 0}))
+        stable_blocks = tuple(dict.fromkeys(body_block_ids))
+        precise_page = page_number if page_number in stable_pages else stable_pages[0] if len(stable_pages) == 1 else 0
+        precise_block = stable_blocks[0] if len(stable_blocks) == 1 else None
         results.append(RetrievedChunk(
-            material_id=asset.id,
+            material_id=material.id if material is not None else None,
             lecture_title=asset.original_name,
-            page_number=page_numbers[0] if page_numbers else 0,
+            page_number=precise_page,
             text=chunk.text,
             score=score,
-            page_block_id=body_block_ids[0] if body_block_ids else None,
+            page_block_id=None,
             source_ref_id=None,
-            location_label=(f"第 {page_numbers[0]} 页" if page_numbers else None),
+            location_label=(f"第 {precise_page} 页" if precise_page else "跨页片段" if len(stable_pages) > 1 else None),
             score_source="hybrid" if vector else "keyword",
             direct_support=lexical > 0 or vector >= 0.55,
             kind="document",
             notebook_id=notebook.id,
-            document_block_id=body_block_ids[0] if body_block_ids else None,
+            document_block_id=precise_block,
             parse_run_id=chunk.parse_run_id,
+            asset_id=asset.id,
+            page_numbers=stable_pages,
+            document_block_ids=stable_blocks,
         ))
     return results
 
@@ -217,7 +228,8 @@ def build_context(chunks: list[RetrievedChunk]) -> str:
         if chunk.kind == "notebook":
             header = f"[课程笔记：{chunk.lecture_title} | {chunk.location_label or '当前正文'}]"
         else:
-            header = f"[课程资料：{chunk.lecture_title} | 第 {chunk.page_number} 页]"
+            location = chunk.location_label or (f"第 {chunk.page_number} 页" if chunk.page_number else "页码未确认")
+            header = f"[课程资料：{chunk.lecture_title} | {location}]"
         blocks.append(f"{header}\n{chunk.text}")
     return "\n\n".join(blocks)
 

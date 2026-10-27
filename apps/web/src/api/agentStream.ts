@@ -21,7 +21,7 @@ export type AgentDeltaEvent = { type: 'delta'; text: string }
 export type AgentNoticeEvent = { type: 'notice'; text: string }
 
 export type AgentSuggestion =
-  | { type: 'note_suggestion'; id: string; note_id: string; note_title: string; impact: string }
+  | { type: 'notebook_edit_suggestion'; id: string; notebook_id: string; notebook_title: string; base_revision: number; impact: string }
   | { type: 'knowledge_proposal'; id: string; name: string }
 
 export type AgentFinalEvent = {
@@ -55,7 +55,7 @@ export type AgentReadingContext = {
 }
 
 export type AgentNotebookContext = {
-  course_id: string
+  course_id: string | null
   notebook_id: string
   revision: number
   title?: string

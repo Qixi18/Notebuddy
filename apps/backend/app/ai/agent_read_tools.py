@@ -48,7 +48,7 @@ def _format_chunk(index: int, chunk: RetrievedChunk) -> str:
     if chunk.kind == "notebook":
         location = chunk.location_label or "当前正文"
         return f"[片段{index} | 课程笔记：{chunk.lecture_title} | {location}]\n{chunk.text[:CHUNK_TEXT_MAX_CHARS]}"
-    location = chunk.location_label or f"第 {chunk.page_number} 页"
+    location = chunk.location_label or (f"第 {chunk.page_number} 页" if chunk.page_number else "页码未确认")
     return f"[片段{index} | 课程资料：{chunk.lecture_title} | {location}]\n{chunk.text[:CHUNK_TEXT_MAX_CHARS]}"
 
 

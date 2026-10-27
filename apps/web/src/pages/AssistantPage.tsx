@@ -9,10 +9,9 @@ import { AssistantContextBar, type ScopeNext } from '../features/assistant/Assis
 import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
 import { NoteScopePicker } from '../features/assistant/NoteScopePicker'
-import { KnowledgeProposalCards, NoteSuggestionCards } from '../features/assistant/AgentCards'
-import { useNoteSuggestions } from '../features/assistant/useNoteSuggestions'
-import { NotePreviewDialog } from '../features/assistant/NotePreviewDialog'
-import { ChangesPanel, type NoteChangeItem } from '../features/assistant/ChangesPanel'
+import { KnowledgeProposalCards, NotebookEditSuggestionCards } from '../features/assistant/AgentCards'
+import { useNotebookEditSuggestions } from '../features/assistant/useNotebookEditSuggestions'
+import { ChangesPanel } from '../features/assistant/ChangesPanel'
 import { TermDialog } from '../features/assistant/TermDialog'
 import { teacherPersonaMeta } from '../features/persona/personas'
 import { PetAvatar, type PetAvatarHandle } from '../features/pet/PetAvatar'
@@ -32,12 +31,10 @@ export function AssistantPage() {
     courseId,
     courses,
     materials,
-    notes,
     courseContentLoading,
     openMaterialSource,
     teacherPersona,
     conversation,
-    refreshCurrentNotes,
   } = useWorkspace()
   const { askAgent, stopAgent, ready, busy, hasMessages, messages, renameConversation, deleteConversation, agentRun } = conversation
   const navigate = useNavigate()
@@ -53,13 +50,16 @@ export function AssistantPage() {
   const [scopeKind, setScopeKind] = useState<'global' | 'course' | 'note'>('global')
   const [scopeTargetId, setScopeTargetId] = useState<string>()
   const [scopeTargetTitle, setScopeTargetTitle] = useState<string>()
+  const [scopeTargetCourseId, setScopeTargetCourseId] = useState<string>()
+  const [scopeTargetRevision, setScopeTargetRevision] = useState(0)
+  const [currentNotebooks, setCurrentNotebooks] = useState<import('../types').NotebookSummary[]>([])
+  const handledNotebookRoute = useRef<string | undefined>(undefined)
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
+  const [changesOpen, setChangesOpen] = useState(false)
   const [notePickerOpen, setNotePickerOpen] = useState(false)
-  const [previewItem, setPreviewItem] = useState<NoteChangeItem>()
   const [scopeLockHint, setScopeLockHint] = useState(false)
   const scopeLockTimer = useRef<number | undefined>(undefined)
   const [webStatus, setWebStatus] = useState<{ configured: boolean; status: string }>({ configured: false, status: 'unconfigured' })
-  const [changesOpen, setChangesOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
   const [railDrawerOpen, setRailDrawerOpen] = useState(false)
@@ -72,14 +72,13 @@ export function AssistantPage() {
   )
 
   /* agent 产出的笔记修改建议：目标笔记 = 答疑页锁定的那一篇（与悬浮坞共用同一套建议状态机） */
-  const targetNote = useMemo(
-    () => (scopeTargetId ? notes.find((item) => item.id === scopeTargetId) : undefined),
-    [scopeTargetId, notes],
-  )
-  const noteSuggestions = useNoteSuggestions({
-    noteId: scopeTargetId,
-    note: targetNote,
-    refreshNotes: refreshCurrentNotes,
+  const notebookSuggestions = useNotebookEditSuggestions({
+    target: scopeKind === 'note' && scopeTargetId && scopeTargetCourseId && scopeTargetCourseId === courseId ? {
+      courseId: scopeTargetCourseId,
+      notebookId: scopeTargetId,
+      title: scopeTargetTitle ?? 'Notebook',
+      revision: scopeTargetRevision,
+    } : null,
     agentFinalId: agentRun?.final?.message_id,
   })
   const knowledgeProposals = useMemo(
@@ -96,18 +95,15 @@ export function AssistantPage() {
   const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext }>(() => {
     if (scope.kind === 'global') return { scope: 'global' }
     if (scope.kind === 'note' && scope.targetId) {
-      const note = notes.find((item) => item.id === scope.targetId)
       return {
         scope: 'note',
         readingContext: {
-          note_id: scope.targetId,
-          note_title: scope.targetTitle ?? note?.title,
-          excerpt: note?.content_markdown ? note.content_markdown.slice(0, 1200) : undefined,
+          note_title: scope.targetTitle,
         },
       }
     }
     return { scope: 'course' }
-  }, [scope.kind, scope.targetId, scope.targetTitle, notes])
+  }, [scope.kind, scope.targetTitle])
 
   /* 切换会话时，把范围 chip 对齐到该会话的真实归属。
      范围是会话级属性，存在 Conversation 行上；只有「还没有消息」的会话才允许再改。
@@ -126,12 +122,22 @@ export function AssistantPage() {
     }
     if (target.scope === 'note') {
       setScopeKind('note'); setScopeTargetId(target.note_id ?? undefined); setScopeTargetTitle(target.note_title ?? undefined)
+      setScopeTargetCourseId(courseId); setScopeTargetRevision(0)
     } else if (target.scope === 'global') {
       setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined)
     } else {
       setScopeKind('course'); setScopeTargetId(undefined); setScopeTargetTitle(undefined)
     }
   }, [conversation.conversationId, conversation.conversations])
+
+  useEffect(() => {
+    if (scopeKind !== 'note' || !scopeTargetId || !courseId || scopeTargetCourseId !== courseId) return
+    let active = true
+    void api.getNotebookDocument(courseId, scopeTargetId)
+      .then((document) => { if (active) setScopeTargetRevision(document.revision) })
+      .catch(() => { if (active) setScopeTargetRevision(0) })
+    return () => { active = false }
+  }, [scopeKind, scopeTargetId, scopeTargetCourseId, courseId])
 
   /* 范围锁定：当前会话一旦有过真实问答（不含本地开场白），就不再允许改范围 */
   const scopeLocked = hasMessages
@@ -147,7 +153,27 @@ export function AssistantPage() {
     setScopeKind('global')
     setScopeTargetId(undefined)
     setScopeTargetTitle(undefined)
+    setScopeTargetCourseId(undefined)
   }, [courseId])
+
+  useEffect(() => {
+    if (!courseId || !notePickerOpen) return
+    let active = true
+    void api.listNotebooks(courseId).then((items) => { if (active) setCurrentNotebooks(items) }).catch(() => { if (active) setCurrentNotebooks([]) })
+    return () => { active = false }
+  }, [courseId, notePickerOpen])
+
+  useEffect(() => {
+    const state = location.state as { lockNotebook?: { id: string; course_id: string; title: string } } | null
+    const notebook = state?.lockNotebook
+    if (!notebook) { handledNotebookRoute.current = undefined; return }
+    if (!notebook || notebook.course_id !== courseId || !ready || handledNotebookRoute.current === notebook.id) return
+    handledNotebookRoute.current = notebook.id
+    setScopeKind('note'); setScopeTargetId(notebook.id); setScopeTargetTitle(notebook.title)
+    setScopeTargetCourseId(notebook.course_id); setScopeTargetRevision(0)
+    void conversation.startNewConversation({ scope: 'note', noteId: notebook.id, noteTitle: notebook.title })
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.key, location.pathname, location.state, courseId, ready, conversation, navigate])
 
   useEffect(() => { void api.getWebSearchStatus().then(setWebStatus).catch(() => setWebStatus({ configured: false, status: 'unavailable' })) }, [])
 
@@ -164,9 +190,23 @@ export function AssistantPage() {
     const trimmed = text.trim()
     if (!trimmed || busy) return false
     /* 走 agent 流式通道：与悬浮坞同一条能力线（可调工具、正文逐字返回） */
-    void askAgent(trimmed, agentOptions).then((sent) => { if (!sent) setDraft(trimmed) })
+    void (async () => {
+      try {
+        let notebookContext
+        if (agentOptions.scope === 'note' && scopeTargetId && courseId) {
+          const document = await api.getNotebookDocument(courseId, scopeTargetId)
+          setScopeTargetRevision(document.revision)
+          notebookContext = { course_id: courseId, notebook_id: scopeTargetId, revision: document.revision,
+            title: scopeTargetTitle, excerpt: document.blocks.map((block) => block.text).join('\n').slice(0, 1200) }
+        }
+        const sent = await askAgent(trimmed, { ...agentOptions, notebookContext })
+        if (!sent) setDraft(trimmed)
+      } catch {
+        setDraft(trimmed)
+      }
+    })()
     return true
-  }, [askAgent, busy, agentOptions])
+  }, [askAgent, busy, agentOptions, scopeTargetId, scopeTargetTitle, courseId])
 
   /* 失败卡重试：拿原问题原文重发。
      已知限制：后端对重复幂等键直接 409（api/v1/agent.py:61-68），所以这里用新键重发，
@@ -428,14 +468,9 @@ export function AssistantPage() {
               title="搜索会话（Ctrl+K）"
               aria-label="搜索会话"
             >⌕</button>
-            <button
-              type="button"
-              className="workspace-topbar-changes"
-              onClick={() => setChangesOpen((open) => !open)}
-              aria-pressed={changesOpen}
-              title={changesOpen ? '收起改动栏' : '展开改动栏'}
-              aria-label={changesOpen ? '收起改动栏' : '展开改动栏'}
-            >改动</button>
+            <button type="button" className="workspace-topbar-changes"
+              onClick={() => setChangesOpen((open) => !open)} aria-pressed={changesOpen}
+              title={changesOpen ? '收起改动栏' : '展开改动栏'} aria-label={changesOpen ? '收起改动栏' : '展开改动栏'}>改动</button>
             <button
               type="button"
               className="primary-button workspace-topbar-new"
@@ -481,21 +516,25 @@ export function AssistantPage() {
           onStarter={useStarter}
           onFeedback={handleFeedback}
           onOpenMaterial={openMaterial}
+          onOpenNotebook={(notebookId, blockId, assetId, page) => {
+            if (!courseId) return
+            const params = new URLSearchParams()
+            if (assetId) { params.set('asset', assetId); if (page) params.set('page', String(page)) }
+            else if (blockId) params.set('section', blockId)
+            navigate(`/courses/${courseId}/notebooks/${notebookId}${params.size ? `?${params}` : ''}`)
+          }}
           onRetry={retryQuestion}
           onFollowUp={useStarter}
           agentRun={agentRun}
           extras={(
             <>
-              <NoteSuggestionCards
-                suggestions={noteSuggestions.suggestions}
-                currentContent={targetNote?.content_markdown ?? ''}
-                busyId={noteSuggestions.busyId}
-                adoptedContents={noteSuggestions.adopted}
-                onReview={(suggestion, decision, finalMarkdown) => void noteSuggestions.review(suggestion, decision, finalMarkdown)}
-                onUndo={(suggestion) => void noteSuggestions.undo(suggestion)}
+              <NotebookEditSuggestionCards
+                suggestions={notebookSuggestions.suggestions}
+                busyId={notebookSuggestions.busyId}
+                onReview={(suggestion, decision, indices) => void notebookSuggestions.review(suggestion, decision, indices)}
               />
               <KnowledgeProposalCards suggestions={knowledgeProposals} />
-              {noteSuggestions.notice ? <p className="workspace-agent-notice">{noteSuggestions.notice}</p> : null}
+              {notebookSuggestions.notice ? <p className="workspace-agent-notice">{notebookSuggestions.notice}</p> : null}
             </>
           )}
         />
@@ -527,23 +566,8 @@ export function AssistantPage() {
         </div>
       </section>
 
-      <ChangesPanel
-        open={changesOpen}
-        onToggle={() => setChangesOpen((open) => !open)}
-        items={noteSuggestions.changes}
-        onApplyAll={() => void noteSuggestions.applyAll()}
-        applying={noteSuggestions.busyId === '__all__'}
-        onPreview={(item) => setPreviewItem(item)}
-      />
-
-      <NotePreviewDialog
-        open={Boolean(previewItem)}
-        title={previewItem?.noteTitle ?? ''}
-        chapter={previewItem?.chapter}
-        current={targetNote?.content_markdown ?? ''}
-        proposed={previewItem?.proposed ?? ''}
-        onClose={() => setPreviewItem(undefined)}
-      />
+      <ChangesPanel open={changesOpen} onToggle={() => setChangesOpen((open) => !open)} items={[]}
+        onApplyAll={() => undefined} applying={false} onPreview={() => undefined} />
 
       {paletteOpen && (
         <ConversationSearch
@@ -559,11 +583,17 @@ export function AssistantPage() {
         open={notePickerOpen}
         courses={courses}
         currentCourseId={courseId}
-        currentNotes={notes}
-        loadNotes={(id) => api.listNotes(id)}
-        onPick={(note) => {
-          changeScope({ kind: 'note', targetId: note.id, targetTitle: note.title })
+        currentNotebooks={currentNotebooks}
+        loadNotebooks={(id) => api.listNotebooks(id)}
+        onPick={(notebook) => {
           setNotePickerOpen(false)
+          if (notebook.course_id !== courseId) {
+            navigate(featurePath(notebook.course_id, 'assistant'), { state: { lockNotebook: notebook } })
+            return
+          }
+          setScopeKind('note'); setScopeTargetId(notebook.id); setScopeTargetTitle(notebook.title)
+          setScopeTargetCourseId(notebook.course_id); setScopeTargetRevision(0)
+          void conversation.startNewConversation({ scope: 'note', noteId: notebook.id, noteTitle: notebook.title })
         }}
         onClose={() => setNotePickerOpen(false)}
       />

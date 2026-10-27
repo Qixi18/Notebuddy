@@ -2,6 +2,8 @@ import { useState } from 'react'
 
 import { DiffView } from './DiffView'
 import { applySelected, diffRows, hunksOf } from './noteDiff'
+import type { NotebookEditSuggestion } from '../../types'
+import { docToMarkdown } from '../notebook-editor/document'
 
 /**
  * agent 产生的待确认项卡片：
@@ -103,12 +105,53 @@ export function KnowledgeProposalCards({ suggestions }: { suggestions: Array<{ t
   if (suggestions.length === 0) return null
   return (
     <div className="agent-cards" role="list" aria-label="知识节点提议">
-      <small className="agent-cards-title">🌿 知识节点提议 · 到课程知识图谱审核后才会进入图谱</small>
+      <small className="agent-cards-title">🌿 旧版知识提议 · 不会写入 Notebook 正文或当前知识森林</small>
       {suggestions.map((proposal) => (
         <article key={proposal.id} className="agent-card agent-card-info" role="listitem">
-          <p className="agent-card-body">提议新增知识点「{proposal.name}」</p>
+          <p className="agent-card-body">提议新增知识点「{proposal.name}」。该提议仅保留在历史记录中；当前知识结构由 Notebook 正文生成。</p>
         </article>
       ))}
     </div>
   )
+}
+
+export function NotebookEditSuggestionCards({ suggestions, busyId, onReview }: {
+  suggestions: NotebookEditSuggestion[]
+  busyId?: string
+  onReview: (suggestion: NotebookEditSuggestion, decision: 'accept' | 'reject', selectedIndices?: number[]) => void
+}) {
+  const [selected, setSelected] = useState<Record<string, Set<number>>>({})
+  if (!suggestions.length) return null
+  return <div className="agent-cards" role="list" aria-label="待审核的 Notebook 修改建议">
+    <small className="agent-cards-title">📝 Notebook 修改建议 · 选择要应用的结构化操作，确认后写入</small>
+    {suggestions.map((item) => {
+      const selectedIndices = selected[item.id] ?? new Set(item.operations.map((_, index) => index))
+      return <article key={item.id} className="agent-card" role="listitem">
+        <p className="agent-card-body">《{item.notebook_title ?? 'Notebook'}》· {item.rationale || 'AI 提出的修改建议'}</p>
+        <fieldset className="notebook-edit-operations">
+          <legend>修改操作</legend>
+          {item.operations.map((operation, index) => <label key={`${index}-${operation.op}`}>
+            <input type="checkbox" checked={selectedIndices.has(index)} onChange={() => setSelected((current) => {
+              const next = new Set(current[item.id] ?? item.operations.map((_, i) => i))
+              next.has(index) ? next.delete(index) : next.add(index)
+              return { ...current, [item.id]: next }
+            })} />
+            <span>{operation.op} · {operation.anchor || '文末'}{operation.content ? `：${operation.content}` : ''}</span>
+          </label>)}
+        </fieldset>
+        {item.proposed_content ? <details className="notebook-edit-preview">
+          <summary>查看完整建议正文（预览）</summary>
+          <pre>{docToMarkdown(item.proposed_content)}</pre>
+        </details> : null}
+        <div className="agent-card-actions">
+          <button type="button" className="agent-card-confirm" disabled={busyId === item.id || selectedIndices.size === 0}
+            onClick={() => onReview(item, 'accept', [...selectedIndices].sort((a, b) => a - b))}>
+            {busyId === item.id ? '写入中…' : `采纳所选操作（${selectedIndices.size}/${item.operations.length}）`}
+          </button>
+          <button type="button" className="agent-card-reject" disabled={busyId === item.id}
+            onClick={() => onReview(item, 'reject')}>忽略</button>
+        </div>
+      </article>
+    })}
+  </div>
 }

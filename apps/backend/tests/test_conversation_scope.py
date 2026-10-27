@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base, get_db
-from app.db.models import Course
+from app.db.models import Course, Notebook
 from app.main import app
 
 
@@ -26,18 +26,22 @@ def _client(tmp_path):
         db.add(course)
         db.commit()
         course_id = course.id
-    return TestClient(app), course_id
+        notebook = Notebook(course_id=course_id, title="红黑树", tree_slot=0)
+        db.add(notebook)
+        db.commit()
+        notebook_id = notebook.id
+    return TestClient(app), course_id, notebook_id
 
 
 def test_note_scope_persists_snapshot(tmp_path) -> None:
-    client, course_id = _client(tmp_path)
+    client, course_id, notebook_id = _client(tmp_path)
     try:
         created = client.post(
             f"/api/v1/courses/{course_id}/conversations",
-            json={"title": "锁定笔记", "scope": "note", "note_id": "n-1", "note_title": "红黑树的五个不变量"},
+            json={"title": "锁定笔记", "scope": "note", "note_id": notebook_id, "note_title": "红黑树的五个不变量"},
         ).json()
         assert created["scope"] == "note"
-        assert created["note_id"] == "n-1"
+        assert created["note_id"] == notebook_id
         assert created["note_title"] == "红黑树的五个不变量"
         assert created["default_scope"] == "note"
     finally:
@@ -45,7 +49,7 @@ def test_note_scope_persists_snapshot(tmp_path) -> None:
 
 
 def test_legacy_material_folds_into_course_and_drops_note(tmp_path) -> None:
-    client, course_id = _client(tmp_path)
+    client, course_id, _notebook_id = _client(tmp_path)
     try:
         created = client.post(
             f"/api/v1/courses/{course_id}/conversations",
@@ -61,7 +65,7 @@ def test_legacy_material_folds_into_course_and_drops_note(tmp_path) -> None:
 
 
 def test_global_scope_and_list_returns_it(tmp_path) -> None:
-    client, course_id = _client(tmp_path)
+    client, course_id, _notebook_id = _client(tmp_path)
     try:
         client.post(
             f"/api/v1/courses/{course_id}/conversations",

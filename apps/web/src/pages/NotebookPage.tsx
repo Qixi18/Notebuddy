@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useWorkspace } from '../components/AppLayout'
-import type { AssetResource, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
+import type { AssetResource, DeletionPreview, Material, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
 import type { AssetProcessingJob } from '../types'
 import {
   NotebookEditor, type AIAction, type NotebookEditorHandle, type SelectionAnchor,
@@ -14,6 +15,7 @@ import {
 import { useNotebookSave } from '../features/notebook-editor/useNotebookSave'
 import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
 import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features/notebook-editor/NotebookBridge'
+import { DocumentSourcePreview } from '../features/notebook-editor/DocumentSourcePreview'
 import './NotebookPage.css'
 
 function serverDate(value: string): Date {
@@ -38,9 +40,12 @@ export function NotebookPage() {
 
 function NotebookPageBody() {
   const { courseId, notebookId } = useParams<{ courseId: string; notebookId: string }>()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const linkedSectionId = searchParams.get('section')
   const linkedChapterId = searchParams.get('chapter')
+  const linkedAssetId = searchParams.get('asset')
+  const uploadRequested = searchParams.get('upload') === '1'
+  const linkedAssetPage = Number(searchParams.get('page') || 1)
   const { course, materials, busy, uploadMaterial, refreshCurrentMaterials, setDocumentDirty } = useWorkspace()
 
   const [outline, setOutline] = useState<NotebookRead>()
@@ -63,8 +68,16 @@ function NotebookPageBody() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [assetResources, setAssetResources] = useState<AssetResource[]>([])
+  const [detachedAssetResources, setDetachedAssetResources] = useState<AssetResource[]>([])
+  const [assetResourcesLoaded, setAssetResourcesLoaded] = useState(false)
+  const [deletedBookMaterials, setDeletedBookMaterials] = useState<Material[]>([])
+  const [materialRemoval, setMaterialRemoval] = useState<{ id: string; impact: DeletionPreview }>()
+  const [materialActionError, setMaterialActionError] = useState<string>()
+  const [materialBusyId, setMaterialBusyId] = useState<string>()
   const [assetJobs, setAssetJobs] = useState<Record<string, AssetProcessingJob>>({})
   const [assetUploadError, setAssetUploadError] = useState<string>()
+  const [allowDuplicateUploads, setAllowDuplicateUploads] = useState(false)
+  const [assetRemoval, setAssetRemoval] = useState<AssetResource>()
   const [generationJob, setGenerationJob] = useState<NotebookGenerationJob | null>(null)
   const [generationBusy, setGenerationBusy] = useState(false)
   const [uploadBatchId, setUploadBatchId] = useState<string>()
@@ -159,20 +172,38 @@ function NotebookPageBody() {
 
   const refreshAssetResources = useCallback(async () => {
     if (!notebookId) return
-    const rows = await api.listNotebookAssets(notebookId)
+    const [rows, detached] = await Promise.all([
+      api.listNotebookAssets(notebookId),
+      api.listDetachedNotebookAssets(notebookId),
+    ])
     setAssetResources(rows)
+    setDetachedAssetResources(detached)
   }, [notebookId])
 
   useEffect(() => {
     if (!loaded || !notebookId) return
     let active = true
-    void api.listNotebookAssets(notebookId).then((rows) => {
-      if (active) setAssetResources(rows)
+    void Promise.all([api.listNotebookAssets(notebookId), api.listDetachedNotebookAssets(notebookId)]).then(([rows, detached]) => {
+      if (active) { setAssetResources(rows); setDetachedAssetResources(detached); setAssetResourcesLoaded(true) }
     }).catch((cause: unknown) => {
-      if (active) setAssetUploadError(cause instanceof Error ? cause.message : '资源列表读取失败')
+      if (active) { setAssetUploadError(cause instanceof Error ? cause.message : '资源列表读取失败'); setAssetResourcesLoaded(true) }
     })
     return () => { active = false }
   }, [loaded, notebookId])
+
+  useEffect(() => {
+    if (!uploadRequested || !loaded) return
+    fileInput.current?.click()
+    const next = new URLSearchParams(searchParams)
+    next.delete('upload')
+    setSearchParams(next, { replace: true })
+  }, [loaded, searchParams, setSearchParams, uploadRequested])
+
+  const closeAssetPreview = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('asset'); next.delete('page')
+    setSearchParams(next, { replace: true })
+  }
 
   useEffect(() => {
     if (!loaded || !notebookId) return
@@ -254,6 +285,93 @@ function NotebookPageBody() {
 
   const headings = useMemo(() => extractOutline(content), [content])
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
+
+  useEffect(() => {
+    if (!loaded || !courseId || !notebookId) return
+    let active = true
+    void api.listDeletedMaterials(courseId).then((items) => {
+      if (active) setDeletedBookMaterials(items.filter((item) => item.notebook_id === notebookId))
+    }).catch(() => { if (active) setDeletedBookMaterials([]) })
+    return () => { active = false }
+  }, [courseId, loaded, materials, notebookId])
+
+  async function prepareMaterialRemoval(material: Material) {
+    if (materialBusyId) return
+    setMaterialActionError(undefined)
+    setMaterialBusyId(material.id)
+    try {
+      const impact = await api.previewMaterialDeletion(material.id)
+      if (impact.active_jobs) throw new Error('资料仍在处理中，请等待任务结束后再移除。')
+      setMaterialRemoval({ id: material.id, impact })
+    } catch (cause) {
+      setMaterialActionError(cause instanceof Error ? cause.message : '读取移除影响失败')
+    } finally { setMaterialBusyId(undefined) }
+  }
+
+  async function confirmMaterialRemoval() {
+    if (!materialRemoval) return
+    setMaterialBusyId(materialRemoval.id)
+    try {
+      await api.deleteMaterial(materialRemoval.id)
+      setMaterialRemoval(undefined)
+      await refreshCurrentMaterials()
+      if (courseId) setDeletedBookMaterials((await api.listDeletedMaterials(courseId)).filter((item) => item.notebook_id === notebookId))
+    } catch (cause) {
+      setMaterialActionError(cause instanceof Error ? cause.message : '移除资料失败')
+    } finally { setMaterialBusyId(undefined) }
+  }
+
+  async function restoreBookMaterial(materialId: string) {
+    setMaterialBusyId(materialId)
+    try {
+      await api.restoreMaterial(materialId)
+      await refreshCurrentMaterials()
+      if (courseId) setDeletedBookMaterials((await api.listDeletedMaterials(courseId)).filter((item) => item.notebook_id === notebookId))
+      setMaterialActionError(undefined)
+    } catch (cause) {
+      setMaterialActionError(cause instanceof Error ? cause.message : '恢复资料失败')
+    } finally { setMaterialBusyId(undefined) }
+  }
+
+  async function runMaterialOperation(materialId: string, operation: 'retry' | 'reparse') {
+    setMaterialBusyId(materialId)
+    setMaterialActionError(undefined)
+    try {
+      if (operation === 'retry') await api.retryMaterial(materialId)
+      else await api.reparseMaterial(materialId)
+      await refreshCurrentMaterials()
+    } catch (cause) {
+      setMaterialActionError(cause instanceof Error ? cause.message : '资料处理任务启动失败')
+    } finally { setMaterialBusyId(undefined) }
+  }
+
+  async function removeNotebookAsset() {
+    if (!assetRemoval || !notebookId) return
+    setMaterialBusyId(assetRemoval.id)
+    setMaterialActionError(undefined)
+    try {
+      await api.removeNotebookAsset(notebookId, assetRemoval.id)
+      setAssetRemoval(undefined)
+      await refreshAssetResources()
+      if (linkedAssetId === assetRemoval.id) closeAssetPreview()
+      setNotice('资源已从当前 Notebook 移除；正文和历史版本中的引用保持不变。')
+    } catch (cause) {
+      setMaterialActionError(cause instanceof Error ? cause.message : '移除资源失败')
+    } finally { setMaterialBusyId(undefined) }
+  }
+
+  async function restoreNotebookAsset(asset: AssetResource) {
+    if (!notebookId) return
+    setMaterialBusyId(asset.id)
+    setMaterialActionError(undefined)
+    try {
+      await api.restoreNotebookAsset(notebookId, asset.id)
+      await refreshAssetResources()
+      setNotice('资料已恢复到当前 Notebook。')
+    } catch (cause) {
+      setMaterialActionError(cause instanceof Error ? cause.message : '恢复资料失败')
+    } finally { setMaterialBusyId(undefined) }
+  }
   const wordCount = useMemo(() => countText(content), [content])
   const dirty = save.state !== 'saved' || title !== (outline?.title ?? '')
 
@@ -315,7 +433,7 @@ function NotebookPageBody() {
         const lectureTitle = file.name.replace(/\.[^.]+$/, '').trim() || '新资料'
         try {
           results.push({ status: 'fulfilled', value: await uploadMaterial(
-            file, lectureTitle, notebookId, '', false, batchId,
+            file, lectureTitle, notebookId, '', allowDuplicateUploads, batchId,
           ) })
         } catch (reason) {
           results.push({ status: 'rejected', reason })
@@ -323,6 +441,7 @@ function NotebookPageBody() {
       }
       const uploadFailures = results.filter((result) => result.status === 'rejected').length
       await refreshCurrentMaterials()
+      setAllowDuplicateUploads(false)
       setOutline(await api.getNotebookById(courseId, notebookId))
       setResourcesOpen(true)
       if (uploadFailures < files.length) {
@@ -503,7 +622,7 @@ function NotebookPageBody() {
             <button type="button" onClick={exportMarkdown}>导出 Markdown</button>
             <button type="button" onClick={exportPdf}>导出 PDF</button>
             <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href).then(() => setNotice('链接已复制。'))}>复制链接</button>
-            <Link to={`/courses/${courseId}/materials?notebook=${notebookId}`}>管理课程资料</Link>
+            <button type="button" onClick={() => { setResourcesOpen(true); document.querySelector('.notebook-document-resource-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}>查看本篇资料</button>
           </div>
         </details>
       </div>
@@ -534,6 +653,10 @@ function NotebookPageBody() {
         <button className="notebook-document-upload is-secondary" type="button" onClick={() => sourceImageInput.current?.click()}>
           <span aria-hidden="true">▧</span>添加 PNG/JPG 图片资料
         </button>
+        <label className="notebook-document-duplicate-option">
+          <input type="checkbox" checked={allowDuplicateUploads} onChange={(event) => setAllowDuplicateUploads(event.target.checked)} />
+          相同文件也作为新资料导入
+        </label>
         {uploadError && <p className="notebook-document-sidebar-error" role="alert">{uploadError}</p>}
         {assetUploadError && <p className="notebook-document-sidebar-error" role="alert">{assetUploadError}</p>}
         {generationError && <p className="notebook-document-sidebar-error" role="alert">{generationError}</p>}
@@ -558,10 +681,24 @@ function NotebookPageBody() {
             {assetResources.length ? assetResources.map((asset) => <div className="notebook-document-resource-item" key={asset.id}>
               <span title={asset.original_name}>{asset.original_name}</span>
               <small>{asset.state === 'ready' ? asset.role === 'source_material' ? '原始资料' : '正文资源' : asset.state}</small>
+              {asset.role === 'source_material' && <button type="button" disabled={asset.state !== 'ready'}
+                onClick={() => { const next = new URLSearchParams(searchParams); next.set('asset', asset.id); next.set('page', '1'); setSearchParams(next) }}>查看来源</button>}
+              {asset.role === 'source_material' && <details className="notebook-document-material-actions"><summary aria-label={`管理${asset.original_name}`}>更多</summary>
+                <button type="button" disabled={Boolean(materialBusyId)} onClick={() => setAssetRemoval(asset)}>从本篇移除</button>
+              </details>}
               {asset.media_type === 'image' && asset.state === 'ready' && <button type="button" onClick={() => void insertSourceAsset(asset)}>插入正文</button>}
               {asset.media_type === 'image' && asset.role === 'source_material' && assetJobs[asset.id] && <small className="notebook-document-resource-status">OCR：{assetJobs[asset.id].status === 'completed' ? '完成' : assetJobs[asset.id].status === 'completed_with_warnings' ? '有告警' : assetJobs[asset.id].status === 'failed' ? `失败 · ${assetJobs[asset.id].error_message ?? ''}` : assetJobs[asset.id].status === 'processing' ? '处理中' : '排队中'}</small>}
               {asset.media_type === 'image' && asset.role === 'source_material' && assetJobs[asset.id]?.status === 'failed' && <button type="button" onClick={() => void api.retryAssetParse(asset.id).then((job) => setAssetJobs((current) => ({ ...current, [asset.id]: job }))).catch((cause: unknown) => setAssetUploadError(cause instanceof Error ? cause.message : '重试图片解析失败'))}>重试 OCR</button>}
             </div>) : <p className="notebook-document-sidebar-empty">暂时没有已登记的统一资源</p>}
+            {detachedAssetResources.length > 0 && <details className="notebook-document-deleted-materials">
+              <summary>可恢复资源 · {detachedAssetResources.length}</summary>
+              {detachedAssetResources.map((asset) => <div key={asset.id}>
+                <span>{asset.original_name}</span>
+                <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void restoreNotebookAsset(asset)}>
+                  {materialBusyId === asset.id ? '恢复中…' : '恢复'}
+                </button>
+              </div>)}
+            </details>}
           </div>
         </section>
         <section className="notebook-document-sidebar-section">
@@ -569,10 +706,27 @@ function NotebookPageBody() {
             <span className={resourcesOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>课程资料 <small>{bookMaterials.length}</small>
           </button>
           {resourcesOpen && <div className="notebook-document-section-body">
-            {bookMaterials.length ? bookMaterials.map((material) => <Link className="notebook-document-material" key={material.id} to={`/courses/${courseId}/materials?notebook=${notebookId}`} title={material.original_filename}>
-              <span className="notebook-document-file-icon" aria-hidden="true">{material.original_filename.toLowerCase().endsWith('.pdf') ? 'PDF' : material.original_filename.toLowerCase().endsWith('.pptx') ? 'PPT' : 'DOC'}</span>
-              <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? `已整理 · ${material.page_count} 页` : material.status === 'failed' ? '处理失败' : '正在整理'}</small></span>
-            </Link>) : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}
+            {materialActionError && <p className="notebook-document-sidebar-error" role="alert">{materialActionError}</p>}
+            {bookMaterials.length ? bookMaterials.map((material) => <div className="notebook-document-material-row" key={material.id}>
+              <Link className="notebook-document-material"
+                to={`/courses/${courseId}/notebooks/${notebookId}${material.asset_id ? `?asset=${encodeURIComponent(material.asset_id)}` : ''}`} title={material.original_filename}>
+                <span className="notebook-document-file-icon" aria-hidden="true">{material.original_filename.toLowerCase().endsWith('.pdf') ? 'PDF' : material.original_filename.toLowerCase().endsWith('.pptx') ? 'PPT' : 'DOC'}</span>
+                <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? `已整理 · ${material.page_count} 页` : material.status === 'failed' ? `处理失败${material.document_warning ? ` · ${material.document_warning}` : ''}` : '正在整理'}</small></span>
+              </Link>
+              <details className="notebook-document-material-actions"><summary aria-label={`管理${material.original_filename}`}>更多</summary>
+                <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void prepareMaterialRemoval(material)}>移除资料</button>
+                {material.status === 'failed'
+                  ? <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void runMaterialOperation(material.id, 'retry')}>重试解析</button>
+                  : <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void runMaterialOperation(material.id, 'reparse')}>重新解析</button>}
+              </details>
+            </div>) : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}
+            {deletedBookMaterials.length > 0 && <details className="notebook-document-deleted-materials">
+              <summary>可恢复资料 · {deletedBookMaterials.length}</summary>
+              {deletedBookMaterials.map((material) => <div key={material.id}>
+                <span>{material.original_filename}</span><button type="button" disabled={Boolean(materialBusyId)}
+                  onClick={() => void restoreBookMaterial(material.id)}>{materialBusyId === material.id ? '恢复中…' : '恢复'}</button>
+              </div>)}
+            </details>}
           </div>}
         </section>
         <section className="notebook-document-sidebar-section notebook-document-sidebar-directory">
@@ -617,6 +771,36 @@ function NotebookPageBody() {
           />
         </article>}
       </main>
+      {linkedAssetId && assetResourcesLoaded && notebookId && (() => {
+        const asset = assetResources.find((item) => item.id === linkedAssetId && item.role === 'source_material')
+        const materialId = bookMaterials.find((item) => item.asset_id === asset?.id)?.id
+        return asset ? <DocumentSourcePreview assetId={asset.id} notebookId={notebookId} materialId={materialId}
+          initialPage={Number.isInteger(linkedAssetPage) && linkedAssetPage > 0 ? linkedAssetPage : 1}
+          fileName={asset.original_name} mimeType={asset.mime_type} originalUrl={asset.content_url} onClose={closeAssetPreview} />
+          : <div className="document-source-backdrop" role="presentation"><section className="document-source-dialog" role="alertdialog" aria-modal="true" aria-label="资料不可用">
+            <p>这份资料不属于当前 Notebook 或已不可用。</p><button type="button" onClick={closeAssetPreview}>关闭</button>
+          </section></div>
+      })()}
+      {materialRemoval && <ConfirmDialog
+        eyebrow="Notebook 资料管理"
+        title={`移除“${bookMaterials.find((item) => item.id === materialRemoval.id)?.original_filename ?? '这份资料'}”？`}
+        description="资料会从当前 Notebook 隐藏，并进入可恢复资料列表。受保护的用户笔记不会被删除。"
+        confirmLabel="确认移除资料" cancelLabel="保留资料" tone="danger"
+        pending={Boolean(materialBusyId)} pendingLabel="正在移除…" error={materialActionError}
+        onConfirm={() => void confirmMaterialRemoval()} onCancel={() => setMaterialRemoval(undefined)}>
+        <div className="deletion-impact" aria-label="移除影响范围">
+          <span><strong>{materialRemoval.impact.pages}</strong><small>个页面</small></span>
+          <span><strong>{materialRemoval.impact.source_refs}</strong><small>条来源</small></span>
+          <span><strong>{materialRemoval.impact.user_notes_protected}</strong><small>条受保护笔记</small></span>
+        </div>
+      </ConfirmDialog>}
+      {assetRemoval && <ConfirmDialog
+        eyebrow="Notebook 资源管理"
+        title={`从本篇移除“${assetRemoval.original_name}”？`}
+        description="此操作解除资源与当前 Notebook 的关联。源文件不会立即物理删除；正文附件或历史版本仍引用时会继续保留。"
+        confirmLabel="确认移除" cancelLabel="保留资源" tone="danger"
+        pending={Boolean(materialBusyId)} pendingLabel="正在移除…" error={materialActionError}
+        onConfirm={() => void removeNotebookAsset()} onCancel={() => setAssetRemoval(undefined)} />}
     </div>
 
     {save.conflictOpen && <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="保存冲突">

@@ -1,21 +1,46 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { api } from '../src/api'
-import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
-import { NotesPage } from '../src/pages/NotesPage'
-vi.mock('../src/api', () => ({ api: { getNotebook: vi.fn(), getNote: vi.fn(), getCourseTree: vi.fn() } }))
-function Result() { const location = useLocation(); return <p>{location.pathname}{location.search}</p> }
-function mount(path: string) { render(<MemoryRouter initialEntries={[path]}><WorkspaceProvider value={{ notes: [], materials: [] } as unknown as WorkspaceContextValue}><Routes><Route path="/courses/:courseId/notes/:noteId" element={<NotesPage />} /><Route path="/courses/:courseId/notebooks/:notebookId" element={<Result />} /></Routes></WorkspaceProvider></MemoryRouter>) }
-beforeEach(() => {
-  vi.clearAllMocks()
-  vi.mocked(api.getNotebook).mockResolvedValue({ id: 'default', course_id: 'c', title: '默认本', chapters: [], historical_sections: [], removed_chapters: [] } as never)
-  vi.mocked(api.getNote).mockResolvedValue({ id: 'n', course_id: 'c', notebook_id: 'second', material_id: 'lecture' } as never)
-  vi.mocked(api.getCourseTree).mockResolvedValue({ course_id: 'c', notebooks: [{ id: 'second', chapters: [{ id: 'lecture' }], removed_chapters: [] }] } as never)
-})
+
+const apiState = vi.hoisted(() => ({ listNotebooks: vi.fn() }))
+vi.mock('../src/api', () => ({ api: { listNotebooks: apiState.listNotebooks } }))
+
+import { LegacyMaterialsRedirect } from '../src/App'
+
+function Destination() {
+  const location = useLocation()
+  return <p>{location.pathname}{location.search}</p>
+}
+
+function mount(path: string) {
+  render(<MemoryRouter initialEntries={[path]}><Routes>
+    <Route path="/courses/:courseId/materials" element={<LegacyMaterialsRedirect />} />
+    <Route path="/courses/:courseId/notebooks/:notebookId" element={<Destination />} />
+    <Route path="/courses/:courseId" element={<Destination />} />
+  </Routes></MemoryRouter>)
+}
+
+beforeEach(() => vi.clearAllMocks())
 afterEach(cleanup)
-test('old note links preserve the real book and reject another course', async () => {
-  mount('/courses/c/notes/n'); await screen.findByText('/courses/c/notebooks/second?chapter=lecture&section=n')
-  cleanup(); vi.mocked(api.getNote).mockResolvedValue({ id: 'n', course_id: 'other', notebook_id: 'second', material_id: 'lecture' } as never)
-  mount('/courses/c/notes/n'); await screen.findByText('这条笔记属于其他课程。')
+
+test('old materials links open the explicitly selected Notebook', async () => {
+  apiState.listNotebooks.mockResolvedValue([
+    { id: 'book-a', course_id: 'c', title: '第一本' },
+    { id: 'book-b', course_id: 'c', title: '第二本' },
+  ])
+  mount('/courses/c/materials?notebook=book-b')
+  expect(await screen.findByText('/courses/c/notebooks/book-b')).toBeTruthy()
+  expect(apiState.listNotebooks).toHaveBeenCalledWith('c')
+})
+
+test('invalid Notebook links return to the course overview instead of switching books', async () => {
+  apiState.listNotebooks.mockResolvedValue([{ id: 'book-a', course_id: 'c', title: '第一本' }])
+  mount('/courses/c/materials?notebook=missing')
+  expect(await screen.findByText('/courses/c')).toBeTruthy()
+})
+
+test('courses without Notebooks return to the course overview', async () => {
+  apiState.listNotebooks.mockResolvedValue([])
+  mount('/courses/c/materials')
+  expect(await screen.findByText('/courses/c')).toBeTruthy()
 })

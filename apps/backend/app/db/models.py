@@ -1094,8 +1094,11 @@ class MessageEvidence(Base):
     # Document IR / Notebook evidence (source_ref_id remains for legacy rows).
     notebook_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     document_block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    document_block_ids_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    page_numbers_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
     parse_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     body_block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notebook_revision: Mapped[int | None] = mapped_column(nullable=True)
     source_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
     location_label: Mapped[str | None] = mapped_column(String(500), nullable=True)
     snippet: Mapped[str | None] = mapped_column(Text, nullable=True)

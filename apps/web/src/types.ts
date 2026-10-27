@@ -185,6 +185,30 @@ export type AssetResource = {
   created_at: string
 }
 
+export type DocumentParseRunSummary = {
+  id: string; asset_id: string; status: string; is_current: boolean
+  page_count: number; text_chars: number; quality_status: string
+  quality: { status: string; warnings?: string[]; [key: string]: unknown }
+  created_at: string; error_code?: string | null; error_message?: string | null
+}
+export type DocumentPage = {
+  page_number: number; status: string; extraction: string; confidence: number | null
+  warnings: string[]; text_chars: number; render_url: string | null
+}
+export type DocumentBlock = {
+  block_id: string; page_number: number; type: string; level: number; text: string
+  latex: string | null; confidence: number | null; extraction: string; warnings: string[]
+}
+export type AssetDocument = {
+  run: DocumentParseRunSummary; pages: DocumentPage[]
+  sections: Array<{ section_id: string; title: string; level: number; page_start: number; page_end: number; block_ids: string[] }>
+}
+export type DocumentCoverage = {
+  asset_id: string; asset_name: string; parse_run_id: string; total_blocks: number; cited_blocks: number
+  pages: Array<{ page_number: number; total: number; cited: number }>
+  blocks: Array<{ block_id: string; page_number: number; quote: string; citations: Array<{ notebook_id: string; notebook_title: string; block_id: string; page_number: number }> }>
+}
+
 export type AssetProcessingJob = {
   id: string
   asset_id: string
@@ -226,11 +250,15 @@ export type NotebookGenerationJob = {
 }
 
 export type AssistantSource = {
-  source_type: 'course_material' | 'web'
+  source_type: 'course_material' | 'notebook' | 'web'
+  source_status?: 'active' | 'stale' | 'unavailable'
   source_ref_id?: string | null
   material_id?: string | null
+  asset_id?: string | null
   lecture_title?: string | null
   page_number?: number | null
+  page_numbers?: number[]
+  document_block_ids?: string[]
   snippet: string
   title?: string | null
   url?: string | null
@@ -240,6 +268,13 @@ export type AssistantSource = {
   location_label?: string | null
   support_level?: string
   score_source?: string | null
+  notebook_id?: string | null
+  notebook_title?: string | null
+  notebook_revision?: number | null
+  block_id?: string | null
+  document_block_id?: string | null
+  parse_run_id?: string | null
+  locator?: Record<string, unknown> | null
 }
 
 export type WebSource = {
@@ -338,6 +373,7 @@ export type NotebookEditOperation = {
 export type NotebookEditSuggestion = {
   id: string
   notebook_id: string
+  notebook_title?: string
   base_revision: number
   rationale: string
   operations: NotebookEditOperation[]

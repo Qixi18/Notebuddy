@@ -7,10 +7,13 @@ import json
 import pytest
 
 from app.ai.agent_tools import build_tool_specs, execute_tool
+from app.api.v1.agent import send_agent_message
+from app.api.v1.conversations import create_conversation
 from app.api.v1.notebook import list_edit_suggestions, review_edit_suggestion
-from app.db.models import NotebookEditSuggestion
+from app.db.models import Conversation, ConversationMessage, NotebookEditSuggestion
 from app.notes.document import load_document, normalize_document
 from app.notes.store import write_document
+from app.schemas.api import AgentMessageCreate, ConversationCreate
 from app.schemas.notebook import NotebookEditSuggestionReview
 from tests.notebook_fixtures import (
     make_asset,
@@ -69,6 +72,73 @@ def test_read_notebook_rejects_foreign_course(session):
     outcome = execute_tool(session, course_id=_course.id, name="read_notebook",
                            arguments={"notebook_id": foreign.id}, scope="course")
     assert "不属于当前课程" in outcome.payload_text or "拒绝" in outcome.payload_text
+
+
+def test_locked_agent_conversation_rejects_scope_widening(session):
+    course, book, _asset = _setup(session)
+    conversation = Conversation(
+        course_id=course.id, title="锁定笔记", default_scope="note",
+        scope="note", note_id=book.id, note_title=book.title,
+    )
+    session.add(conversation)
+    session.flush()
+    session.add(ConversationMessage(
+        conversation_id=conversation.id, role="user", content="已在锁定笔记范围提问",
+        status="completed",
+    ))
+    session.commit()
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as captured:
+        send_agent_message(
+            conversation.id, AgentMessageCreate(question="扩大范围", scope="course"), session,
+        )
+    assert captured.value.status_code == 409
+    assert len(conversation.messages) == 1
+
+
+def test_note_conversation_creation_checks_notebook_course(session):
+    course, _book, _asset = _setup(session)
+    other_course = make_course(session, "另一个课程")
+    foreign_book = make_notebook(session, other_course)
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as captured:
+        create_conversation(
+            course.id,
+            ConversationCreate(scope="note", default_scope="note", note_id=foreign_book.id),
+            session,
+        )
+    assert captured.value.status_code == 404
+
+
+def test_agent_rejects_notebook_context_from_foreign_course(session):
+    course, _book, _asset = _setup(session)
+    foreign_course = make_course(session, "隔离课程")
+    foreign_book = make_notebook(session, foreign_course)
+    conversation = create_conversation(
+        course.id,
+        ConversationCreate(scope="course", default_scope="course"),
+        session,
+    )
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as captured:
+        send_agent_message(
+            conversation.id,
+            AgentMessageCreate(
+                question="跨课程读取", scope="course",
+                notebook_context={
+                    "course_id": foreign_course.id, "notebook_id": foreign_book.id,
+                    "revision": foreign_book.document_revision,
+                },
+            ),
+            session,
+        )
+    assert captured.value.status_code == 404
 
 
 def test_propose_notebook_edits_is_pending_and_body_unchanged(session):

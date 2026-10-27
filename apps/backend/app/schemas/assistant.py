@@ -11,7 +11,10 @@ TeacherPersonaId = Literal["elf", "doubao", "feiyu"]
 class AssistantRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     material_id: str | None = None
+    asset_id: str | None = None
     page_number: int | None = None
+    page_numbers: list[int] = Field(default_factory=list)
+    document_block_ids: list[str] = Field(default_factory=list)
     allow_web: bool = True
     learning_goal: str | None = Field(default=None, max_length=60)
     teacher_persona: TeacherPersonaId = "elf"
@@ -32,6 +35,12 @@ class AssistantSource(BaseModel):
     location_label: str | None = None
     support_level: str = "direct"
     score_source: str | None = None
+    notebook_id: str | None = None
+    block_id: str | None = None
+    document_block_id: str | None = None
+    parse_run_id: str | None = None
+    notebook_revision: int | None = None
+    source_status: Literal["active", "stale", "unavailable"] = "active"
 
 
 class AssistantClaim(BaseModel):

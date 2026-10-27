@@ -29,3 +29,23 @@ test('web citation opens externally with safe link attributes', () => {
   expect(link.getAttribute('target')).toBe('_blank')
   expect(link.getAttribute('rel')).toContain('noreferrer')
 })
+
+test('outdated citations stay identifiable and unavailable Notebook evidence cannot be opened', () => {
+  const openSource = vi.fn()
+  const { rerender } = render(<AssistantMessageSource source={{
+    source_type: 'course_material', material_id: 'm1', page_number: 2,
+    lecture_title: '第一讲', snippet: '解析版本已更新', source_status: 'stale',
+  }} onOpen={openSource} />)
+  expect(screen.getByText('来源已更新')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: /第一讲/ }))
+  expect(openSource).toHaveBeenCalledOnce()
+
+  rerender(<AssistantMessageSource source={{
+    source_type: 'notebook', notebook_id: 'book', block_id: 'block',
+    snippet: 'Notebook 已删除', source_status: 'unavailable',
+  }} onOpen={openSource} />)
+  const unavailable = screen.getByRole('button', { name: /来源已不可用/ }) as HTMLButtonElement
+  expect(unavailable.disabled).toBe(true)
+  expect(screen.getByText(/来源已不可用/)).toBeTruthy()
+  expect(openSource).toHaveBeenCalledOnce()
+})

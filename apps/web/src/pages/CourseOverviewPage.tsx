@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { featurePath, useWorkspace } from '../components/AppLayout'
+import { useWorkspace } from '../components/AppLayout'
 import { ProcessingStatus } from '../components/ProcessingStatus'
 import { CourseKnowledgeStructure } from './CourseKnowledgeStructure'
 import { api } from '../api'
@@ -60,7 +60,9 @@ export function CourseOverviewPage() {
         <div className="course-workspace-actions">
           <Link className="secondary-button link-button" to={`/forest?course=${courseId}`}>在知识森林中查看</Link>
           <button className="secondary-button" type="button" onClick={() => navigate('/', { state: { openCreateCourse: true } })}>＋ 新建课程</button>
-          <Link className="primary-button link-button" to={featurePath(courseId, 'materials')}>上传课程资料</Link>
+          <button className="primary-button" type="button" onClick={() => notebooks[0]
+            ? navigate(`/courses/${courseId}/notebooks/${notebooks[0].id}?upload=1`)
+            : setRootOpen(true)}>上传课程资料</button>
         </div>
       </header>
 
@@ -82,12 +84,16 @@ export function CourseOverviewPage() {
 
           <div className="course-entry-list">
             <section aria-label="本课程笔记本"><h2>笔记本</h2>{notebooks.map(book => <Link className="course-entry-row" key={book.id} to={`/courses/${courseId}/notebooks/${book.id}`}>{book.title} · 继续阅读</Link>)}<button className="text-button" onClick={() => setRootOpen(true)}>新建或扩充笔记本</button>{bookError && <p role="alert">{bookError}</p>}</section>
-            <Link className="course-entry-row" to={featurePath(courseId, 'materials')}>
+            <Link className="course-entry-row" to={notebooks[0] ? `/courses/${courseId}/notebooks/${notebooks[0].id}` : '#'} onClick={(event) => {
+              if (!notebooks[0]) { event.preventDefault(); setRootOpen(true) }
+            }}>
               <span className="course-entry-icon" aria-hidden="true">▱</span>
               <span className="course-entry-copy"><strong>课程资料</strong><small>{materialCount ? `${materialCount} 份资料 · 查看解析状态与页码来源` : '上传课件并查看解析状态与页码来源'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>
             </Link>
-            <Link className="course-entry-row" to={notebooks[0] ? `/courses/${courseId}/notebooks/${notebooks[0].id}` : featurePath(courseId, 'materials')}>
+            <Link className="course-entry-row" to={notebooks[0] ? `/courses/${courseId}/notebooks/${notebooks[0].id}` : '#'} onClick={(event) => {
+              if (!notebooks[0]) { event.preventDefault(); setRootOpen(true) }
+            }}>
               <span className="course-entry-icon course-entry-icon-notes" aria-hidden="true">▤</span>
               <span className="course-entry-copy"><strong>课程笔记</strong><small>{sectionCount ? `${sectionCount} 个小节 · 阅读、编辑并核对来源` : '阅读整理内容，或从已解析的资料开始生成'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>

@@ -14,6 +14,8 @@ from app.db.models import (
     ConversationMessage,
     Material,
     MessageEvidence,
+    Note,
+    Notebook,
     PageBlock,
     SourceRef,
 )
@@ -114,11 +116,20 @@ def _normalize_scope(value: str | None) -> str:
 
 @router.post("/courses/{course_id}/conversations", response_model=ConversationRead, status_code=201)
 def create_conversation(course_id: str, payload: ConversationCreate, db: Session = Depends(get_db)) -> Conversation:
-    ensure_course(db, course_id)
+    course = ensure_course(db, course_id)
     scope = _normalize_scope(payload.scope or payload.default_scope)
     # 只有锁定笔记的会话才带笔记快照；其余范围忽略，避免脏字段混进历史分组。
     note_id = payload.note_id if scope == "note" else None
     note_title = payload.note_title if scope == "note" else None
+    if scope == "note":
+        notebook = db.get(Notebook, note_id) if note_id else None
+        if notebook is None and note_id:
+            legacy_note = db.get(Note, note_id)
+            notebook = db.get(Notebook, legacy_note.notebook_id) if legacy_note and legacy_note.notebook_id else None
+        if notebook is None or notebook.deleted_at is not None or notebook.course_id != course.id:
+            raise HTTPException(status_code=404, detail="锁定的笔记不存在或不属于当前课程")
+        note_id = notebook.id
+        note_title = (note_title or notebook.title)[:300]
     conversation = Conversation(
         course_id=course_id,
         title=payload.title.strip(),
@@ -158,7 +169,22 @@ def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> 
 @router.get("/courses/{course_id}/conversations", response_model=list[ConversationRead])
 def list_conversations(course_id: str, db: Session = Depends(get_db)) -> list[Conversation]:
     ensure_course(db, course_id)
-    return list(db.scalars(select(Conversation).where(Conversation.course_id == course_id).order_by(Conversation.updated_at.desc())).all())
+    conversations = list(db.scalars(select(Conversation).where(
+        Conversation.course_id == course_id,
+    ).order_by(Conversation.updated_at.desc())).all())
+    # Historical scope snapshots may contain a legacy Note ID. Resolve them on
+    # read so the client can open the canonical Notebook without rewriting data.
+    for conversation in conversations:
+        if conversation.scope != "note" or not conversation.note_id:
+            continue
+        if db.get(Notebook, conversation.note_id) is not None:
+            continue
+        legacy_note = db.get(Note, conversation.note_id)
+        notebook = db.get(Notebook, legacy_note.notebook_id) if legacy_note and legacy_note.notebook_id else None
+        if notebook is not None and notebook.course_id == course_id and notebook.deleted_at is None:
+            conversation.note_id = notebook.id
+            conversation.note_title = conversation.note_title or notebook.title
+    return conversations
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[ConversationMessageRead])

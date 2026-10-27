@@ -62,8 +62,8 @@ function UnboundNotebookBody({ notebookId }: { notebookId: string | undefined })
     return true
   }, [editVersion, save.isDirty, save.reset, save.revision])
 
-  const bridgeValue = useMemo<NotebookBridgeValue | null>(() => conversationCourseId && notebookId && notebook ? {
-    courseId: conversationCourseId, notebookId, title, revision: save.revision, editVersion,
+  const bridgeValue = useMemo<NotebookBridgeValue | null>(() => notebookId && notebook ? {
+    courseId: null, notebookId, title, revision: save.revision, editVersion,
     excerpt: excerptAroundSelection(content, selection?.text), selection, insertAI,
     isDirty: save.isDirty, adoptDocument,
   } : null, [adoptDocument, content, conversationCourseId, editVersion, insertAI, notebook, notebookId, save.isDirty, save.revision, selection, title])

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Uploa
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.api.v1.shared import ensure_course, ensure_material
 from app.core.config import settings
@@ -27,10 +27,9 @@ from app.db.models import (
     NotebookAttachment,
     NotebookBlockSource,
     NotebookGenerationInput,
+    NotebookSection,
     NotebookUploadBatch,
-    PageBlock,
     ProcessingJob,
-    SourceRef,
     WebSource,
 )
 from app.document_processing.ir import QualityReport
@@ -53,7 +52,6 @@ from app.notes.assets import (
 from app.notes.notebook import bump_order_revision
 from app.parsers.ocr import status as ocr_status
 from app.schemas.api import (
-    BlockRead,
     CoverageRead,
     DeletionPreview,
     JobRead,
@@ -114,6 +112,55 @@ def list_notebook_assets(notebook_id: str, db: Session = Depends(get_db)):
         NotebookAsset.detached_at.is_(None),
     ).order_by(NotebookAsset.created_at.desc())).all()
     return [_asset_read(asset, role, owner_notebook_id) for asset, role, owner_notebook_id in rows]
+
+
+@router.get("/notebooks/{notebook_id}/detached-assets", response_model=list[AssetRead])
+def list_detached_notebook_assets(notebook_id: str, db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    rows = db.execute(select(Asset, NotebookAsset.role, NotebookAsset.notebook_id).join(
+        NotebookAsset, NotebookAsset.asset_id == Asset.id,
+    ).where(
+        NotebookAsset.notebook_id == notebook_id,
+        NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_not(None),
+        Asset.state == "ready",
+    ).order_by(NotebookAsset.detached_at.desc())).all()
+    return [_asset_read(asset, role, owner_notebook_id) for asset, role, owner_notebook_id in rows]
+
+
+@router.post("/notebooks/{notebook_id}/assets/{asset_id}/restore", response_model=AssetRead)
+def restore_notebook_asset(notebook_id: str, asset_id: str, db: Session = Depends(get_db)):
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    owner = db.scalar(select(NotebookAsset).where(
+        NotebookAsset.notebook_id == notebook_id,
+        NotebookAsset.asset_id == asset_id,
+        NotebookAsset.is_owner.is_(True),
+    ))
+    asset = db.get(Asset, asset_id)
+    if owner is None or asset is None:
+        raise HTTPException(404, "这份资源不属于当前 Notebook")
+    if owner.detached_at is None:
+        return _asset_read(asset, owner.role, notebook_id)
+    if asset.state != "ready":
+        raise HTTPException(409, "资源文件已不可恢复，请重新上传原文件")
+    active_owner = db.scalar(select(NotebookAsset.id).where(
+        NotebookAsset.asset_id == asset_id,
+        NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_(None),
+    ))
+    if active_owner is not None:
+        raise HTTPException(409, "资源已归属其他位置，无法恢复到当前 Notebook")
+    try:
+        storage_path(asset)
+    except AssetUnavailable as exc:
+        raise HTTPException(409, "资源文件缺失，无法恢复") from exc
+    owner.detached_at = None
+    db.commit()
+    return _asset_read(asset, owner.role, notebook_id)
 
 
 @router.post("/notebooks/{notebook_id}/assets/{asset_id}/inline", response_model=AssetRead)
@@ -270,8 +317,8 @@ def list_asset_parse_results(asset_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/assets/{asset_id}/parse-runs", response_model=list[DocumentRunRead])
-def list_asset_parse_runs(asset_id: str, db: Session = Depends(get_db)):
-    _ensure_asset(db, asset_id)
+def list_asset_parse_runs(asset_id: str, notebook_id: str | None = None, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id, notebook_id)
     runs = db.scalars(select(DocumentParseRun).where(
         DocumentParseRun.asset_id == asset_id,
     ).order_by(DocumentParseRun.created_at.desc())).all()
@@ -279,8 +326,8 @@ def list_asset_parse_runs(asset_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/assets/{asset_id}/document", response_model=DocumentIRRead)
-def get_asset_document(asset_id: str, db: Session = Depends(get_db)):
-    _ensure_asset(db, asset_id)
+def get_asset_document(asset_id: str, notebook_id: str | None = None, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id, notebook_id)
     run = current_parse_run(db, asset_id)
     if run is None:
         latest = latest_parse_run(db, asset_id)
@@ -295,8 +342,8 @@ def get_asset_document(asset_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/assets/{asset_id}/document/runs/{run_id}", response_model=DocumentIRRead)
-def get_asset_document_run(asset_id: str, run_id: str, db: Session = Depends(get_db)):
-    _ensure_asset(db, asset_id)
+def get_asset_document_run(asset_id: str, run_id: str, notebook_id: str | None = None, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id, notebook_id)
     run = db.get(DocumentParseRun, run_id)
     if run is None or run.asset_id != asset_id:
         raise HTTPException(404, "解析版本不存在")
@@ -311,9 +358,10 @@ def get_asset_document_run(asset_id: str, run_id: str, db: Session = Depends(get
 
 @router.get("/assets/{asset_id}/document/pages/{page_number}/evidence",
             response_model=list[DocumentBlockRead])
-def get_document_page_evidence(asset_id: str, page_number: int, db: Session = Depends(get_db)):
-    _ensure_asset(db, asset_id)
-    run = current_parse_run(db, asset_id)
+def get_document_page_evidence(asset_id: str, page_number: int, notebook_id: str | None = None,
+                               run_id: str | None = None, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id, notebook_id)
+    run = _selected_completed_run(db, asset_id, run_id)
     if run is None:
         raise HTTPException(404, "该资料还没有完成的解析版本")
     document = load_ir(db, run)
@@ -324,9 +372,10 @@ def get_document_page_evidence(asset_id: str, page_number: int, db: Session = De
 
 
 @router.get("/assets/{asset_id}/document/pages/{page_number}/render")
-def get_document_page_render(asset_id: str, page_number: int, db: Session = Depends(get_db)):
-    asset = _ensure_asset(db, asset_id)
-    run = current_parse_run(db, asset_id)
+def get_document_page_render(asset_id: str, page_number: int, notebook_id: str | None = None,
+                             run_id: str | None = None, db: Session = Depends(get_db)):
+    asset = _ensure_asset(db, asset_id, notebook_id)
+    run = _selected_completed_run(db, asset_id, run_id)
     if run is None:
         raise HTTPException(404, "该资料还没有完成的解析版本")
     if (asset.extension or "").lower() != ".pdf":
@@ -346,9 +395,10 @@ def get_document_page_render(asset_id: str, page_number: int, db: Session = Depe
 
 
 @router.get("/assets/{asset_id}/document/coverage")
-def get_document_coverage(asset_id: str, db: Session = Depends(get_db)):
-    asset = _ensure_asset(db, asset_id)
-    run = current_parse_run(db, asset_id)
+def get_document_coverage(asset_id: str, notebook_id: str | None = None,
+                          run_id: str | None = None, db: Session = Depends(get_db)):
+    asset = _ensure_asset(db, asset_id, notebook_id)
+    run = _selected_completed_run(db, asset_id, run_id)
     if run is None:
         raise HTTPException(404, "该资料还没有完成的解析版本")
     rows = db.execute(
@@ -389,11 +439,23 @@ def get_document_coverage(asset_id: str, db: Session = Depends(get_db)):
     }
 
 
-def _ensure_asset(db: Session, asset_id: str) -> Asset:
+def _ensure_asset(db: Session, asset_id: str, notebook_id: str | None = None) -> Asset:
+    if notebook_id:
+        try:
+            return assert_notebook_asset(db, asset_id, notebook_id)
+        except AssetUnavailable as exc:
+            raise HTTPException(404, str(exc)) from exc
     asset = db.get(Asset, asset_id)
     if asset is None:
         raise HTTPException(404, "资源不存在")
     return asset
+
+
+def _selected_completed_run(db: Session, asset_id: str, run_id: str | None) -> DocumentParseRun | None:
+    run = current_parse_run(db, asset_id) if run_id is None else db.get(DocumentParseRun, run_id)
+    if run is not None and (run.asset_id != asset_id or run.status != "completed"):
+        raise HTTPException(404, "解析版本不存在或尚未完成")
+    return run
 
 
 def _run_payload(run: DocumentParseRun) -> dict:

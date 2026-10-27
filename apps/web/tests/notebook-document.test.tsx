@@ -11,10 +11,12 @@ vi.mock('../src/api', () => ({
     getNotebookById: vi.fn(), getNotebookDocument: vi.fn(), saveNotebookDocument: vi.fn(),
     renameNotebook: vi.fn(), getNotebookChapter: vi.fn(), getNote: vi.fn(),
     uploadNotebookAttachment: vi.fn(), listNotebookRevisions: vi.fn(), getNotebookRevision: vi.fn(),
-    restoreNotebookRevision: vi.fn(), listNotebookAssets: vi.fn().mockResolvedValue([]),
+    restoreNotebookRevision: vi.fn(), listNotebookAssets: vi.fn().mockResolvedValue([]), listDetachedNotebookAssets: vi.fn().mockResolvedValue([]),
+    restoreNotebookAsset: vi.fn(), removeNotebookAsset: vi.fn(),
     listNotebookUploadBatches: vi.fn().mockResolvedValue([]), getNotebookUploadBatch: vi.fn(),
     closeNotebookUploadBatch: vi.fn(), getNotebookGenerationJob: vi.fn(),
     listNotebookAssetJobs: vi.fn().mockResolvedValue([]), retryMaterial: vi.fn(),
+    listDeletedMaterials: vi.fn().mockResolvedValue([]),
     retryNotebookGenerationJob: vi.fn(), retryAssetParse: vi.fn(), uploadNotebookAsset: vi.fn(),
     useAssetInline: vi.fn(),
   },
@@ -81,10 +83,39 @@ test('resource and outline groups collapse; upload targets the current notebook'
   await waitFor(() => expect(refreshCurrentMaterials).toHaveBeenCalled())
 })
 
+test('Notebook upload preserves the explicit duplicate-as-new-item choice', async () => {
+  const { uploadMaterial } = mount()
+  await screen.findByRole('textbox', { name: '笔记名称' })
+  fireEvent.click(screen.getByLabelText('相同文件也作为新资料导入'))
+  const file = new File(['pdf'], '同名讲义.pdf', { type: 'application/pdf' })
+  fireEvent.change(screen.getByLabelText('选择课程资料'), { target: { files: [file] } })
+  await waitFor(() => expect(uploadMaterial).toHaveBeenCalledWith(
+    file, '同名讲义', 'book', '', true, expect.any(String),
+  ))
+})
+
+test('restores a detached Asset through its Notebook scoped resource list', async () => {
+  const asset = {
+    id: 'asset-restore', source_type: 'upload', media_type: 'image', mime_type: 'image/png',
+    original_name: '题目.png', byte_size: 1024, sha256: null, state: 'ready',
+    role: 'source_material', content_url: '/api/v1/notebooks/book/assets/asset-restore/content',
+    created_at: '2026-10-27T00:00:00Z',
+  }
+  vi.mocked(api.listNotebookAssets).mockResolvedValueOnce([]).mockResolvedValue([asset] as never)
+  vi.mocked(api.listDetachedNotebookAssets).mockResolvedValueOnce([asset] as never).mockResolvedValue([])
+  vi.mocked(api.restoreNotebookAsset).mockResolvedValue(asset as never)
+  mount()
+  await screen.findByRole('textbox', { name: '笔记名称' })
+  fireEvent.click(await screen.findByText('可恢复资源 · 1'))
+  fireEvent.click(screen.getByRole('button', { name: '恢复' }))
+  await waitFor(() => expect(api.restoreNotebookAsset).toHaveBeenCalledWith('book', 'asset-restore'))
+  await waitFor(() => expect(screen.getByText('题目.png')).toBeTruthy())
+})
+
 test('document save status starts from the server revision', async () => {
   mount()
   await screen.findByRole('textbox', { name: '笔记名称' })
-  expect(screen.getByRole('status').textContent).toContain('已保存')
+  expect(document.querySelector('.notebook-document-save-status')?.textContent).toContain('已保存')
   expect(api.saveNotebookDocument).not.toHaveBeenCalled()
 })
 

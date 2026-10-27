@@ -95,6 +95,32 @@ def test_course_tree_and_overview_use_body(client, session):
     assert overview.json()["materials"][0]["generation_allowed"] is True
 
 
+def test_knowledge_graph_tracks_document_edits_and_history_restore(client, session):
+    course, book = _ready_book(session)
+    graph_url = f"/api/v1/courses/{course.id}/knowledge-graph"
+    graph = client.get(graph_url)
+    assert graph.status_code == 200
+    assert {node["name"] for node in graph.json()["nodes"]} == {"第一章 极限", "第二章 连续"}
+
+    changed = client.put(
+        f"/api/v1/courses/{course.id}/notebooks/{book.id}/document",
+        json={"content": _document("第三章 导数"), "expected_revision": 1},
+    )
+    assert changed.status_code == 200, changed.text
+    edited_graph = client.get(graph_url).json()
+    assert [node["name"] for node in edited_graph["nodes"]] == ["第三章 导数"]
+    assert [node["id"] for node in edited_graph["nodes"]] == ["h-1"]
+
+    restored = client.post(
+        f"/api/v1/courses/{course.id}/notebooks/{book.id}/revisions/1/restore",
+        json={"expected_revision": 2},
+    )
+    assert restored.status_code == 200, restored.text
+    restored_graph = client.get(graph_url).json()
+    assert [node["name"] for node in restored_graph["nodes"]] == ["第一章 极限", "第二章 连续"]
+    assert {node["revision"] for node in restored_graph["nodes"]} == {3}
+
+
 def test_forest_relations_between_notebooks(client, session):
     _course_a, book_a = _ready_book(session, title="A 笔记", course_name="课程 A")
     _course_b, book_b = _ready_book(session, title="B 笔记", course_name="课程 B")

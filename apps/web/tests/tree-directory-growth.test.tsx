@@ -1,11 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { HomePage } from '../src/pages/HomePage'
 import { ForestPage } from '../src/pages/ForestPage'
-import { MaterialsPage } from '../src/pages/MaterialsPage'
 vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getForestRelations: vi.fn().mockResolvedValue([]), getCourseTree: vi.fn(), getLatestForestJob: vi.fn().mockResolvedValue(null), getForestJob: vi.fn(), createNotebook: vi.fn(), listNotebooks: vi.fn(), getCapabilities: vi.fn().mockResolvedValue(undefined), listDeletedMaterials: vi.fn().mockResolvedValue([]) } }))
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); sessionStorage.clear() })
 
@@ -23,8 +22,12 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
     const navigate = useNavigate(), location = useLocation()
     return <><output aria-label="当前页面">{location.pathname}{location.search}</output><button onClick={() => navigate(-1)}>浏览器返回</button></>
   }
+  function NotebookUploadTarget() {
+    const { notebookId } = useParams()
+    return <><h1>本篇资料入口</h1><output aria-label="目标笔记本">{notebookId}</output></>
+  }
   const { container } = render(<MemoryRouter initialEntries={[mode === 'home' ? '/' : '/forest']}><WorkspaceProvider value={{ course, courses: [course], coursesLoading: false, materials: [], pages: [], refreshCourses: vi.fn() } as unknown as WorkspaceContextValue}>
-    <Routes><Route path="/" element={<HomePage />} /><Route path="/forest" element={<ForestPage />} /><Route path="/courses/:courseId/materials" element={<MaterialsPage />} /></Routes><HistoryControl />
+    <Routes><Route path="/" element={<HomePage />} /><Route path="/forest" element={<ForestPage />} /><Route path="/courses/:courseId/notebooks/:notebookId" element={<NotebookUploadTarget />} /></Routes><HistoryControl />
   </WorkspaceProvider></MemoryRouter>)
   await screen.findByRole('button', { name: '打开知识点：旧知识点' })
   expect(container.querySelector('.kt-branch-growth')).toBeNull()
@@ -44,9 +47,9 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
   fireEvent.click(screen.getByRole('button', { name: '新建笔记本' }))
   fireEvent.change(screen.getByLabelText('笔记本名称'), { target: { value: added.title } })
   fireEvent.click(screen.getByRole('button', { name: '创建并上传' }))
-  await screen.findByRole('heading', { name: '课程资料' })
+  await screen.findByRole('heading', { name: '本篇资料入口' })
   expect(api.createNotebook).toHaveBeenCalledExactlyOnceWith('c', added.title)
-  expect(screen.getByLabelText('当前页面').textContent).toBe('/courses/c/materials?notebook=new-book')
+  expect(screen.getByLabelText('当前页面').textContent).toBe('/courses/c/notebooks/new-book?upload=1')
   await waitFor(() => expect((screen.getByLabelText('目标笔记本') as HTMLSelectElement).value).toBe(added.id))
   fireEvent.click(screen.getByRole('button', { name: '浏览器返回' }))
   await screen.findByRole('button', { name: '续读笔记本：新增笔记本' })

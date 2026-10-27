@@ -3,7 +3,7 @@ import type { SelectionAnchor } from './NotebookEditor'
 import type { DocNode } from './document'
 
 export type NotebookBridgeValue = {
-  courseId: string
+  courseId: string | null
   notebookId: string
   title: string
   revision: number

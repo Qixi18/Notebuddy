@@ -7,7 +7,7 @@ import { HomePage } from '../src/pages/HomePage'
 
 vi.mock('../src/api', () => ({ api: {
   getNotebook: vi.fn(), getNotebookById: vi.fn(), getReadingPosition: vi.fn(), saveReadingPosition: vi.fn(),
-  listNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
+  listNotebookAssets: vi.fn().mockResolvedValue([]), listDetachedNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
   getChapter: vi.fn(), getNotebookChapter: vi.fn(), getNote: vi.fn(), getForest: vi.fn(), getCourseTree: vi.fn(),
   getForestRelations: vi.fn().mockResolvedValue([]), getLatestForestJob: vi.fn().mockResolvedValue(null),
   listMaterials: vi.fn().mockResolvedValue([]), listNotes: vi.fn().mockResolvedValue([]), listNotebooks: vi.fn(), createNotebook: vi.fn(),
@@ -41,7 +41,7 @@ test('home root creates a named book then navigates to upload that book', async 
   fireEvent.click(screen.getByRole('button', { name: '新建笔记本' }))
   fireEvent.change(screen.getByLabelText('笔记本名称'), { target: { value: '新本' } })
   fireEvent.click(screen.getByRole('button', { name: '创建并上传' }))
-  await waitFor(() => expect(screen.getByLabelText('位置').textContent).toBe('/courses/c/materials?notebook=new-book'))
+  await waitFor(() => expect(screen.getByLabelText('位置').textContent).toBe('/courses/c/notebooks/new-book?upload=1'))
 })
 test('home root expands the chosen book rather than the default book', async () => {
   mount('/', <HomePage />)
@@ -49,5 +49,5 @@ test('home root expands the chosen book rather than the default book', async () 
   fireEvent.click(screen.getByRole('button', { name: '扩充现有笔记本' }))
   fireEvent.change(await screen.findByLabelText('选择笔记本'), { target: { value: 'b2' } })
   fireEvent.click(screen.getByRole('button', { name: '上传到此本' }))
-  expect(screen.getByLabelText('位置').textContent).toBe('/courses/c/materials?notebook=b2')
+  expect(screen.getByLabelText('位置').textContent).toBe('/courses/c/notebooks/b2?upload=1')
 })

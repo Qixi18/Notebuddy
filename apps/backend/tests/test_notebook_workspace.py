@@ -201,3 +201,36 @@ def test_unbound_notebook_can_upload_parse_and_generate(env):
         overview = client.get(f"/api/v1/courses/{course['id']}/overview").json()
         assert overview["counts"]["notebooks"] == 1
         assert overview["counts"]["sections"] >= 1
+
+
+def test_notebook_asset_can_be_restored_only_by_its_owner_notebook(env):
+    _engine, _factory, tmp_path = env
+    with TestClient(app) as client:
+        _course_id, notebook_id = _create_course_and_book(client)
+        uploaded = _upload(client, notebook_id, _pdf(tmp_path))
+        asset_id = uploaded["asset"]["id"]
+
+        removed = client.delete(f"/api/v1/notebooks/{notebook_id}/assets/{asset_id}")
+        assert removed.status_code == 200, removed.text
+        detached = client.get(f"/api/v1/notebooks/{notebook_id}/detached-assets")
+        assert detached.status_code == 200, detached.text
+        assert [row["id"] for row in detached.json()] == [asset_id]
+
+        other_course = client.post("/api/v1/courses", json={"name": "另一门课"}).json()
+        other_book = client.post(
+            f"/api/v1/courses/{other_course['id']}/notebooks", json={"title": "另一笔记"},
+        ).json()
+        unauthorized = client.post(
+            f"/api/v1/notebooks/{other_book['id']}/assets/{asset_id}/restore",
+        )
+        assert unauthorized.status_code == 404
+
+        restored = client.post(
+            f"/api/v1/notebooks/{notebook_id}/assets/{asset_id}/restore",
+        )
+        assert restored.status_code == 200, restored.text
+        assert restored.json()["id"] == asset_id
+        assert [row["id"] for row in client.get(
+            f"/api/v1/notebooks/{notebook_id}/assets",
+        ).json()] == [asset_id]
+        assert client.get(f"/api/v1/notebooks/{notebook_id}/detached-assets").json() == []

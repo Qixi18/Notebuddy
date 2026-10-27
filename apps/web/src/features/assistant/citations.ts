@@ -18,7 +18,7 @@ import type { AssistantSource } from '../../types'
 export type CiteRef = {
   /** 角标编号，等于该来源首次被引用的顺序（1 起） */
   no: number
-  kind: 'course' | 'web'
+  kind: 'course' | 'notebook' | 'web'
   sourceIndex: number
   title: string
   page?: number

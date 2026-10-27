@@ -23,7 +23,7 @@ export function NotebookRootMenu({ courseId, courseName, onClose, returnState }:
     void api.listNotebooks(courseId).then(items => { if (active) { setBooks(items); setSelected(items[0]?.id ?? '') } }).catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '目录读取失败') })
     return () => { active = false }
   }, [courseId, mode])
-  function upload(id: string) { navigate(`/courses/${courseId}/materials?notebook=${encodeURIComponent(id)}`, { state: returnState }) }
+  function upload(id: string) { navigate(`/courses/${courseId}/notebooks/${encodeURIComponent(id)}?upload=1`, { state: returnState }) }
   async function create(event: FormEvent) {
     event.preventDefault()
     if (!title.trim() || busy) return

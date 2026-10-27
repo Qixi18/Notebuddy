@@ -104,6 +104,7 @@ const featureDescriptions: Record<Feature, string> = {
 
 export function featurePath(courseId: string, feature: Feature): string {
   if (feature === 'notes') return `/courses/${courseId}/notebook`
+  if (feature === 'materials') return `/courses/${courseId}`
   return `/courses/${courseId}/${feature}`
 }
 

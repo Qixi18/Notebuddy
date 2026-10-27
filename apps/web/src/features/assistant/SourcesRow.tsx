@@ -8,7 +8,7 @@ import { parseCitations, type CiteRef } from './citations'
  * 角标编号按正文首次引用顺序生成，与 chips 编号一一对应。
  * 点正文角标会滚动到这里、展开原文并高亮对应 chip（否则依据在长回答底部，点了像没反应）。
  */
-export function SourcesRow({ content, sources, activeNo, focus, onActive, onOpenMaterial }: {
+export function SourcesRow({ content, sources, activeNo, focus, onActive, onOpenMaterial, onOpenNotebook }: {
   content: string
   sources: AssistantSource[]
   activeNo?: number
@@ -16,6 +16,7 @@ export function SourcesRow({ content, sources, activeNo, focus, onActive, onOpen
   focus?: { no: number; seq: number }
   onActive: (no: number) => void
   onOpenMaterial?: (materialId: string, page: number) => void
+  onOpenNotebook?: (notebookId: string, blockId?: string, assetId?: string, page?: number) => void
 }) {
   const [open, setOpen] = useState(false)
   const chipRefs = useRef(new Map<number, HTMLButtonElement>())
@@ -26,6 +27,11 @@ export function SourcesRow({ content, sources, activeNo, focus, onActive, onOpen
     const seen = new Map<number, CiteRef>()
     for (const paragraph of parsed.paragraphs) {
       for (const ref of paragraph.refs) if (!seen.has(ref.no)) seen.set(ref.no, ref)
+    }
+    for (const [sourceIndex, source] of sources.entries()) {
+      if (!source.notebook_id || [...seen.values()].some((ref) => ref.sourceIndex === sourceIndex)) continue
+      const no = Math.max(0, ...seen.keys()) + 1
+      seen.set(no, { no, kind: 'notebook', sourceIndex, title: source.lecture_title ?? source.title ?? 'Notebook 正文' })
     }
     return [...seen.values()].sort((a, b) => a.no - b.no)
   }, [content, sources])
@@ -99,7 +105,14 @@ export function SourcesRow({ content, sources, activeNo, focus, onActive, onOpen
                     {source?.page_number ? ` · p.${source.page_number}` : ''}
                   </strong>
                   {source?.snippet && <p>{source.snippet}</p>}
-                  {source?.material_id && source.page_number && onOpenMaterial && (
+                {source?.notebook_id && onOpenNotebook && (
+                  <button type="button" className="workspace-source-open"
+                    onClick={() => onOpenNotebook(source.notebook_id!, source.block_id ?? undefined,
+                      source.asset_id ?? undefined, source.page_number ?? undefined)}>
+                    {source.asset_id ? '查看原始资料 →' : '打开 Notebook →'}
+                  </button>
+                )}
+                {source?.material_id && source.page_number && onOpenMaterial && (
                     <button
                       type="button"
                       className="workspace-source-open"

@@ -65,11 +65,12 @@ async function copyText(text: string): Promise<boolean> {
 /** 追问建议：点一下只把话术填进输入框，由用户决定要不要发 */
 const FOLLOW_UPS = ['再展开讲讲', '能举个例子吗', '这和上一讲有什么关系'] as const
 
-function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry, retryText, onFollowUp }: {
+function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, retryText, onFollowUp }: {
   message: ConversationMessage
   personaName: string
   onFeedback: (messageId: string, category: 'helpful' | 'not_helpful') => Promise<boolean>
   onOpenMaterial?: (materialId: string, page: number) => void
+  onOpenNotebook?: (notebookId: string, blockId?: string, assetId?: string, page?: number) => void
   /** 失败卡的重试：回传原问题原文，由调用方重发 */
   onRetry?: (text: string) => void
   /** 可重试的原问题原文 */
@@ -144,6 +145,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
           focus={citeFocus}
           onActive={setActiveNo}
           onOpenMaterial={onOpenMaterial}
+          onOpenNotebook={onOpenNotebook}
         />
 
         {message.status !== 'failed' && message.id !== 'local-greeting' && (
@@ -182,7 +184,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
 }
 
 /** 对话主线：欢迎态 / 用户气泡 / 回答卡（角标 + 依据行 + 反馈）/ agent 实时块 */
-export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onRetry, onFollowUp, agentRun, extras }: {
+export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, onFollowUp, agentRun, extras }: {
   ready: boolean
   busy: boolean
   messages: ConversationMessage[]
@@ -192,6 +194,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
   onStarter: (prompt: string) => void
   onFeedback: (messageId: string, category: 'helpful' | 'not_helpful') => Promise<boolean>
   onOpenMaterial?: (materialId: string, page: number) => void
+  onOpenNotebook?: (notebookId: string, blockId?: string, assetId?: string, page?: number) => void
   /** 失败卡的重试：回传原问题原文，由调用方重发 */
   onRetry?: (text: string) => void
   /** 追问 chips：只把话术填进草稿，不自动发送 */
@@ -267,6 +270,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
             personaName={personaName}
             onFeedback={onFeedback}
             onOpenMaterial={onOpenMaterial}
+            onOpenNotebook={onOpenNotebook}
             onRetry={onRetry}
             retryText={retryTextFor(index)}
             onFollowUp={onFollowUp}
