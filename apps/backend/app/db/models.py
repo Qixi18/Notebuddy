@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     Table,
@@ -56,13 +58,11 @@ class Course(Base):
     notebook_order_revision: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     last_opened_at: Mapped[datetime | None] = mapped_column(nullable=True)
     notebooks: Mapped[list[Notebook]] = relationship(passive_deletes=True)
+    materials: Mapped[list[Material]] = relationship(back_populates="course", passive_deletes=True)
 
-    # 除了 materials，其余关联表只有 course_id 外键。显式声明 ORM 级联，
+    # 课程数据显式声明 ORM 级联，
     # 这样即使引擎未开启 SQLite 外键（tests / 迁移脚本 / 换库），
     # 删课程也不会留下孤儿知识点、笔记或检索块。
-    materials: Mapped[list[Material]] = relationship(
-        back_populates="course", cascade="all, delete-orphan"
-    )
     conversations: Mapped[list[Conversation]] = relationship(
         back_populates="course", cascade="all, delete-orphan"
     )
@@ -112,6 +112,46 @@ class Notebook(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now)
     reading_position: Mapped[NotebookReadingPosition | None] = relationship(cascade="all, delete-orphan")
+    materials: Mapped[list[Material]] = relationship(back_populates="notebook", cascade="all, delete-orphan")
+    attachments: Mapped[list[NotebookAttachment]] = relationship(back_populates="notebook", cascade="all, delete-orphan")
+    outgoing_links: Mapped[list[NotebookRelation]] = relationship(
+        foreign_keys="NotebookRelation.source_notebook_id",
+        back_populates="source_notebook", cascade="all, delete-orphan",
+    )
+    incoming_links: Mapped[list[NotebookRelation]] = relationship(
+        foreign_keys="NotebookRelation.target_notebook_id",
+        back_populates="target_notebook", cascade="all, delete-orphan",
+    )
+
+
+class NotebookRelation(Base):
+    """An explicit, typed link between two independently stored notebooks."""
+
+    __tablename__ = "notebook_relations"
+    __table_args__ = (
+        CheckConstraint("source_notebook_id <> target_notebook_id", name="ck_notebook_relations_no_self_link"),
+        UniqueConstraint("source_notebook_id", "target_notebook_id", "relation_type",
+                         name="uq_notebook_relations_endpoints_type"),
+        Index("ix_notebook_relations_target", "target_notebook_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    source_notebook_id: Mapped[str] = mapped_column(
+        ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False,
+    )
+    target_notebook_id: Mapped[str] = mapped_column(
+        ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False,
+    )
+    relation_type: Mapped[str] = mapped_column(String(40), nullable=False, default="related")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+    source_notebook: Mapped[Notebook] = relationship(
+        foreign_keys=[source_notebook_id], back_populates="outgoing_links",
+    )
+    target_notebook: Mapped[Notebook] = relationship(
+        foreign_keys=[target_notebook_id], back_populates="incoming_links",
+    )
 
 
 class NotebookReadingPosition(Base):
@@ -131,6 +171,7 @@ class NotebookDocumentRevision(Base):
     __tablename__ = "notebook_document_revisions"
     __table_args__ = (
         UniqueConstraint("notebook_id", "revision", name="uq_notebook_document_revisions"),
+        UniqueConstraint("id", "notebook_id", name="uq_notebook_revision_id_notebook"),
         Index("ix_notebook_document_revisions_notebook", "notebook_id", "created_at"),
     )
 
@@ -147,25 +188,41 @@ class NotebookAttachment(Base):
     """Image (or other) attachment owned by one notebook document."""
 
     __tablename__ = "notebook_attachments"
-    __table_args__ = (Index("ix_notebook_attachments_notebook", "notebook_id"),)
+    __table_args__ = (
+        Index("ix_notebook_attachments_notebook", "notebook_id"),
+        UniqueConstraint("asset_id", name="uq_notebook_attachments_asset_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"))
-    course_id: Mapped[str | None] = mapped_column(ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
+    # Legacy course scope retained until historical rows are reconciled.
+    # New uploads derive course context from Notebook and leave this NULL.
+    course_id: Mapped[str | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="SET NULL"), nullable=True,
+    )
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     stored_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     mime: Mapped[str] = mapped_column(String(120), nullable=False)
     size_bytes: Mapped[int] = mapped_column(nullable=False)
+    asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    notebook: Mapped[Notebook] = relationship(back_populates="attachments")
 
 
 class Material(Base):
     __tablename__ = "materials"
-    __table_args__ = (Index("ix_materials_course_id", "course_id"),)
+    __table_args__ = (
+        Index("ix_materials_course_id", "course_id"),
+        UniqueConstraint("asset_id", name="uq_materials_asset_id"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
-    notebook_id: Mapped[str | None] = mapped_column(ForeignKey("notebooks.id"), nullable=True, index=True)
+    # Nullable during the legacy course-material compatibility period. New
+    # Notebook uploads always set notebook_id; legacy course-only rows remain
+    # queryable without being assigned to an arbitrary Notebook.
+    notebook_id: Mapped[str | None] = mapped_column(ForeignKey("notebooks.id", ondelete="SET NULL"), nullable=True, index=True)
+    course_id: Mapped[str | None] = mapped_column(ForeignKey("courses.id", ondelete="SET NULL"), nullable=True)
+    asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id", ondelete="SET NULL"), nullable=True)
     lecture_title: Mapped[str] = mapped_column(String(200), nullable=False)
     topic_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -181,13 +238,276 @@ class Material(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     chapter_order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
 
-    course: Mapped[Course] = relationship(back_populates="materials")
+    notebook: Mapped[Notebook | None] = relationship(back_populates="materials")
+    course: Mapped[Course | None] = relationship(back_populates="materials")
     pages: Mapped[list[MaterialPage]] = relationship(
         back_populates="material", cascade="all, delete-orphan"
     )
     jobs: Mapped[list[ProcessingJob]] = relationship(
         back_populates="material", cascade="all, delete-orphan"
     )
+
+
+
+class NotebookUploadBatch(Base):
+    """Durable grouping and close marker for source uploads."""
+
+    __tablename__ = "notebook_upload_batches"
+    __table_args__ = (Index("ix_notebook_upload_batches_notebook", "notebook_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class NotebookGenerationInput(Base):
+    """Per-Asset idempotency and recovery state; generation snapshots remain on the job."""
+
+    __tablename__ = "notebook_generation_inputs"
+    __table_args__ = (
+        Index("ix_notebook_generation_inputs_batch_state", "batch_id", "status", "created_at"),
+        Index("ix_notebook_generation_inputs_status", "status", "updated_at"),
+        CheckConstraint(
+            "status IN ('waiting_parse','parsing','parse_failed','ready','generating',"
+            "'generation_failed','completed')",
+            name="ck_notebook_generation_input_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, unique=True)
+    batch_id: Mapped[str] = mapped_column(ForeignKey("notebook_upload_batches.id", ondelete="CASCADE"), nullable=False)
+    parse_kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    parse_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    parse_result_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    generation_job_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notebook_generation_jobs.id", ondelete="SET NULL"), nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="waiting_parse")
+    error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retry_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class Asset(Base):
+    """Stable metadata for a file owned by one Notebook or a legacy record."""
+
+    __tablename__ = "assets"
+    __table_args__ = (
+        Index("ix_assets_state_created", "state", "created_at"),
+        Index("ix_assets_sha256", "sha256"),
+        CheckConstraint(
+            "state IN ('staging','ready','missing','quarantined','delete_pending','deleted')",
+            name="ck_assets_state",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    extension: Mapped[str] = mapped_column(String(20), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    byte_size: Mapped[int] = mapped_column(nullable=False)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    upload_batch_id: Mapped[str | None] = mapped_column(
+        ForeignKey("notebook_upload_batches.id", ondelete="SET NULL"), nullable=True,
+    )
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="ready", server_default="ready")
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class AssetMigrationIssue(Base):
+    """Persistent audit rows for legacy files intentionally left unmapped."""
+
+    __tablename__ = "asset_migration_issues"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_table", "source_id", "issue_code",
+            name="uq_asset_migration_issue_source_code",
+        ),
+        Index("ix_asset_migration_issues_unresolved", "resolved_at", "source_table"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    source_table: Mapped[str] = mapped_column(String(80), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    issue_code: Mapped[str] = mapped_column(String(60), nullable=False)
+    details_json: Mapped[str] = mapped_column(Text, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class NotebookAsset(Base):
+    """Notebook ownership/use link. Exactly one active row owns each asset."""
+
+    __tablename__ = "notebook_assets"
+    __table_args__ = (
+        Index(
+            "uq_notebook_assets_one_active_owner_per_asset", "asset_id", unique=True,
+            sqlite_where=text("is_owner = 1 AND detached_at IS NULL"),
+        ),
+        Index(
+            "uq_notebook_assets_active_use", "notebook_id", "asset_id", "role", unique=True,
+            sqlite_where=text("detached_at IS NULL"),
+        ),
+        Index("ix_notebook_assets_notebook", "notebook_id", "created_at"),
+        UniqueConstraint("id", "notebook_id", "asset_id", name="uq_notebook_asset_owner_ref"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="RESTRICT"), nullable=False)
+    role: Mapped[str] = mapped_column(String(30), nullable=False)
+    is_owner: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    detached_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class NotebookCoverAsset(Base):
+    """Compatibility pointer for legacy cover API fields."""
+
+    __tablename__ = "notebook_cover_assets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["owner_link_id", "notebook_id", "asset_id"],
+            ["notebook_assets.id", "notebook_assets.notebook_id", "notebook_assets.asset_id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), unique=True, nullable=False)
+    owner_link_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class NotebookRevisionAsset(Base):
+    """Pins assets referenced by an immutable Notebook history snapshot."""
+
+    __tablename__ = "notebook_revision_assets"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["revision_id", "notebook_id"],
+            ["notebook_document_revisions.id", "notebook_document_revisions.notebook_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["owner_link_id", "notebook_id", "asset_id"],
+            ["notebook_assets.id", "notebook_assets.notebook_id", "notebook_assets.asset_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("revision_id", "asset_id", name="uq_notebook_revision_asset"),
+        Index("ix_notebook_revision_assets_asset", "asset_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    revision_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    notebook_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_link_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class AssetProcessingJob(Base):
+    """Image/OCR job independent of Material's document parser projection."""
+
+    __tablename__ = "asset_processing_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["owner_link_id", "notebook_id", "asset_id"],
+            ["notebook_assets.id", "notebook_assets.notebook_id", "notebook_assets.asset_id"],
+            ondelete="CASCADE",
+        ),
+        Index("ix_asset_processing_jobs_asset", "asset_id", "created_at"),
+        Index(
+            "uq_asset_processing_jobs_active", "asset_id", unique=True,
+            sqlite_where=text("status IN ('pending', 'processing')"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    owner_link_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False, default="image_parse")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class AssetParseResult(Base):
+    __tablename__ = "asset_parse_results"
+    __table_args__ = (Index("ix_asset_parse_results_asset", "asset_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
+    job_id: Mapped[str] = mapped_column(ForeignKey("asset_processing_jobs.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warnings_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class NotebookGenerationJob(Base):
+    __tablename__ = "notebook_generation_jobs"
+    __table_args__ = (
+        UniqueConstraint("notebook_id", "idempotency_key", name="uq_notebook_generation_idempotency"),
+        UniqueConstraint("id", "notebook_id", name="uq_notebook_generation_job_id_notebook"),
+        Index("ix_notebook_generation_status", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    base_document_revision: Mapped[int] = mapped_column(nullable=False)
+    input_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    schema_version: Mapped[int] = mapped_column(default=2, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class NotebookGenerationCandidate(Base):
+    __tablename__ = "notebook_generation_candidates"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_id", "notebook_id"],
+            ["notebook_generation_jobs.id", "notebook_generation_jobs.notebook_id"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("job_id", name="uq_notebook_candidate_job"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    job_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    document_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending_review")
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class ProcessingJob(Base):
@@ -677,7 +997,7 @@ class ProviderCall(Base):
 
 
 def default_notebook_id(connection, course_id: str) -> str:
-    """Assign legacy writes a real default book without changing existing IDs."""
+    """Compatibility helper for explicit course UI actions only."""
     connection.execute(Course.__table__.update().where(Course.id == course_id).values(
         notebook_order_revision=Course.notebook_order_revision))
     book_id = connection.scalar(select(Notebook.id).where(
@@ -695,11 +1015,10 @@ def default_notebook_id(connection, course_id: str) -> str:
     return book_id
 
 
-@event.listens_for(Material, "before_insert")
 @event.listens_for(Note, "before_insert")
 def assign_notebook(mapper, connection, target) -> None:
-    """Compatibility for worker and existing integrations constructing ORM rows."""
-    if isinstance(target, Note) and target.material_id:
+    """Derive legacy Note placement only from its explicit source Material."""
+    if target.material_id:
         material = connection.execute(select(Material.course_id, Material.notebook_id).where(
             Material.id == target.material_id)).one()
         if material.course_id != target.course_id:
@@ -707,13 +1026,15 @@ def assign_notebook(mapper, connection, target) -> None:
         if target.notebook_id is not None and target.notebook_id != material.notebook_id:
             raise ValueError("Note and material must belong to the same notebook")
         target.notebook_id = material.notebook_id
+    # Legacy course knowledge Notes can remain unbound. Never select a course
+    # default Notebook on their behalf; Notebook-backed Notes pass an explicit
+    # ID (or inherit it from a Notebook-owned Material above).
     if target.notebook_id is None:
-        target.notebook_id = default_notebook_id(connection, target.course_id)
+        return
     owner = connection.scalar(select(Notebook.course_id).where(Notebook.id == target.notebook_id))
     if owner != target.course_id:
         raise ValueError("Notebook must belong to the same course")
-    if isinstance(target, Note):
-        next_slot = connection.scalar(Notebook.__table__.update().where(Notebook.id == target.notebook_id)
-                                      .values(next_note_slot=Notebook.next_note_slot + 1)
-                                      .returning(Notebook.next_note_slot))
-        target.tree_slot = next_slot - 1
+    next_slot = connection.scalar(Notebook.__table__.update().where(Notebook.id == target.notebook_id)
+                                  .values(next_note_slot=Notebook.next_note_slot + 1)
+                                  .returning(Notebook.next_note_slot))
+    target.tree_slot = next_slot - 1

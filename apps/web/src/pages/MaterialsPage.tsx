@@ -116,7 +116,7 @@ export function MaterialsPage() {
     event.preventDefault()
     if (!file || !targetBook) return
     try {
-      await uploadMaterial(file, lectureTitle, topicTitle, allowDuplicate, targetBook.id)
+      await uploadMaterial(file, lectureTitle, targetBook.id, topicTitle, allowDuplicate)
       setFile(undefined)
       setAllowDuplicate(false)
       if (course) {

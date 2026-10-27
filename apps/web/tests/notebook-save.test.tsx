@@ -79,6 +79,36 @@ describe('useNotebookSave', () => {
     expect(result.current.state).toBe('saved')
   })
 
+  test('a 409 keeps the local draft recoverable while the server append can be previewed', async () => {
+    vi.mocked(api.saveNotebookDocument).mockRejectedValueOnce(new ApiError('stale', 409))
+    const serverAppend = {
+      ...base,
+      content: [...(base.content ?? []), {
+        type: 'paragraph', attrs: { blockId: 'ai-added' },
+        content: [{ type: 'text', text: '服务器新增的 AI 内容' }],
+      }],
+    }
+    vi.mocked(api.getNotebookDocument).mockResolvedValue(savedResponse(serverAppend, 2))
+    const { result } = renderHook(() => useNotebookSave({ courseId: 'course', notebookId: 'book' }))
+    act(() => result.current.reset(base, 1))
+    act(() => result.current.markEdited(edited))
+
+    await act(async () => { await result.current.saveNow() })
+    expect(result.current.state).toBe('conflict')
+    const latest = await result.current.fetchServer()
+    expect(latest?.content.content?.at(-1)).toMatchObject({
+      attrs: { blockId: 'ai-added' },
+    })
+    expect(JSON.stringify(latest?.content)).toContain('服务器新增的 AI 内容')
+
+    act(() => result.current.keepLocalDraft())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.state).toBe('unsaved')
+    expect(result.current.conflictOpen).toBe(false)
+    expect(localStorage.getItem('notebuddy-draft:notebook:course:book')).toContain('第二版')
+    expect(api.saveNotebookDocument).toHaveBeenCalledTimes(1)
+  })
+
   test('keeps the latest recovery draft while an older snapshot finishes saving', async () => {
     let completeSave!: (response: ReturnType<typeof savedResponse>) => void
     vi.mocked(api.saveNotebookDocument).mockImplementationOnce(() => new Promise((resolve) => { completeSave = resolve }))

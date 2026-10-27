@@ -79,7 +79,7 @@ ALLOWED_ATTRS: dict[str, set[str]] = {
     "tableRow": set(),
     "tableCell": {"colspan", "rowspan", "colwidth", "align"},
     "tableHeader": {"colspan", "rowspan", "colwidth", "align"},
-    "image": {"src", "alt", "title", "attachmentId", "width", "height"},
+    "image": {"src", "alt", "title", "attachmentId", "assetId", "width", "height"},
     "inlineMath": {"latex"},
     "blockMath": {"latex"},
     "callout": {"blockId", "tone", "title"},
@@ -89,6 +89,7 @@ ALLOWED_ATTRS: dict[str, set[str]] = {
 CALLOUT_TONES = {"tip", "warning", "note"}
 
 ATTACHMENT_SRC_RE = re.compile(r"^/api/v1/notebook-attachments/[A-Za-z0-9_-]{1,64}$")
+ASSET_SRC_RE = re.compile(r"^/api/v1/assets/[A-Za-z0-9_-]{1,64}/content$")
 LINK_PROTOCOL_RE = re.compile(r"^(https?://|mailto:)", re.IGNORECASE)
 ATTACHMENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -674,12 +675,21 @@ def _validate_mark(mark: Any) -> None:
 def _validate_image(attrs: dict[str, Any]) -> None:
     src = attrs.get("src")
     attachment_id = attrs.get("attachmentId")
-    if not isinstance(src, str) or not ATTACHMENT_SRC_RE.match(src):
-        raise DocumentValidationError("图片必须来自本笔记附件")
-    if not isinstance(attachment_id, str) or not ATTACHMENT_ID_RE.match(attachment_id):
-        raise DocumentValidationError("图片附件编号不合法")
-    if src.rsplit("/", 1)[-1] != attachment_id:
-        raise DocumentValidationError("图片地址与附件编号不一致")
+    asset_id = attrs.get("assetId")
+    if attachment_id is not None:
+        if (not isinstance(src, str) or not ATTACHMENT_SRC_RE.match(src)
+                or not isinstance(attachment_id, str) or not ATTACHMENT_ID_RE.match(attachment_id)
+                or src.rsplit("/", 1)[-1] != attachment_id):
+            raise DocumentValidationError("图片附件编号或地址不合法")
+        if asset_id is not None:
+            raise DocumentValidationError("图片不能同时使用附件编号和 Asset 编号")
+    elif asset_id is not None:
+        if (not isinstance(src, str) or not ASSET_SRC_RE.match(src)
+                or not isinstance(asset_id, str) or not ATTACHMENT_ID_RE.match(asset_id)
+                or src != f"/api/v1/assets/{asset_id}/content"):
+            raise DocumentValidationError("图片资源编号或地址不合法")
+    else:
+        raise DocumentValidationError("图片必须引用本笔记的稳定资源编号")
     alt = attrs.get("alt", "")
     if not isinstance(alt, str) or len(alt) > MAX_ATTACHMENT_ALT:
         raise DocumentValidationError("图片说明过长")
@@ -709,9 +719,11 @@ def attachment_ids(content: dict[str, Any]) -> set[str]:
         if not isinstance(node, dict):
             return
         if node.get("type") == "image":
-            value = (node.get("attrs") or {}).get("attachmentId")
-            if isinstance(value, str):
-                ids.add(value)
+            attrs = node.get("attrs") or {}
+            for key in ("attachmentId", "assetId"):
+                value = attrs.get(key)
+                if isinstance(value, str):
+                    ids.add(value)
         for child in node.get("content") or []:
             walk(child)
 

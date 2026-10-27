@@ -35,8 +35,8 @@ def _material_ids(db: Session, course_id: str) -> list[str]:
     )).all())
 
 
-def impact_preview(db: Session, *, course_id: str, material_id: str | None = None) -> dict:
-    material_ids = [material_id] if material_id else _material_ids(db, course_id)
+def impact_preview(db: Session, *, course_id: str | None, material_id: str | None = None) -> dict:
+    material_ids = [material_id] if material_id else (_material_ids(db, course_id) if course_id else [])
     materials = list(db.scalars(select(Material).where(Material.id.in_(material_ids))).all()) if material_ids else []
     pages = db.scalar(select(func.count(MaterialPage.id)).where(
         MaterialPage.material_id.in_(material_ids), MaterialPage.is_active.is_(True)
@@ -103,8 +103,6 @@ def soft_delete_course(db: Session, course: Course) -> dict:
     _checkpoint()
     db.execute(update(Notebook).where(Notebook.course_id == course.id).values(
         course_id=None, tree_slot=0, display_order=0, order_revision=0, is_default=False))
-    db.execute(update(NotebookAttachment).where(NotebookAttachment.course_id == course.id).values(
-        course_id=None))
     course.deleted_at = datetime.now(UTC)
     db.commit()
     return preview

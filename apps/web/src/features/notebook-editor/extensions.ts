@@ -18,7 +18,7 @@ declare module '@tiptap/core' {
       moveBlockDown: () => ReturnType
       setCallout: (attrs?: { tone?: string; title?: string }) => ReturnType
       setExample: (attrs?: { title?: string }) => ReturnType
-      insertImage: (attrs: { src: string; attachmentId: string; alt?: string; title?: string }) => ReturnType
+      insertImage: (attrs: { src: string; attachmentId?: string; assetId?: string; alt?: string; title?: string }) => ReturnType
     }
   }
 }
@@ -204,6 +204,11 @@ export const NotebookImage = Image.extend({
         parseHTML: (element) => element.getAttribute('data-attachment-id'),
         renderHTML: (attributes) => attributes.attachmentId ? { 'data-attachment-id': attributes.attachmentId } : {},
       },
+      assetId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-asset-id'),
+        renderHTML: (attributes) => attributes.assetId ? { 'data-asset-id': attributes.assetId } : {},
+      },
     }
   },
   addCommands() {
@@ -211,7 +216,7 @@ export const NotebookImage = Image.extend({
       ...this.parent?.(),
       insertImage: (attrs) => ({ commands }) => commands.insertContent({
         type: 'image',
-        attrs: { src: attrs.src, attachmentId: attrs.attachmentId, alt: attrs.alt ?? '', title: attrs.title ?? null },
+        attrs: { src: attrs.src, attachmentId: attrs.attachmentId ?? null, assetId: attrs.assetId ?? null, alt: attrs.alt ?? '', title: attrs.title ?? null },
       }),
     }
   },

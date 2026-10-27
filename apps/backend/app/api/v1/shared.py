@@ -25,7 +25,6 @@ def ensure_material(db: Session, material_id: str) -> Material:
     material = db.get(Material, material_id)
     if material is None or material.deleted_at is not None:
         raise HTTPException(status_code=404, detail="资料不存在")
-    ensure_course(db, material.course_id)
     return material
 
 

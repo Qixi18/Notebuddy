@@ -11,7 +11,12 @@ vi.mock('../src/api', () => ({
     getNotebookById: vi.fn(), getNotebookDocument: vi.fn(), saveNotebookDocument: vi.fn(),
     renameNotebook: vi.fn(), getNotebookChapter: vi.fn(), getNote: vi.fn(),
     uploadNotebookAttachment: vi.fn(), listNotebookRevisions: vi.fn(), getNotebookRevision: vi.fn(),
-    restoreNotebookRevision: vi.fn(),
+    restoreNotebookRevision: vi.fn(), listNotebookAssets: vi.fn().mockResolvedValue([]),
+    listNotebookUploadBatches: vi.fn().mockResolvedValue([]), getNotebookUploadBatch: vi.fn(),
+    closeNotebookUploadBatch: vi.fn(), getNotebookGenerationJob: vi.fn(),
+    listNotebookAssetJobs: vi.fn().mockResolvedValue([]), retryMaterial: vi.fn(),
+    retryNotebookGenerationJob: vi.fn(), retryAssetParse: vi.fn(), uploadNotebookAsset: vi.fn(),
+    useAssetInline: vi.fn(),
   },
 }))
 
@@ -72,7 +77,7 @@ test('resource and outline groups collapse; upload targets the current notebook'
   fireEvent.click(screen.getByRole('button', { name: /笔记目录/ }))
   expect(screen.getByRole('navigation', { name: '笔记目录' })).toBeTruthy()
   fireEvent.change(screen.getByLabelText('选择课程资料'), { target: { files: [new File(['sample'], '第一讲.pdf', { type: 'application/pdf' })] } })
-  await waitFor(() => expect(uploadMaterial).toHaveBeenCalledWith(expect.any(File), '第一讲', '', false, 'book'))
+  await waitFor(() => expect(uploadMaterial).toHaveBeenCalledWith(expect.any(File), '第一讲', 'book', '', false, expect.any(String)))
   await waitFor(() => expect(refreshCurrentMaterials).toHaveBeenCalled())
 })
 

@@ -57,6 +57,25 @@ class NotebookTitleUpdate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
 
 
+class NotebookRelationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_notebook_id: str = Field(min_length=1, max_length=36)
+    relation_type: str = Field(default="related", min_length=1, max_length=40)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+class NotebookRelationRead(BaseModel):
+    id: str
+    source_notebook_id: str
+    target_notebook_id: str
+    related_notebook_id: str
+    related_notebook_title: str
+    direction: Literal["outgoing", "incoming"]
+    relation_type: str
+    description: str | None
+    created_at: datetime
+
+
 class NotebookMoveRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     course_id: str = Field(min_length=1, max_length=36)

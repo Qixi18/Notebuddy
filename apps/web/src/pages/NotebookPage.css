@@ -253,6 +253,18 @@
 .notebook-document-history-preview pre { margin: 0; white-space: pre-wrap; color: #37483d; font-family: var(--nb-sans); font-size: 12px; line-height: 1.75; }
 .notebook-document-history-preview > p { color: #8b9a8f; }
 
+.notebook-document-upload.is-secondary { margin-top: 6px; background: #f8faf7; color: #4b6754; }
+.notebook-document-upload.is-ai { margin-top: 6px; background: #e9f2e8; color: #365640; }
+.notebook-document-upload:disabled { opacity: .58; cursor: wait; }
+.notebook-document-section-toggle.is-static { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; color: #49614f; font-size: 12px; font-weight: 650; }
+.notebook-document-resource-list { display: grid; gap: 5px; padding: 4px 8px 10px; }
+.notebook-document-resource-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 7px; align-items: center; padding: 8px; border: 1px solid #e7ede6; border-radius: 7px; color: #506255; font-size: 11px; }
+.notebook-document-resource-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notebook-document-resource-item small { color: #8b9b8e; }
+.notebook-document-resource-item .notebook-document-resource-status { grid-column: 1 / -1; overflow-wrap: anywhere; color: #927344; }
+.notebook-document-resource-item button { grid-column: 2; border: 0; background: transparent; color: #547b5a; font-size: 11px; cursor: pointer; }
+.notebook-document-candidate-preview { max-height: 58vh; overflow: auto; margin: 12px 0 0; padding: 16px; border: 1px solid #e3ebe2; border-radius: 8px; background: #f8faf7; color: #35483a; font: 13px/1.75 var(--nb-sans); white-space: pre-wrap; }
+
 @media (max-width: 1080px) {
   .notebook-document-paper { padding-inline: clamp(26px, 4vw, 56px); }
   .nb-slash-menu { width: min(324px, calc(100vw - 24px)); }

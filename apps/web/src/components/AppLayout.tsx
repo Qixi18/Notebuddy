@@ -8,6 +8,7 @@ import type {
   Material,
   Note,
   Page,
+  UploadResponse,
 } from '../types'
 import type { ConversationState } from '../features/conversation/useConversation'
 import { AssistantDock } from '../features/assistant/AssistantDock'
@@ -61,7 +62,7 @@ export type WorkspaceContextValue = {
   error?: string
   setError: (message: string | undefined) => void
   createCourse: (name: string) => Promise<Course>
-  uploadMaterial: (file: File, lectureTitle: string, topicTitle?: string, allowDuplicate?: boolean, notebookId?: string) => Promise<void>
+  uploadMaterial: (file: File, lectureTitle: string, notebookId: string, topicTitle?: string, allowDuplicate?: boolean, batchId?: string) => Promise<UploadResponse>
   retryMaterial: (materialId: string) => Promise<void>
   reparseMaterial: (materialId: string) => Promise<void>
   requestOCR: (materialId: string) => Promise<void>

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { useWorkspace } from '../components/AppLayout'
-import type { Note, NotebookDocumentResponse, NotebookRead } from '../types'
+import type { AssetResource, Note, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
+import type { AssetProcessingJob } from '../types'
 import {
   NotebookEditor, type AIAction, type NotebookEditorHandle, type SelectionAnchor,
 } from '../features/notebook-editor/NotebookEditor'
@@ -64,7 +65,16 @@ function NotebookPageBody() {
   const [conflictPreview, setConflictPreview] = useState<NotebookDocumentResponse | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [notice, setNotice] = useState<string>()
+  const [assetResources, setAssetResources] = useState<AssetResource[]>([])
+  const [assetJobs, setAssetJobs] = useState<Record<string, AssetProcessingJob>>({})
+  const [assetUploadError, setAssetUploadError] = useState<string>()
+  const [generationJob, setGenerationJob] = useState<NotebookGenerationJob | null>(null)
+  const [generationBusy, setGenerationBusy] = useState(false)
+  const [uploadBatchId, setUploadBatchId] = useState<string>()
+  const [uploadBatch, setUploadBatch] = useState<NotebookUploadBatch | null>(null)
+  const [generationError, setGenerationError] = useState<string>()
   const fileInput = useRef<HTMLInputElement>(null)
+  const sourceImageInput = useRef<HTMLInputElement>(null)
   const editorRef = useRef<NotebookEditorHandle>(null)
   const editorReadyRef = useRef(false)
   const pageActiveRef = useRef(true)
@@ -137,6 +147,101 @@ function NotebookPageBody() {
     return () => { active = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId, notebookId])
+
+  const refreshAssetResources = useCallback(async () => {
+    if (!notebookId) return
+    const rows = await api.listNotebookAssets(notebookId)
+    setAssetResources(rows)
+  }, [notebookId])
+
+  useEffect(() => {
+    if (!loaded || !notebookId) return
+    let active = true
+    void api.listNotebookAssets(notebookId).then((rows) => {
+      if (active) setAssetResources(rows)
+    }).catch((cause: unknown) => {
+      if (active) setAssetUploadError(cause instanceof Error ? cause.message : '资源列表读取失败')
+    })
+    return () => { active = false }
+  }, [loaded, notebookId])
+
+  useEffect(() => {
+    if (!loaded || !notebookId) return
+    let active = true
+    void api.listNotebookUploadBatches(notebookId).then((batches) => {
+      if (!active || !batches.length) return
+      const current = batches.find((batch) => ['open', 'waiting_parse', 'parsing', 'generating', 'partial_failure'].includes(batch.status)) ?? batches[0]
+      setUploadBatch(current)
+      setUploadBatchId(current.id)
+    }).catch(() => undefined)
+    return () => { active = false }
+  }, [loaded, notebookId])
+
+  useEffect(() => {
+    if (!notebookId || !uploadBatchId || uploadBatch?.status === 'completed') return
+    let active = true
+    const refresh = async () => {
+      try {
+        const batch = await api.getNotebookUploadBatch(notebookId, uploadBatchId)
+        if (!active) return
+        setUploadBatch(batch)
+        const generationId = batch.generation_jobs.at(-1)?.id
+        if (generationId && generationId !== generationJob?.id) {
+          const job = await api.getNotebookGenerationJob(notebookId, generationId)
+          if (active) setGenerationJob(job)
+        }
+      } catch (cause) {
+        if (active) setGenerationError(cause instanceof Error ? cause.message : '上传批次状态读取失败')
+      }
+    }
+    void refresh()
+    const timer = window.setInterval(() => void refresh(), 2000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [generationJob?.id, notebookId, uploadBatch?.status, uploadBatchId])
+
+  useEffect(() => {
+    if (!notebookId || assetResources.length === 0) return
+    let active = true
+    const refresh = () => {
+      for (const asset of assetResources.filter((item) => item.media_type === 'image' && item.role === 'source_material')) {
+        void api.listNotebookAssetJobs(notebookId, asset.id).then((jobs) => {
+          if (!active || !jobs[0]) return
+          setAssetJobs((current) => ({ ...current, [asset.id]: jobs[0] }))
+        }).catch(() => undefined)
+      }
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 2500)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [assetResources, notebookId])
+
+  useEffect(() => {
+    if (!notebookId || !generationJob || !['pending', 'processing', 'cancel_requested'].includes(generationJob.status)) return
+    let active = true
+    const timer = window.setInterval(() => {
+      void api.getNotebookGenerationJob(notebookId, generationJob.id).then((job) => {
+        if (!active) return
+        setGenerationJob(job)
+        if (job.status === 'completed' && generationJob.status !== 'completed') {
+          if (save.isDirty()) {
+            setNotice('AI 补充内容已写入服务器。当前有未保存的本地编辑，已保留草稿；保存冲突面板可用于合并服务器版本。')
+            return
+          }
+          void api.getNotebookDocument(courseId!, notebookId).then((latest) => {
+            if (!active || save.isDirty() || latest.revision <= save.revision) return
+            const normalized = normalizeDocument(latest.content)
+            editorRef.current?.replaceContent(normalized)
+            setContent(normalized)
+            save.reset(normalized, latest.revision, latest.updated_at)
+            setNotice('AI 补充内容已追加到正式正文。')
+          }).catch(() => setNotice('AI 已完成；正文刷新失败，请手动重新加载页面。'))
+        }
+      }).catch((cause: unknown) => {
+        if (active) setGenerationError(cause instanceof Error ? cause.message : '生成状态读取失败')
+      })
+    }, 1500)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [courseId, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision])
 
   useEffect(() => {
     if (!courseId || !notebookId || !linkedSectionId) { setLinkedNote(undefined); return }
@@ -212,17 +317,70 @@ function NotebookPageBody() {
   }
 
   async function handleUploadMaterial(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
+    const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!file || !courseId || !notebookId) return
+    if (!files.length || !courseId || !notebookId) return
     setUploadError(undefined)
     try {
-      const lectureTitle = file.name.replace(/\.[^.]+$/, '').trim() || '新资料'
-      await uploadMaterial(file, lectureTitle, '', false, notebookId)
+      const batchId = crypto.randomUUID()
+      const results: PromiseSettledResult<unknown>[] = []
+      for (const file of files) {
+        const lectureTitle = file.name.replace(/\.[^.]+$/, '').trim() || '新资料'
+        try {
+          results.push({ status: 'fulfilled', value: await uploadMaterial(
+            file, lectureTitle, notebookId, '', false, batchId,
+          ) })
+        } catch (reason) {
+          results.push({ status: 'rejected', reason })
+        }
+      }
+      const uploadFailures = results.filter((result) => result.status === 'rejected').length
       await refreshCurrentMaterials()
       setOutline(await api.getNotebookById(courseId, notebookId))
       setResourcesOpen(true)
+      if (uploadFailures < files.length) {
+        const batch = await api.closeNotebookUploadBatch(notebookId, batchId)
+        setUploadBatchId(batchId)
+        setUploadBatch(batch)
+        setNotice(uploadFailures
+          ? `${files.length - uploadFailures} 份资料已进入后台处理；${uploadFailures} 份上传失败。关闭页面后后台仍会继续。`
+          : `${files.length} 份资料已进入后台处理；解析完成后会自动追加正式正文。`)
+      } else {
+        setUploadError('所选资料均未成功上传。')
+      }
     } catch (cause) { setUploadError(cause instanceof Error ? cause.message : '资料上传失败') }
+  }
+
+  async function handleUploadSourceImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !notebookId) return
+    setAssetUploadError(undefined)
+    try {
+      const result = await api.uploadNotebookAsset(notebookId, file)
+      if (result.upload_batch_id) setUploadBatchId(result.upload_batch_id)
+      await refreshAssetResources()
+      setResourcesOpen(true)
+      setNotice(result.processing_job?.status === 'pending'
+        ? '原始图片已保存，OCR 任务已排队。'
+        : `原始图片已保存${result.asset.state === 'ready' ? '，等待解析' : ''}。`)
+    } catch (cause) {
+      setAssetUploadError(cause instanceof Error ? cause.message : '图片资料上传失败')
+    }
+  }
+
+  async function insertSourceAsset(asset: AssetResource) {
+    const editor = editorRef.current?.editor
+    if (!editor || !notebookId || asset.media_type !== 'image') return
+    try {
+      const inline = await api.useAssetInline(notebookId, asset.id)
+      editor.chain().focus().insertImage({
+        src: inline.content_url, assetId: inline.id, alt: asset.original_name,
+      }).run()
+      setNotice('图片已插入正文；保存后会纳入笔记历史版本。')
+    } catch (cause) {
+      setAssetUploadError(cause instanceof Error ? cause.message : '插入图片失败')
+    }
   }
 
   async function uploadImage(file: File): Promise<{ src: string; attachmentId: string } | null> {
@@ -436,11 +594,44 @@ function NotebookPageBody() {
     <div className="notebook-document-workspace">
       <aside className="notebook-document-sidebar" aria-label="资料与目录">
         <div className="notebook-document-sidebar-heading">资料与目录</div>
-        <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" onChange={(event) => void handleUploadMaterial(event)} aria-label="选择课程资料" />
+        <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" multiple onChange={(event) => void handleUploadMaterial(event)} aria-label="选择课程资料" />
+        <input ref={sourceImageInput} className="notebook-document-file-input" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={(event) => void handleUploadSourceImage(event)} aria-label="选择原始图片资料" />
         <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
           <span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}
         </button>
+        <button className="notebook-document-upload is-secondary" type="button" onClick={() => sourceImageInput.current?.click()}>
+          <span aria-hidden="true">▧</span>添加 PNG/JPG 图片资料
+        </button>
         {uploadError && <p className="notebook-document-sidebar-error" role="alert">{uploadError}</p>}
+        {assetUploadError && <p className="notebook-document-sidebar-error" role="alert">{assetUploadError}</p>}
+        {generationError && <p className="notebook-document-sidebar-error" role="alert">{generationError}</p>}
+        {uploadBatch && <div className="notebook-document-sidebar-empty" role="status">
+          <strong>{uploadBatch.status === 'open' ? '等待本批上传完成…' : uploadBatch.status === 'parsing' || uploadBatch.status === 'waiting_parse' ? '资料正在后台解析…' : uploadBatch.status === 'generating' ? 'AI 正在追加正式正文…' : uploadBatch.status === 'partial_failure' ? '部分资料处理失败，可检查失败项并重试。' : '本批资料已处理完成。'}</strong>
+          {uploadBatch.inputs.filter((item) => item.error_message).map((item) => {
+            const material = bookMaterials.find((row) => row.asset_id === item.asset_id)
+            return <div key={item.asset_id}><small>{item.asset_id.slice(0, 8)}：{item.error_message}</small>
+              {item.status === 'parse_failed' && material && <button type="button" onClick={() => void api.retryMaterial(material.id).catch((cause: unknown) => setUploadError(cause instanceof Error ? cause.message : '解析重试失败'))}>重试解析</button>}
+            </div>
+          })}
+        </div>}
+        {generationJob && ['pending', 'processing', 'cancel_requested'].includes(generationJob.status) && <p className="notebook-document-sidebar-empty" role="status">{generationJob.status === 'pending' ? '等待 AI 补充正文…' : generationJob.status === 'cancel_requested' ? '正在取消…' : 'AI 正在补充正文…'}</p>}
+        {generationJob?.status === 'failed' && <button className="notebook-document-import" type="button" disabled={generationBusy} onClick={() => {
+          setGenerationBusy(true)
+          void api.retryNotebookGenerationJob(notebookId!, generationJob.id).then(setGenerationJob).catch((cause: unknown) => setGenerationError(cause instanceof Error ? cause.message : '重试失败')).finally(() => setGenerationBusy(false))
+        }}>重试 AI 整理</button>}
+        {generationJob?.status === 'completed' && <p className="notebook-document-sidebar-empty" role="status">AI 补充内容已写入正式正文</p>}
+        <section className="notebook-document-sidebar-section">
+          <div className="notebook-document-section-toggle is-static">本篇资源 <small>{assetResources.length}</small></div>
+          <div className="notebook-document-resource-list">
+            {assetResources.length ? assetResources.map((asset) => <div className="notebook-document-resource-item" key={asset.id}>
+              <span title={asset.original_name}>{asset.original_name}</span>
+              <small>{asset.state === 'ready' ? asset.role === 'source_material' ? '原始资料' : '正文资源' : asset.state}</small>
+              {asset.media_type === 'image' && asset.state === 'ready' && <button type="button" onClick={() => void insertSourceAsset(asset)}>插入正文</button>}
+              {asset.media_type === 'image' && asset.role === 'source_material' && assetJobs[asset.id] && <small className="notebook-document-resource-status">OCR：{assetJobs[asset.id].status === 'completed' ? '完成' : assetJobs[asset.id].status === 'completed_with_warnings' ? '有告警' : assetJobs[asset.id].status === 'failed' ? `失败 · ${assetJobs[asset.id].error_message ?? ''}` : assetJobs[asset.id].status === 'processing' ? '处理中' : '排队中'}</small>}
+              {asset.media_type === 'image' && asset.role === 'source_material' && assetJobs[asset.id]?.status === 'failed' && <button type="button" onClick={() => void api.retryAssetParse(asset.id).then((job) => setAssetJobs((current) => ({ ...current, [asset.id]: job }))).catch((cause: unknown) => setAssetUploadError(cause instanceof Error ? cause.message : '重试图片解析失败'))}>重试 OCR</button>}
+            </div>) : <p className="notebook-document-sidebar-empty">暂时没有已登记的统一资源</p>}
+          </div>
+        </section>
         <section className="notebook-document-sidebar-section">
           <button className="notebook-document-section-toggle" type="button" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}>
             <span className={resourcesOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>课程资料 <small>{bookMaterials.length}</small>

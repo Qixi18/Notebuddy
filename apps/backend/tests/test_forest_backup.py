@@ -1,6 +1,7 @@
 """Forest evidence and curriculum originals survive full backups and checkpoints."""
 
 import json
+import hashlib
 import sqlite3
 import zipfile
 from contextlib import closing
@@ -9,9 +10,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.db.checkpoint import create_checkpoint, restore_checkpoint
+from app.db.checkpoint import create_checkpoint, restore_checkpoint, verify_checkpoint
 from app.db.database import Base
 from app.db.models import (
+    Asset,
     Course,
     CrossCourseRelation,
     CurriculumImport,
@@ -20,6 +22,8 @@ from app.db.models import (
     KnowledgeNode,
     Material,
     Note,
+    Notebook,
+    NotebookAsset,
 )
 from app.services.backup import create_backup_archive, preview_backup, restore_backup_to_empty
 
@@ -99,6 +103,16 @@ def test_checkpoint_restores_curriculum_original_and_referenced_forest_data(fore
         assert db.execute("SELECT count(*) FROM cross_course_relations").fetchone()[0] == 1
 
 
+def test_checkpoint_records_legacy_originals_that_are_already_missing(forest_data, tmp_path):
+    (forest_data / "originals" / "material.pdf").unlink()
+    checkpoint = tmp_path / "checkpoint-with-missing-original"
+    create_checkpoint(forest_data, checkpoint)
+
+    manifest = verify_checkpoint(checkpoint)
+    assert {entry["name"] for entry in manifest["unavailable_originals"]} == {"material.pdf"}
+    assert {entry["name"] for entry in manifest["originals"]} == {"curriculum.pdf"}
+
+
 def test_preview_rejects_unlisted_curriculum_original(forest_data, tmp_path):
     valid = tmp_path / "valid.zip"
     create_backup_archive(forest_data, valid)
@@ -139,3 +153,58 @@ def test_v2_archive_without_forest_tables_still_restores(forest_data, tmp_path):
     assert [entry["name"] for entry in manifest["originals"]] == ["material.pdf"]
     restored = tmp_path / "old-restored"
     assert restore_backup_to_empty(package, restored)["valid"]
+
+
+def test_full_and_course_backups_include_only_notebook_assets(tmp_path):
+    data = tmp_path / "asset-data"
+    data.mkdir()
+    engine = create_engine(f"sqlite:///{data / 'notebook.sqlite3'}")
+    Base.metadata.create_all(engine)
+    assets = []
+    with Session(engine) as db:
+        first_course, second_course = Course(name="课一"), Course(name="课二")
+        db.add_all([first_course, second_course]); db.flush()
+        first_book = Notebook(course_id=first_course.id, title="笔记一", tree_slot=0)
+        second_book = Notebook(course_id=second_course.id, title="笔记二", tree_slot=0)
+        db.add_all([first_book, second_book]); db.flush()
+        for notebook, data_bytes in ((first_book, b"first-image"), (second_book, b"second-image")):
+            asset_id = f"asset-{notebook.id}"
+            key = f"assets/{asset_id}/source.png"
+            path = data / key
+            path.parent.mkdir(parents=True)
+            path.write_bytes(data_bytes)
+            db.add_all([
+                Asset(
+                    id=asset_id, source_type="user_upload", media_type="image",
+                    mime_type="image/png", extension=".png", original_name="source.png",
+                    storage_key=key, byte_size=len(data_bytes),
+                    sha256=hashlib.sha256(data_bytes).hexdigest(), state="ready",
+                ),
+                NotebookAsset(
+                    notebook_id=notebook.id, asset_id=asset_id,
+                    role="source_material", is_owner=True,
+                ),
+            ])
+            assets.append((asset_id, key, data_bytes))
+        db.commit()
+        first_course_id = first_course.id
+    engine.dispose()
+
+    full = tmp_path / "assets-full.zip"
+    full_manifest = create_backup_archive(data, full)
+    assert {item["key"] for item in full_manifest["assets"]} == {item[1] for item in assets}
+    full_restore = tmp_path / "assets-full-restore"
+    restore_backup_to_empty(full, full_restore)
+    for _asset_id, key, expected in assets:
+        assert (full_restore / key).read_bytes() == expected
+
+    course = tmp_path / "assets-course.zip"
+    course_manifest = create_backup_archive(data, course, course_id=first_course_id)
+    assert [item["key"] for item in course_manifest["assets"]] == [assets[0][1]]
+    course_restore = tmp_path / "assets-course-restore"
+    restore_backup_to_empty(course, course_restore)
+    assert (course_restore / assets[0][1]).read_bytes() == assets[0][2]
+    assert not (course_restore / assets[1][1]).exists()
+    with closing(sqlite3.connect(course_restore / "notebook.sqlite3")) as db:
+        assert db.execute("SELECT COUNT(*) FROM assets").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM notebooks").fetchone()[0] == 1

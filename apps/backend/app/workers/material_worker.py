@@ -120,6 +120,18 @@ def process_material(job_id: str) -> None:
         job.heartbeat_at = datetime.now(UTC)
         db.commit()
 
+        # Source files belong to notebooks. An unbound notebook can be parsed
+        # without inventing a course; course-level knowledge/indexing can run
+        # after the notebook is explicitly placed in a course.
+        if material.course_id is None:
+            material.status = "completed"
+            job.status = "completed"
+            job.phase = "completed"
+            job.progress = 100
+            job.finished_at = datetime.now(UTC)
+            db.commit()
+            return
+
         job.progress = 96
         job.phase = "knowledge"
         job.heartbeat_at = datetime.now(UTC)
