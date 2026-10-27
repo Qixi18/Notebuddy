@@ -217,12 +217,14 @@ def build_tool_specs(
             "不要在回答文本里直接写题——那样没有作答卡和判分。"
             "用户指定某一讲时把 material_id 传给它；没指定课件时直接调用（会自动用课程笔记兜底）；"
             "锁定笔记的会话里自动针对该笔记出题，无需传 note_id。"
+            "用户提到难度（如「基础题」「考考研难度」「来点挑战题」）时把原话放进 difficulty，不要自己归一化。"
             "不要在用户没要求测试时主动出题。",
             {
                 "material_id": {"type": "string", "description": "可选：只针对某份课件出题"},
                 "note_id": {"type": "string", "description": "可选：只针对某篇笔记出题"},
                 "count": {"type": "integer", "description": "题目数量，1-5，默认 3"},
                 "focus": {"type": "string", "description": "可选：出题重点（如「内聚与耦合的区别」）"},
+                "difficulty": {"type": "string", "description": "可选：用户指定的难度原话（基础/进阶/挑战/考研…），用户没提就省略"},
             },
             [],
         ))
@@ -275,6 +277,8 @@ def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], co
         count = 3
     count = max(1, min(5, count))
     focus = str(arguments.get("focus") or "").strip()[:200]
+    # 难度由用户自定义（原话保留）：不归一化成三档，避免「考研难度」被吞成「进阶」
+    difficulty = str(arguments.get("difficulty") or "").strip()[:20]
 
     note_markdown = ""
     if note_id:
@@ -291,7 +295,7 @@ def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], co
         )
     course = db.get(Course, course_id)
     try:
-        payload = generate_quiz_payload(source, count=count, focus=focus, course_name=course.name if course else "课程")
+        payload = generate_quiz_payload(source, count=count, focus=focus, course_name=course.name if course else "课程", difficulty=difficulty)
     except QuizSchemaError as exc:
         return ToolOutcome(
             "出题未通过校验",
@@ -317,7 +321,7 @@ def _generate_quiz(db: Session, *, course_id: str, arguments: dict[str, Any], co
     )
 
 
-def _generate_review_outline(db: Session, *, course_id: str, arguments: dict[str, Any], scope: AgentScope = "course", locked_note_id: str | None = None) -> ToolOutcome:
+def _generate_review_outline(db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None = None, scope: AgentScope = "course", locked_note_id: str | None = None) -> ToolOutcome:
     """整理复习提纲（技能卡）：素材 → 模型结构化 JSON → schema 硬门槛 → suggestion 回前端。
 
     纯展示物，不落库；schema 不合格折算文本回模型（不中断流），与 quiz 同策略。
@@ -352,18 +356,25 @@ def _generate_review_outline(db: Session, *, course_id: str, arguments: dict[str
         )
     module_count = len(payload["modules"])
     item_count = sum(len(module["items"]) for module in payload["modules"])
+    from app.services.quiz import create_review_artifact
+
+    artifact = create_review_artifact(
+        db, course_id=course_id, conversation_id=conversation_id,
+        kind="review_outline", title=payload["title"], payload=payload,
+    )
     return ToolOutcome(
         f"整理出 {module_count} 个模块 / {item_count} 条要点的复习提纲",
         f"已生成复习提纲《{payload['title']}》（{module_count} 个模块，{item_count} 条要点，含优先级与来源）。"
         "请在回答里用一两句话介绍提纲怎么用：前端卡片上可勾选进度、按条目追问。",
         suggestions=[{
-            "type": "review_outline", "id": new_id(), "title": payload["title"],
+            "type": "review_outline", "id": artifact.id, "artifact_id": artifact.id,
+            "favorite": False, "title": payload["title"],
             "module_count": module_count, "item_count": item_count, "modules": payload["modules"],
         }],
     )
 
 
-def _generate_concept_contrast(db: Session, *, course_id: str, arguments: dict[str, Any], scope: AgentScope = "course", locked_note_id: str | None = None) -> ToolOutcome:
+def _generate_concept_contrast(db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None = None, scope: AgentScope = "course", locked_note_id: str | None = None) -> ToolOutcome:
     """辨析易混概念（技能卡）：素材 → 结构化 JSON → 硬门槛 → suggestion 回前端。不落库。"""
     from app.services.skills import generate_concept_contrast_payload
 
@@ -393,13 +404,20 @@ def _generate_concept_contrast(db: Session, *, course_id: str, arguments: dict[s
             "概念辨析失败",
             f"辨析服务暂时不可用（{type(exc).__name__}）。请向用户说明并建议稍后再试。",
         )
+    from app.services.quiz import create_review_artifact
+
     pair_names = "、".join(f"「{pair['a']} vs {pair['b']}」" for pair in payload["pairs"])
+    artifact = create_review_artifact(
+        db, course_id=course_id, conversation_id=conversation_id,
+        kind="concept_contrast", title=pair_names[:300], payload=payload,
+    )
     return ToolOutcome(
         f"辨析了 {len(payload['pairs'])} 组易混概念",
         f"已生成概念辨析：{pair_names}，每组含一句话核心区别、2-5 个维度对比与记忆锚点。"
         "请在回答里点出最关键的一组区别，完整对比在前端卡片上展示；学生可就任一组继续要求出题。",
         suggestions=[{
-            "type": "concept_contrast", "id": new_id(), "pair_count": len(payload["pairs"]),
+            "type": "concept_contrast", "id": artifact.id, "artifact_id": artifact.id,
+            "favorite": False, "pair_count": len(payload["pairs"]),
             "pairs": payload["pairs"],
         }],
     )
@@ -567,8 +585,8 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "explain_term": ("course_id", "arguments"),
     "web_search": ("course_id", "arguments", "allow_web"),
     "generate_quiz": ("course_id", "arguments", "conversation_id", "scope", "locked_note_id"),
-    "generate_review_outline": ("course_id", "arguments", "scope", "locked_note_id"),
-    "generate_concept_contrast": ("course_id", "arguments", "scope", "locked_note_id"),
+    "generate_review_outline": ("course_id", "arguments", "conversation_id", "scope", "locked_note_id"),
+    "generate_concept_contrast": ("course_id", "arguments", "conversation_id", "scope", "locked_note_id"),
     "propose_note_edits": ("course_id", "arguments", "editable_note_id", "scope", "allow_note_discovery"),
     "propose_knowledge_node": ("course_id", "arguments"),
 }

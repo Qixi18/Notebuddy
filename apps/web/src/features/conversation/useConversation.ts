@@ -129,6 +129,32 @@ export function useConversation(
   const [error, setError] = useState<string>()
   const [agentRun, setAgentRun] = useState<AgentRunState | null>(null)
   const [agentSuggestionsByMessage, setAgentSuggestionsByMessage] = useState<Record<string, AgentSuggestion[]>>({})
+
+  /* 历史消息携带的建议（随消息落库）→ 种入分桶：刷新/重进会话后技能卡可还原。
+      与实时路径的桶合并时按建议 id 去重，两路来源互不覆盖。 */
+  const seedSuggestionsFromMessages = useCallback((loaded: ConversationMessage[]) => {
+    setAgentSuggestionsByMessage((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const message of loaded) {
+        const suggestions = message.suggestions
+        if (!suggestions?.length) continue
+        const existing = next[message.id]
+        if (!existing) {
+          next[message.id] = suggestions
+          changed = true
+          continue
+        }
+        const seen = new Set(existing.map((item) => item.id))
+        const fresh = suggestions.filter((item) => !seen.has(item.id))
+        if (fresh.length) {
+          next[message.id] = [...existing, ...fresh]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [])
   const [pendingMessageId, setPendingMessageId] = useState<string>()
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
@@ -172,6 +198,7 @@ export function useConversation(
       const loaded = await api.listConversationMessages(next[0].id)
       if (!active || historyRequestRef.current !== request) return
       setHistory(loaded)
+    seedSuggestionsFromMessages(loaded)
       setReady(true)
     }).catch((cause: unknown) => {
       if (!active || historyRequestRef.current !== request) return
@@ -199,6 +226,7 @@ export function useConversation(
     try {
       const loaded = await api.listConversationMessages(id)
       if (historyRequestRef.current === request && courseRef.current === requestCourseId) setHistory(loaded)
+      seedSuggestionsFromMessages(loaded)
     } catch (cause) {
       if (historyRequestRef.current === request && courseRef.current === requestCourseId) {
         setError(cause instanceof Error ? cause.message : '会话读取失败')
@@ -506,6 +534,7 @@ export function useConversation(
         try {
           const loaded = await api.listConversationMessages(targetId)
           if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
+          seedSuggestionsFromMessages(loaded)
         } catch { /* Keep the final event's local message until history can be loaded. */ }
       }
       return true
@@ -525,6 +554,7 @@ export function useConversation(
           try {
             const loaded = await api.listConversationMessages(targetId)
             if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
+            seedSuggestionsFromMessages(loaded)
           } catch { /* Keep the visible error when history cannot be loaded. */ }
         }
       }

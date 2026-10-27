@@ -20,7 +20,7 @@ export type NoteChangeItem = {
  * 右侧「待确认改动（本课程）」：agent 建议改的笔记按篇分组（P4 多目标）。
  * 没有数据时收起为 44px 竖条，不占阅读宽度。
  */
-export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying, onPreview }: {
+export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying, onPreview, materials = [] }: {
   open: boolean
   onToggle: () => void
   items?: NoteChangeItem[]
@@ -29,6 +29,8 @@ export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying,
   applying?: boolean
   /** 点条目 → 预览整篇笔记 */
   onPreview?: (item: NoteChangeItem) => void
+  /** 本讲的课件：只读清单，交代这些改动和被引用的资料出自哪几份课件 */
+  materials?: Array<{ id: string; lecture_title: string; page_count?: number }>
 }) {
   const pending = items.filter((item) => item.status === 'pending')
 
@@ -99,6 +101,19 @@ export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying,
             )
           })}
         </div>
+      )}
+
+      {materials.length > 0 && (
+        <section className="workspace-refs" aria-label="本讲资料">
+          <p className="workspace-refs-label">本讲资料 <b>{materials.length}</b></p>
+          {materials.map((material) => (
+            <div className="workspace-refs-row" key={material.id}>
+              <span className="workspace-refs-icon" aria-hidden="true">◧</span>
+              <span className="workspace-refs-title" title={material.lecture_title}>{material.lecture_title}</span>
+              {typeof material.page_count === 'number' && <em>{material.page_count} 页</em>}
+            </div>
+          ))}
+        </section>
       )}
 
       <footer className="workspace-changes-foot">

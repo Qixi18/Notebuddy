@@ -90,6 +90,8 @@ class ConversationMessageRead(BaseModel):
     sources: list[AssistantSource] = Field(default_factory=list)
     # agent 过程轨迹（思维链 + 工具步骤耗时），前端渲染成可展开的「过程」折叠块；无则为 None。
     process: dict | None = None
+    # agent 产出建议（技能卡负载），随消息持久化；历史加载后卡片还原。
+    suggestions: list[dict] | None = None
     # 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表，避免仍显示「新对话」。
     conversation_title: str = "新对话"
 

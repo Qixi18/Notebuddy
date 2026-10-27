@@ -1362,3 +1362,11 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .markdown-preview th { background: #f1f3ec; }
 /* 「如何打开笔记」提示：未选中任何小节时出现在作用范围下方 */
 .assistant-dock-open-hint { margin: -3px 0 9px; color: #98a094; font-size: 10.5px; line-height: 1.6; }
+/* 重点句/结论句（==标记==）渲染为强调——用主题现成的陶土砖红（与加粗强调同色系） */
+.assistant-key-point { color: var(--nb-clay-ink, #9a553c); font-weight: 600; }
+/* 复习面板是 .modal-card：里面的通用 input 规则（宽 100% 高 44px）会罩到提纲复选框，
+   收藏的提纲在面板里会出现巨型方块——把 checkbox 排除回正常尺寸 */
+.modal-card .outline-item-row input[type="checkbox"] {
+  width: 14px; height: 14px; min-height: 0; flex: none;
+  margin: 4px 0 0; padding: 0; accent-color: var(--nb-forest, #477a5c);
+}

@@ -827,6 +827,8 @@ class ConversationMessage(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # agent 过程轨迹（思维链文本 + 工具步骤与耗时），随消息持久化；标准问答/旧消息为 NULL
     process_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # agent 产出建议（技能卡负载），随消息持久化；历史加载后卡片可还原
+    suggestions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
@@ -837,15 +839,32 @@ class ConversationMessage(Base):
     @property
     def process(self) -> dict | None:
         """解析后的过程轨迹；pydantic from_attributes 直接读取本属性。"""
+        return _parse_json_dict(self.process_json)
+
+    @property
+    def suggestions(self) -> list | None:
+        """解析后的建议列表（技能卡负载）；pydantic from_attributes 直接读取本属性。"""
         import json as _json
 
-        if not self.process_json:
+        if not self.suggestions_json:
             return None
         try:
-            data = _json.loads(self.process_json)
+            data = _json.loads(self.suggestions_json)
         except ValueError:
             return None
-        return data if isinstance(data, dict) else None
+        return data if isinstance(data, list) else None
+
+
+def _parse_json_dict(raw: str | None) -> dict | None:
+    import json as _json
+
+    if not raw:
+        return None
+    try:
+        data = _json.loads(raw)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 class MessageEvidence(Base):
@@ -1002,12 +1021,43 @@ class QuizItem(Base):
     options_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     explanation: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    # 难度标签（v6 §7 第二批）：默认留空表示自适应；用户自定义时存其原始描述（「挑战」「考研」等）
+    difficulty: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # 复习面板的题目级用户状态（§7 学习闭环）：收藏 / 标记 / 移出复习（软删，不破坏卷子本身）
+    favorite: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    marked: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    dismissed: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
     knowledge_node_id: Mapped[str | None] = mapped_column(
         ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
     quiz: Mapped[Quiz] = relationship(back_populates="items")
+
+
+class ReviewArtifact(Base):
+    """复习产物（§7）：复习提纲 / 易混概念对比的结构化实体。
+
+    技能卡产出即落库，复习面板跨会话可见，支持收藏与删除；
+    payload_json 存前端卡片渲染所需的原始结构（与 suggestion 负载同形）。
+    """
+
+    __tablename__ = "review_artifacts"
+    __table_args__ = (Index("ix_review_artifacts_course_kind", "course_id", "kind"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    # 'review_outline' | 'concept_contrast'
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    favorite: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    # 移出复习（软移除）：复习面板不再展示，但会话里的卡片与数据都保留，可随时恢复
+    dismissed: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
 
 class QuizAttempt(Base):

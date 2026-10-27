@@ -64,7 +64,7 @@ describe('ContrastCards', () => {
   test('渲染对比表与记忆锚点', () => {
     render(<ContrastCards contrasts={[contrast]} />)
     expect(screen.getByText('内聚看模块内部，耦合看模块之间')).toBeTruthy()
-    expect(screen.getByText('🧠 高内聚低耦合')).toBeTruthy()
+    expect(screen.getByText('高内聚低耦合')).toBeTruthy()
     expect(screen.getByText('越高越好')).toBeTruthy()
   })
 

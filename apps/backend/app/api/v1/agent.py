@@ -277,6 +277,7 @@ def send_agent_message(
                         "web_indexes": list(range(len(web_results))),
                     }],
                     process=process_public() if (process["thinking"] or process["steps"]) else None,
+                    suggestions=final_event.get("suggestions") or None,
                 )
                 persisted = True
                 yield _sse({

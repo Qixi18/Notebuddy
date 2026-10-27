@@ -95,6 +95,7 @@ def _message_read(db: Session, message: ConversationMessage, conversation_title:
         mode=_mode_from_evidence(message),
         sources=sources_from_evidence(db, message),
         process=message.process,
+        suggestions=message.suggestions,
         conversation_title=conversation_title or DEFAULT_CONVERSATION_TITLE,
     )
 

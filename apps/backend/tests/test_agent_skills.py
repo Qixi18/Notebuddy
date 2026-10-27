@@ -192,7 +192,7 @@ def test_quiz_tool_falls_back_to_course_notes_without_material(skill_db, monkeyp
 
     db, course, _material = skill_db
 
-    def fake_generate(source, *, count, focus, course_name):
+    def fake_generate(source, *, count, focus, course_name, difficulty=""):
         assert "内聚与耦合是模块设计" in source, "素材应来自课程小节笔记"
         return {
             "title": "小测",
@@ -221,7 +221,7 @@ def test_quiz_tool_defaults_to_locked_note_in_note_scope(skill_db, monkeypatch: 
 
     db, course, _material = skill_db
 
-    def fake_generate(source, *, count, focus, course_name):
+    def fake_generate(source, *, count, focus, course_name, difficulty=""):
         assert "内聚与耦合" in source
         return {
             "title": "锁笔记小测",

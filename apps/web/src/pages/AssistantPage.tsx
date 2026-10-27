@@ -13,6 +13,7 @@ import { NoteSuggestionCards } from '../features/assistant/AgentCards'
 import { useNoteSuggestions } from '../features/assistant/useNoteSuggestions'
 import { NotePreviewDialog } from '../features/assistant/NotePreviewDialog'
 import { ChangesPanel, type NoteChangeItem } from '../features/assistant/ChangesPanel'
+import { MistakeBook } from '../features/assistant/MistakeBook'
 import { TermDialog } from '../features/assistant/TermDialog'
 import { teacherPersonaMeta } from '../features/persona/personas'
 import { PetAvatar, type PetAvatarHandle } from '../features/pet/PetAvatar'
@@ -65,6 +66,7 @@ export function AssistantPage() {
   const scopeLockTimer = useRef<number | undefined>(undefined)
   const [webStatus, setWebStatus] = useState<{ configured: boolean; status: string }>({ configured: false, status: 'unconfigured' })
   const [changesOpen, setChangesOpen] = useState(false)
+  const [mistakesOpen, setMistakesOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
   const [railDrawerOpen, setRailDrawerOpen] = useState(false)
@@ -189,6 +191,16 @@ export function AssistantPage() {
     const options = found?.options ?? agentOptions
     void askAgent(text, options).then((sent) => { if (!sent) setDraft(text) })
   }, [askAgent, busy, agentOptions])
+
+  /* 错题本两个动作（v6 §7 第一批）：意图明确，直接走发送通道；
+     send 在忙碌时返回 false，此时退化为填草稿并聚焦输入框，不丢用户操作。 */
+  const askFromMistake = useCallback((prompt: string) => {
+    setMistakesOpen(false)
+    if (!send(prompt)) {
+      setDraft(prompt)
+      composerRef.current?.focus()
+    }
+  }, [send])
 
   useEffect(() => {
     if (!pendingInitialQuestion || !ready || initialQuestionSent.current) return
@@ -458,6 +470,13 @@ export function AssistantPage() {
             >⌕</button>
             <button
               type="button"
+              className="workspace-topbar-mistakes"
+              onClick={() => setMistakesOpen(true)}
+              title="错题本 · 本课程答错的题"
+              aria-label="打开错题本"
+            >复习</button>
+            <button
+              type="button"
               className="workspace-topbar-changes"
               onClick={() => setChangesOpen((open) => !open)}
               aria-pressed={changesOpen}
@@ -572,9 +591,20 @@ export function AssistantPage() {
         open={changesOpen}
         onToggle={() => setChangesOpen((open) => !open)}
         items={noteSuggestions.changes}
+        /* 只把已解析完成的课件传下去，正在解析的还没页数，列出来只会误导 */
+        materials={materials.filter((item) => item.status === 'completed')}
         onApplyAll={() => void noteSuggestions.applyAll()}
         applying={noteSuggestions.busyId === '__all__'}
         onPreview={(item) => setPreviewItem(item)}
+      />
+
+      <MistakeBook
+        open={mistakesOpen}
+        courseId={courseId}
+        courseName={course?.name}
+        onClose={() => setMistakesOpen(false)}
+        onExplain={askFromMistake}
+        onRetry={askFromMistake}
       />
 
       <NotePreviewDialog

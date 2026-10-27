@@ -6,8 +6,55 @@ import remarkMath from 'remark-math'
 import { SourceCard } from '../../components/SourceCard'
 import type { AssistantSource } from '../../types'
 
+/* 重点句标记（§7 用户反馈）：模型把重点句/结论句包在 ==…== 里，渲染成红色强调。
+   手写 mdast 遍历：只拆分纯文本节点里的 ==对==，代码块/公式天然不受影响。 */
+type MdastNode = { type: string; value?: string; children?: MdastNode[] }
+
+function splitKeyPointSegments(value: string): Array<{ text: string; key: boolean }> {
+  const segments: Array<{ text: string; key: boolean }> = []
+  const pattern = /==([^=\n]+)==/g
+  let cursor = 0
+  for (let match = pattern.exec(value); match !== null; match = pattern.exec(value)) {
+    if (match.index > cursor) segments.push({ text: value.slice(cursor, match.index), key: false })
+    segments.push({ text: match[1], key: true })
+    cursor = match.index + match[0].length
+  }
+  if (cursor < value.length) segments.push({ text: value.slice(cursor), key: false })
+  return segments
+}
+
+export function remarkKeyPoint() {
+  return (tree: MdastNode) => {
+    const walk = (node: MdastNode) => {
+      const children = node.children
+      if (!Array.isArray(children)) return
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index]
+        if (child.type === 'text' && child.value && child.value.includes('==')) {
+          const segments = splitKeyPointSegments(child.value)
+          if (segments.length === 1 && !segments[0].key) continue
+          const replacement = segments.map((segment) => (
+            segment.key
+              ? {
+                  type: 'emphasis',
+                  data: { hName: 'span', hProperties: { className: ['assistant-key-point'] } },
+                  children: [{ type: 'text', value: segment.text }],
+                }
+              : { type: 'text', value: segment.text }
+          ))
+          children.splice(index, 1, ...replacement)
+          index += replacement.length - 1
+          continue
+        }
+        walk(child)
+      }
+    }
+    walk(tree)
+  }
+}
+
 export function AssistantMessageMarkdown({ content }: { content: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
+  return <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm, remarkKeyPoint]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
 }
 
 export function AssistantMessageSource({ source, onOpen }: {

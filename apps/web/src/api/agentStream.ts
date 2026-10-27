@@ -29,6 +29,9 @@ export type AgentSuggestion =
   | {
       type: 'review_outline'
       id: string
+      /** 复习产物实体 id（技能产出已落库；旧消息里的建议没有此字段，收藏/删除按钮不渲染） */
+      artifact_id?: string
+      favorite?: boolean
       title: string
       module_count: number
       item_count: number
@@ -37,6 +40,8 @@ export type AgentSuggestion =
   | {
       type: 'concept_contrast'
       id: string
+      artifact_id?: string
+      favorite?: boolean
       pair_count: number
       pairs: {
         a: string
