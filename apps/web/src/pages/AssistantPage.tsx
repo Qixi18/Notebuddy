@@ -9,7 +9,7 @@ import { AssistantContextBar, type ScopeNext } from '../features/assistant/Assis
 import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
 import { NoteScopePicker } from '../features/assistant/NoteScopePicker'
-import { KnowledgeProposalCards, NoteSuggestionCards } from '../features/assistant/AgentCards'
+import { KnowledgeProposalCards, NoteSuggestionCards, QuizCards } from '../features/assistant/AgentCards'
 import { useNoteSuggestions } from '../features/assistant/useNoteSuggestions'
 import { NotePreviewDialog } from '../features/assistant/NotePreviewDialog'
 import { ChangesPanel, type NoteChangeItem } from '../features/assistant/ChangesPanel'
@@ -56,6 +56,8 @@ export function AssistantPage() {
   /* 课件收窄（P3）：消息级参数，仅 course 档随请求发送；不写会话 scope、不触发锁定。
      切范围档 / 切会话 / 切课程时复位（见 changeScope 与下方两个 effect）。 */
   const [materialId, setMaterialId] = useState<string>()
+  /* 学习模式（P9）：消息级参数，direct=直接答 / guided=引导式；切会话/切课程复位 */
+  const [learningMode, setLearningMode] = useState<'direct' | 'guided'>('direct')
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
   const [notePickerOpen, setNotePickerOpen] = useState(false)
   const [previewItem, setPreviewItem] = useState<NoteChangeItem>()
@@ -83,10 +85,18 @@ export function AssistantPage() {
     courseId,
     refreshNotes: refreshCurrentNotes,
     agentFinalId: agentRun?.final?.message_id,
+    resetKey: conversation.conversationId,
   })
   const knowledgeProposals = useMemo(
     () => (agentRun?.final?.suggestions ?? []).filter(
       (item): item is Extract<typeof item, { type: 'knowledge_proposal' }> => item.type === 'knowledge_proposal',
+    ),
+    [agentRun?.final?.suggestions],
+  )
+
+  const quizSuggestions = useMemo(
+    () => (agentRun?.final?.suggestions ?? []).filter(
+      (item): item is Extract<typeof item, { type: 'quiz' }> => item.type === 'quiz',
     ),
     [agentRun?.final?.suggestions],
   )
@@ -96,8 +106,8 @@ export function AssistantPage() {
      答疑页的「锁定笔记」锁的是用户指定的任意一篇，而 agent 的 note 档强制要求 reading_context.note_id
      （后端 agent.py 会 422），所以要把这篇笔记的正文节选一起带过去。
      发现开关（P4）：只有答疑页传 true——全局/课程档下 agent 也能自主定位笔记提交修改建议。 */
-  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext; allowNoteDiscovery: boolean }>(() => {
-    if (scope.kind === 'global') return { scope: 'global', allowNoteDiscovery: true }
+  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext; allowNoteDiscovery: boolean; allowQuiz: boolean; learningMode: 'direct' | 'guided' }>(() => {
+    if (scope.kind === 'global') return { scope: 'global', allowNoteDiscovery: true, allowQuiz: true, learningMode }
     if (scope.kind === 'note' && scope.targetId) {
       const note = notes.find((item) => item.id === scope.targetId)
       return {
@@ -108,10 +118,12 @@ export function AssistantPage() {
           excerpt: note?.content_markdown ? note.content_markdown.slice(0, 1200) : undefined,
         },
         allowNoteDiscovery: true,
+        allowQuiz: true,
+        learningMode,
       }
     }
-    return { scope: 'course', materialId, allowNoteDiscovery: true }
-  }, [scope.kind, scope.targetId, scope.targetTitle, notes, materialId])
+    return { scope: 'course', materialId, allowNoteDiscovery: true, allowQuiz: true, learningMode }
+  }, [scope.kind, scope.targetId, scope.targetTitle, notes, materialId, learningMode])
 
   /* 切换会话时，把范围 chip 对齐到该会话的真实归属。
      范围是会话级属性，存在 Conversation 行上；只有「还没有消息」的会话才允许再改。
@@ -125,10 +137,11 @@ export function AssistantPage() {
       : undefined
     if (!target) {
       // 尚无活动会话（全新对话）→ 默认全局可查
-      setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined); setMaterialId(undefined)
+      setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined); setMaterialId(undefined); setLearningMode('direct')
       return
     }
     setMaterialId(undefined)
+    setLearningMode('direct')
     if (target.scope === 'note') {
       setScopeKind('note'); setScopeTargetId(target.note_id ?? undefined); setScopeTargetTitle(target.note_title ?? undefined)
     } else if (target.scope === 'global') {
@@ -153,6 +166,7 @@ export function AssistantPage() {
     setScopeTargetId(undefined)
     setScopeTargetTitle(undefined)
     setMaterialId(undefined)
+    setLearningMode('direct')
   }, [courseId])
 
   useEffect(() => { void api.getWebSearchStatus().then(setWebStatus).catch(() => setWebStatus({ configured: false, status: 'unavailable' })) }, [])
@@ -166,18 +180,28 @@ export function AssistantPage() {
     navigate(location.pathname, { replace: true, state: null })
   }, [location.key, location.pathname, location.state, navigate])
 
+  /* 重试口径快照（v6 P5）：记录每次提问发出时的 agentOptions，重试按原口径重发，
+      避免失败到重试之间用户改了范围/收窄导致口径漂移 */
+  const recentAsksRef = useRef<Array<{ text: string; options: typeof agentOptions }>>([])
+
   const send = useCallback((text: string): boolean => {
     const trimmed = text.trim()
     if (!trimmed || busy) return false
     /* 走 agent 流式通道：与悬浮坞同一条能力线（可调工具、正文逐字返回） */
     void askAgent(trimmed, agentOptions).then((sent) => { if (!sent) setDraft(trimmed) })
+    recentAsksRef.current = [...recentAsksRef.current.slice(-19), { text: trimmed, options: agentOptions }]
     return true
   }, [askAgent, busy, agentOptions])
 
-  /* 失败卡重试：拿原问题原文重发。
+  /* 失败卡重试：优先按提问时的口径快照重发。
      已知限制：后端对重复幂等键直接 409（api/v1/agent.py:61-68），所以这里用新键重发，
      用户会看到两条相同的提问气泡——去重需要后端「按消息 id 重试」的能力，见计划 §7-1。 */
-  const retryQuestion = useCallback((text: string) => { send(text) }, [send])
+  const retryQuestion = useCallback((text: string) => {
+    if (busy) return
+    const found = [...recentAsksRef.current].reverse().find((item) => item.text === text)
+    const options = found?.options ?? agentOptions
+    void askAgent(text, options).then((sent) => { if (!sent) setDraft(text) })
+  }, [askAgent, busy, agentOptions])
 
   useEffect(() => {
     if (!pendingInitialQuestion || !ready || initialQuestionSent.current) return
@@ -271,10 +295,10 @@ export function AssistantPage() {
     composerRef.current?.focus()
   }
 
-  async function handleFeedback(messageId: string, category: 'helpful' | 'not_helpful'): Promise<boolean> {
+  async function handleFeedback(messageId: string, category: 'helpful' | 'not_helpful', comment?: string): Promise<boolean> {
     if (!courseId) return false
     try {
-      await api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: messageId, category })
+      await api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: messageId, category, comment })
       return true
     } catch {
       return false
@@ -300,6 +324,15 @@ export function AssistantPage() {
     ? '正在翻课程资料…'
     : lastAssistantMessage?.status === 'failed' ? '刚才没答上来，可以再试一次'
       : hasAsked ? '刚回答完，角标可以点开原文' : '等待你的问题'
+
+  /* 能力行（WorkBuddy 式）：任务类 chips 常驻输入框上方，功能可发现不靠话术 */
+  const quickPrompts = materials.length
+    ? [
+      { label: '考考我', prompt: '考考我：针对这一讲出两道题。' },
+      { label: '复习提纲', prompt: '帮我把这一讲整理成复习提纲。' },
+      { label: '易混概念', prompt: '这一讲有哪些容易混淆的概念？请对比说明。' },
+    ]
+    : []
 
   const starterPrompts = materials.length
     ? [
@@ -505,6 +538,7 @@ export function AssistantPage() {
                 onUndo={(suggestion) => void noteSuggestions.undo(suggestion)}
               />
               <KnowledgeProposalCards suggestions={knowledgeProposals} />
+              <QuizCards quizzes={quizSuggestions} courseId={courseId} />
               {noteSuggestions.notice ? <p className="workspace-agent-notice">{noteSuggestions.notice}</p> : null}
             </>
           )}
@@ -538,6 +572,10 @@ export function AssistantPage() {
               : undefined}
             materialId={materialId}
             onMaterialChange={setMaterialId}
+            learningMode={learningMode}
+            onLearningModeChange={setLearningMode}
+            quickPrompts={quickPrompts}
+            onQuickPrompt={useStarter}
           />
         </div>
       </section>

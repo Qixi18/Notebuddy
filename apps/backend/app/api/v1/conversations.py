@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.orchestrator import run_answer
@@ -225,7 +226,12 @@ def send_message(
     # 标题仍是默认值就用首条问题命名（同源复用：同一会话只命名一次）
     if conversation.title.strip() == DEFAULT_CONVERSATION_TITLE:
         conversation.title = derive_conversation_title(payload.question, conversation.scope, conversation.note_title)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # 幂等键「先查后插」非原子：并发同键请求绕过预检后撞唯一约束
+        db.rollback()
+        raise HTTPException(status_code=409, detail="该问题已提交过，请勿重复发送") from None
     course = ensure_course(db, conversation.course_id)
     try:
         result = run_answer(

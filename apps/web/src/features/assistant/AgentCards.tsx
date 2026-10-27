@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import { api } from '../../api'
+import type { QuizDto } from '../../api/quiz'
 import { DiffView } from './DiffView'
 import { applySelected, diffRows, hunksOf } from './noteDiff'
 
@@ -116,5 +118,165 @@ export function KnowledgeProposalCards({ suggestions }: { suggestions: Array<{ t
         </article>
       ))}
     </div>
+  )
+}
+
+/** QuizCards（v6 P10）：agent 出的自测卷——拉题目、作答、服务端判分讲评。 */
+export function QuizCards({ quizzes, courseId }: {
+  quizzes: Array<{ type: 'quiz'; id: string; quiz_id: string; title: string; item_count: number }>
+  courseId?: string
+}) {
+  const [quizzesById, setQuizzesById] = useState<Record<string, QuizDto>>({})
+
+  /* 一次拉课程内 active 卷子，按 id 匹配本批建议（答案不下发，判分在服务端） */
+  useEffect(() => {
+    if (!courseId || quizzes.length === 0) return
+    let alive = true
+    void api.listQuizzes(courseId, 'active')
+      .then((items) => {
+        if (!alive) return
+        const map: Record<string, QuizDto> = {}
+        for (const quiz of items) map[quiz.id] = quiz
+        setQuizzesById(map)
+      })
+      .catch(() => { if (alive) setQuizzesById({}) })
+    return () => { alive = false }
+  }, [courseId, quizzes.length])
+
+  if (quizzes.length === 0) return null
+  return (
+    <div className="agent-cards" role="list" aria-label="自测卷">
+      <small className="agent-cards-title">📝 自测卷 · 作答后系统自动判分讲评（答案不出现在页面上）</small>
+      {quizzes.map((quiz) => {
+        const dto = quizzesById[quiz.quiz_id]
+        if (!dto) {
+          return (
+            <article key={quiz.quiz_id} className="agent-card agent-card-info" role="listitem">
+              <p className="agent-card-body">📄 {quiz.title}（{quiz.item_count} 题）{courseId ? '· 正在加载题目…' : ''}</p>
+            </article>
+          )
+        }
+        return <QuizCard key={quiz.quiz_id} quiz={dto} />
+      })}
+    </div>
+  )
+}
+
+function QuizCard({ quiz }: { quiz: QuizDto }) {
+  const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [graded, setGraded] = useState<Record<string, { correct: boolean; answer: string; explanation: string; comment: string }>>({})
+  const [busyId, setBusyId] = useState<string>()
+  const [error, setError] = useState<string>()
+
+  const gradedCount = Object.keys(graded).length
+  const correctCount = Object.values(graded).filter((entry) => entry.correct).length
+  const allGraded = gradedCount === quiz.items.length
+
+  /* 点击即判（v6 用户反馈）：选择项一点就提交本题、立刻出对错；简答单独提交。
+     答案与讲评在判分前不出现在页面上，判分后作为独立答案区与题目分离。 */
+  function submitOne(item: QuizDto['items'][number], answer: string) {
+    if (graded[item.id] || busyId || !answer.trim()) return
+    setBusyId(item.id)
+    setError(undefined)
+    void api.submitAttempts(quiz.id, [{ item_id: item.id, answer }])
+      .then((result) => {
+        const verdict = result.results.find((entry) => entry.item_id === item.id)
+        if (verdict) setGraded((current) => ({ ...current, [item.id]: verdict }))
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : '提交失败，请重试')
+      })
+      .finally(() => setBusyId(undefined))
+  }
+
+  return (
+    <article className="agent-card quiz-paper" role="listitem">
+      <header className="quiz-paper-head">
+        <span className="quiz-paper-badge">自测卷</span>
+        <strong className="quiz-paper-title">{quiz.title}</strong>
+        <span className="quiz-paper-progress" role="status">
+          {allGraded ? `得分 ${correctCount}/${quiz.items.length}` : `已判 ${gradedCount}/${quiz.items.length}`}
+        </span>
+      </header>
+      {quiz.items.map((item) => {
+        const verdict = graded[item.id]
+        const picked = answers[item.id] ?? ''
+        return (
+          <section key={item.id} className={`quiz-item${verdict ? (verdict.correct ? ' is-correct' : ' is-wrong') : ''}`}>
+            <p className="quiz-item-stem">
+              <span className="quiz-item-no" aria-hidden="true">{item.seq}</span>
+              {item.stem}
+              {item.type === 'short' && <small>（简答）</small>}
+            </p>
+            {item.type === 'choice' ? (
+              <div className="quiz-item-options" role="radiogroup" aria-label={`第 ${item.seq} 题选项`}>
+                {item.options.map((option) => {
+                  const isPicked = picked === option
+                  const state = !verdict
+                    ? isPicked ? ' is-selected' : ''
+                    : option === verdict.answer ? ' is-correct' : isPicked ? ' is-wrong' : ' is-dim'
+                  return (
+                    <label key={option} className={`quiz-item-option${state}`}>
+                      <input
+                        type="radio"
+                        name={`quiz-${quiz.id}-item-${item.id}`}
+                        disabled={Boolean(verdict) || busyId === item.id}
+                        checked={isPicked}
+                        onChange={() => {
+                          setAnswers((current) => ({ ...current, [item.id]: option }))
+                          submitOne(item, option)
+                        }}
+                      />
+                      <span>{option}</span>
+                      {verdict && option === verdict.answer && <span className="quiz-option-mark" aria-hidden="true">✓</span>}
+                      {verdict && isPicked && option !== verdict.answer && <span className="quiz-option-mark" aria-hidden="true">✗</span>}
+                    </label>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="quiz-item-short-wrap">
+                <textarea
+                  className="quiz-item-short"
+                  value={picked}
+                  disabled={Boolean(verdict)}
+                  rows={3}
+                  placeholder="写下你的回答…"
+                  aria-label={`第 ${item.seq} 题作答`}
+                  onChange={(event) => setAnswers((current) => ({ ...current, [item.id]: event.target.value }))}
+                />
+                {!verdict && (
+                  <button
+                    type="button"
+                    className="quiz-item-submit"
+                    disabled={!picked.trim() || busyId === item.id}
+                    onClick={() => submitOne(item, picked)}
+                  >{busyId === item.id ? '判分中…' : '提交本题'}</button>
+                )}
+              </div>
+            )}
+            {/* 答案区：判分后才渲染，与题目区视觉分离 */}
+            {verdict && (
+              <div className={`quiz-verdict${verdict.correct ? ' is-correct' : ' is-wrong'}`}>
+                <p className="quiz-verdict-line">
+                  {verdict.correct ? '✓ 答对了' : '✗ 答错了'}
+                  <span> · 你的回答：{picked || '（空）'}</span>
+                  {!verdict.correct && verdict.answer && <span> · 正确答案：{verdict.answer}</span>}
+                </p>
+                {(verdict.explanation || verdict.comment) && (
+                  <p className="quiz-verdict-why">{verdict.explanation}{verdict.comment}</p>
+                )}
+              </div>
+            )}
+          </section>
+        )
+      })}
+      {allGraded && (
+        <footer className="quiz-paper-foot">
+          {correctCount === quiz.items.length ? '全对，漂亮！' : `错题已记录，之后可在复习里回看（${correctCount}/${quiz.items.length} 正确）。`}
+        </footer>
+      )}
+      {error && <p className="workspace-agent-notice">{error}</p>}
+    </article>
   )
 }

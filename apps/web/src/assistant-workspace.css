@@ -475,6 +475,160 @@
   100% { background: transparent; box-shadow: 0 0 0 3px transparent; }
 }
 
+/* ---- 能力行（WorkBuddy 式）：输入框上方的任务与模式 chips ---- */
+.workspace-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 8px;
+}
+.workspace-quick-chip {
+  border: 1px solid var(--nb-line);
+  background: var(--nb-white);
+  border-radius: 999px;
+  padding: 4px 13px;
+  font-size: 12px;
+  color: var(--nb-ink);
+  cursor: pointer;
+  transition: border-color 120ms var(--nb-ease), background 120ms var(--nb-ease);
+}
+.workspace-quick-chip:hover { border-color: var(--nb-sage); background: #f4f9f4; }
+.workspace-quick-chip.is-mode.is-active {
+  border-color: var(--nb-forest);
+  background: #eef4ef;
+  color: var(--nb-forest-deep);
+  font-weight: 600;
+}
+.workspace-quick-spacer { flex: 1; }
+
+/* ---- P10 自测卷（考卷形态：卷头/题号/选项状态色/答案区与题目分离）+ P11 反馈原因 ---- */
+.quiz-paper { border-left: 3px solid var(--nb-forest); }
+.quiz-paper-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.quiz-paper-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--nb-forest);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.quiz-paper-title { font-size: 13.5px; color: var(--nb-forest-deep); }
+.quiz-paper-progress { margin-left: auto; color: var(--nb-muted); font-size: 11px; font-family: var(--nb-mono); }
+.quiz-paper-foot {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f0f6f0;
+  color: var(--nb-forest-deep);
+  font-size: 12px;
+}
+.quiz-item {
+  margin: 10px 0 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--nb-line);
+  border-radius: 10px;
+  background: var(--nb-white);
+}
+.quiz-item.is-correct { border-color: #bcd9c8; }
+.quiz-item.is-wrong { border-color: #e4c4bc; }
+.quiz-item-stem {
+  margin: 0 0 7px;
+  color: var(--nb-ink);
+  font-size: 13px;
+  line-height: 1.7;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.quiz-item-stem small { color: var(--nb-muted); }
+.quiz-item-no {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #eef4ef;
+  color: var(--nb-forest-deep);
+  font-size: 11px;
+  font-weight: 700;
+  transform: translateY(2px);
+}
+.quiz-item-options { display: flex; flex-direction: column; gap: 4px; }
+.quiz-item-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--nb-ink);
+  transition: background 120ms var(--nb-ease), border-color 120ms var(--nb-ease);
+}
+.quiz-item-option:hover { border-color: var(--nb-sage); background: #f4f9f4; }
+.quiz-item-option.is-selected { border-color: var(--nb-forest); background: #eef4ef; }
+.quiz-item-option input { accent-color: var(--nb-forest); }
+.quiz-item-option.is-correct { border-color: #9dc7ae; background: #e8f2ec; color: #1e5a44; }
+.quiz-item-option.is-wrong { border-color: #ddb8ae; background: #fbefef; color: #8a4b3f; }
+.quiz-item-option.is-dim { opacity: 0.55; cursor: default; }
+.quiz-option-mark { margin-left: auto; font-weight: 700; }
+.quiz-item-short-wrap { display: flex; flex-direction: column; gap: 6px; }
+.quiz-item-short {
+  width: 100%;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--nb-ink);
+  font: inherit;
+  font-size: 12.5px;
+  padding: 7px 9px;
+  resize: vertical;
+}
+.quiz-item-submit {
+  align-self: flex-end;
+  border: 1px solid var(--nb-forest);
+  background: var(--nb-forest);
+  color: #fff;
+  font-size: 11.5px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.quiz-item-submit:disabled { opacity: 0.45; cursor: default; }
+/* 答案区：与题目分离的独立块，判分后才出现 */
+.quiz-verdict {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.75;
+}
+.quiz-verdict.is-correct { background: #e8f2ec; color: #1e5a44; }
+.quiz-verdict.is-wrong { background: #fbefef; color: #8a4b3f; }
+.quiz-verdict-line { margin: 0; font-weight: 600; }
+.quiz-verdict-why { margin: 3px 0 0; opacity: 0.92; }
+.workspace-msg-reasons { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.workspace-msg-reasons button {
+  border: 1px solid var(--nb-line);
+  background: var(--nb-white);
+  color: var(--nb-muted-strong, #46544a);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.workspace-msg-reasons button:hover { border-color: var(--nb-sage); color: var(--nb-forest); }
+
 /* ---- P4 多目标建议：卡片标注目标笔记 + 改动栏按笔记分组 ---- */
 .agent-card-note {
   display: inline-block;

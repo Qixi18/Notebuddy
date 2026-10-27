@@ -55,6 +55,8 @@ MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES | {
     "notebook_revision_assets", "asset_processing_jobs", "asset_parse_results",
     "notebook_generation_jobs", "notebook_generation_candidates",
     "notebook_upload_batches", "notebook_generation_inputs",
+    # v6 P10：自测卷三表由 a4f8c2d7e910 迁移创建，不进旧库桥接清单
+    "quizzes", "quiz_items", "quiz_attempts",
 }
 LEGACY_COLUMNS = {
     "materials": {"topic_title": "VARCHAR(200)"},

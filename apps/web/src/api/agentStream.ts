@@ -23,6 +23,7 @@ export type AgentNoticeEvent = { type: 'notice'; text: string }
 export type AgentSuggestion =
   | { type: 'note_suggestion'; id: string; note_id: string; note_title: string; impact: string }
   | { type: 'knowledge_proposal'; id: string; name: string }
+  | { type: 'quiz'; id: string; quiz_id: string; title: string; item_count: number }
 
 export type AgentFinalEvent = {
   type: 'final'
@@ -74,6 +75,10 @@ export type AgentQuestionPayload = {
   notebook_context?: AgentNotebookContext
   /** P4 发现开关：允许 agent 自主定位课程内任意笔记并提交修改建议；只有答疑页传 true */
   allow_note_discovery?: boolean
+  /** P10 出题开关：允许 agent 调 generate_quiz 出自测卷；只有答疑页传 true */
+  allow_quiz?: boolean
+  /** P9 学习模式：guided=引导式答疑（先诊断再分步提示）；默认 direct */
+  learning_mode?: 'direct' | 'guided'
 }
 
 export type AgentStreamHandlers = {
@@ -84,15 +89,18 @@ export type AgentStreamHandlers = {
   onError?: (event: AgentErrorEvent) => void
 }
 
+/** SSE 帧边界：兼容 \n\n 与被中间层规范化成 \r\n\r\n 的行尾（v6 P2）。 */
+const SSE_FRAME_BOUNDARY = /\r?\n\r?\n/
+
 /** 解析一段 SSE 缓冲为事件列表，返回未成帧的余量。 */
 export function parseAgentStream(buffer: string): { events: AgentEvent[]; rest: string } {
   const events: AgentEvent[] = []
   let rest = buffer
-  let boundary = rest.indexOf('\n\n')
-  while (boundary >= 0) {
-    const frame = rest.slice(0, boundary).trim()
-    rest = rest.slice(boundary + 2)
-    boundary = rest.indexOf('\n\n')
+  let boundary = SSE_FRAME_BOUNDARY.exec(rest)
+  while (boundary) {
+    const frame = rest.slice(0, boundary.index).trim()
+    rest = rest.slice(boundary.index + boundary[0].length)
+    boundary = SSE_FRAME_BOUNDARY.exec(rest)
     if (!frame.startsWith('data:')) continue
     try {
       events.push(JSON.parse(frame.slice(5).trim()) as AgentEvent)

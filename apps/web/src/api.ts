@@ -8,6 +8,7 @@ import { conversationApi } from './api/conversations'
 import { feedbackApi } from './api/feedback'
 import { termsApi } from './api/terms'
 import { forestApi } from './api/forest'
+import { quizApi } from './api/quiz'
 
 export { ApiError } from './api/http'
 export type { Capabilities, ConnectivityTestPayload, OCRStatus, ProviderStatus } from './api/config'
@@ -23,4 +24,5 @@ export const api = {
   ...conversationApi,
   ...feedbackApi,
   ...termsApi,
+  ...quizApi,
 }

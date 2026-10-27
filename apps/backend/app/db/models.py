@@ -951,6 +951,62 @@ class Feedback(Base):
     course: Mapped[Course] = relationship(back_populates="feedback")
 
 
+class Quiz(Base):
+    """agent 出的自测卷（v6 P10）：题目落 items、作答落 attempts，错题本与掌握度的数据源。"""
+
+    __tablename__ = "quizzes"
+    __table_args__ = (Index("ix_quizzes_course_status", "course_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    material_id: Mapped[str | None] = mapped_column(
+        ForeignKey("materials.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+    items: Mapped[list["QuizItem"]] = relationship(
+        back_populates="quiz", cascade="all, delete-orphan", order_by="QuizItem.seq"
+    )
+
+
+class QuizItem(Base):
+    __tablename__ = "quiz_items"
+    __table_args__ = (Index("ix_quiz_items_quiz_seq", "quiz_id", "seq"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"))
+    seq: Mapped[int] = mapped_column(nullable=False)
+    # choice=单选（answer 必须是 options 之一，机器可判） / short=简答（模型判分）
+    item_type: Mapped[str] = mapped_column(String(20), default="choice", nullable=False)
+    stem: Mapped[str] = mapped_column(Text, nullable=False)
+    options_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    knowledge_node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+    quiz: Mapped[Quiz] = relationship(back_populates="items")
+
+
+class QuizAttempt(Base):
+    __tablename__ = "quiz_attempts"
+    __table_args__ = (Index("ix_quiz_attempts_item_created", "item_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"))
+    item_id: Mapped[str] = mapped_column(ForeignKey("quiz_items.id", ondelete="CASCADE"))
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    correct: Mapped[bool] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
 class BackupRecord(Base):
     __tablename__ = "backup_records"
     __table_args__ = (Index("ix_backup_records_course_id", "course_id"),)

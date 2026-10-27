@@ -63,12 +63,12 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 /** 追问建议：点一下只把话术填进输入框，由用户决定要不要发 */
-const FOLLOW_UPS = ['再展开讲讲', '能举个例子吗', '这和上一讲有什么关系'] as const
+const FOLLOW_UPS = ['再展开讲讲', '能举个例子吗', '就这个内容考考我', '这和上一讲有什么关系'] as const
 
 function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry, retryText, onFollowUp }: {
   message: ConversationMessage
   personaName: string
-  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful') => Promise<boolean>
+  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful', comment?: string) => Promise<boolean>
   onOpenMaterial?: (materialId: string, page: number) => void
   /** 失败卡的重试：回传原问题原文，由调用方重发 */
   onRetry?: (text: string) => void
@@ -83,6 +83,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
   const citeSeq = useRef(0)
   const [feedbackSaved, setFeedbackSaved] = useState(false)
   const [feedbackBusy, setFeedbackBusy] = useState(false)
+  const [reasonOpen, setReasonOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const sources = message.sources ?? []
 
@@ -92,12 +93,15 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
     setCiteFocus({ no, seq: citeSeq.current })
   }
 
-  async function handleFeedback(category: 'helpful' | 'not_helpful') {
+  async function handleFeedback(category: 'helpful' | 'not_helpful', comment?: string) {
     if (feedbackBusy) return
     setFeedbackBusy(true)
-    const saved = await onFeedback(message.id, category)
+    const saved = await onFeedback(message.id, category, comment)
     setFeedbackBusy(false)
-    if (saved) setFeedbackSaved(true)
+    if (saved) {
+      setFeedbackSaved(true)
+      setReasonOpen(false)
+    }
   }
 
   async function handleCopy() {
@@ -151,6 +155,18 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
 
         {message.status !== 'failed' && message.id !== 'local-greeting' && (
           <footer className="workspace-msg-foot">
+            {reasonOpen && !feedbackSaved && (
+              <div className="workspace-msg-reasons" role="group" aria-label="选择不理想的原因">
+                {['答非所问', '引用不准', '太啰嗦', '有错误', '其他'].map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    disabled={feedbackBusy}
+                    onClick={() => void handleFeedback('not_helpful', reason)}
+                  >{reason}</button>
+                ))}
+              </div>
+            )}
             <div className="workspace-msg-feedback">
               <button
                 type="button"
@@ -162,7 +178,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
                 type="button"
                 disabled={feedbackBusy}
                 aria-pressed={feedbackSaved}
-                onClick={() => void handleFeedback('not_helpful')}
+                onClick={() => setReasonOpen((open) => !open)}
               >需改进</button>
               {feedbackSaved && <small>反馈已保存</small>}
             </div>
@@ -193,7 +209,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
   personaName: string
   starters: string[]
   onStarter: (prompt: string) => void
-  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful') => Promise<boolean>
+  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful', comment?: string) => Promise<boolean>
   onOpenMaterial?: (materialId: string, page: number) => void
   /** 失败卡的重试：回传原问题原文，由调用方重发 */
   onRetry?: (text: string) => void
