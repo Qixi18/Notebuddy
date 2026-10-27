@@ -50,7 +50,9 @@ FOREST_TABLES = {
 }
 MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES | {
     "notebooks", "notebook_reading_positions", "unbound_notebooks",
-    "notebook_document_revisions", "notebook_attachments", "notebook_relations",
+    "notebook_document_revisions", "notebook_attachments",
+    # main(PR #12)：笔记本资产系列表由各自 Alembic 修订创建
+    "notebook_relations",
     "assets", "asset_migration_issues", "notebook_assets", "notebook_cover_assets",
     "notebook_revision_assets", "asset_processing_jobs", "asset_parse_results",
     "notebook_generation_jobs", "notebook_generation_candidates",
