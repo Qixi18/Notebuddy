@@ -130,8 +130,9 @@ class NotebookRelation(Base):
     __tablename__ = "notebook_relations"
     __table_args__ = (
         CheckConstraint("source_notebook_id <> target_notebook_id", name="ck_notebook_relations_no_self_link"),
-        UniqueConstraint("source_notebook_id", "target_notebook_id", "relation_type",
-                         name="uq_notebook_relations_endpoints_type"),
+        Index("uq_notebook_relations_endpoints_anchors", "source_notebook_id", "target_notebook_id",
+              "relation_type", text("coalesce(source_block_id, '')"),
+              text("coalesce(target_block_id, '')"), unique=True),
         Index("ix_notebook_relations_target", "target_notebook_id"),
     )
 
@@ -144,6 +145,11 @@ class NotebookRelation(Base):
     )
     relation_type: Mapped[str] = mapped_column(String(40), nullable=False, default="related")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    origin: Mapped[str] = mapped_column(String(20), default="manual", server_default="manual", nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
     source_notebook: Mapped[Notebook] = relationship(
@@ -159,6 +165,9 @@ class NotebookReadingPosition(Base):
     notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True)
     chapter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     note_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # New reading target: a stable block in document_json (note_id stays for
+    # legacy rows until the old Note path is dropped).
+    block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     mode: Mapped[str] = mapped_column(String(10), nullable=False)
     section_offset: Mapped[float] = mapped_column(default=0)
     revision: Mapped[int] = mapped_column(default=1)
@@ -181,6 +190,12 @@ class NotebookDocumentRevision(Base):
     schema_version: Mapped[int] = mapped_column(default=2, server_default="2", nullable=False)
     document_json: Mapped[str] = mapped_column(Text, nullable=False)
     origin: Mapped[str] = mapped_column(String(20), default="autosave", server_default="autosave")
+    # Migrated legacy history keeps its original timestamp and is never trimmed
+    # by the rolling autosave retention policy.
+    legacy_created_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    retention: Mapped[str] = mapped_column(
+        String(20), default="rolling", server_default="rolling", nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
 
@@ -488,9 +503,22 @@ class NotebookGenerationJob(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    # Document IR input identity and generation provenance.
+    parse_run_ids_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    ir_fingerprints_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}", nullable=False)
+    generator: Mapped[str] = mapped_column(String(40), default="deepseek", server_default="deepseek", nullable=False)
+    generator_version: Mapped[str] = mapped_column(String(40), default="1", server_default="1", nullable=False)
+    knowledge_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_map_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class NotebookGenerationCandidate(Base):
+    """Legacy review-candidate table.
+
+    The worker never produced candidates (the document was appended directly).
+    The table is kept read-only for historical rows; the API is retired.
+    """
+
     __tablename__ = "notebook_generation_candidates"
     __table_args__ = (
         ForeignKeyConstraint(
@@ -508,6 +536,215 @@ class NotebookGenerationCandidate(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending_review")
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class DocumentParseRun(Base):
+    """One immutable parse attempt for one Asset (versioned document evidence)."""
+
+    __tablename__ = "document_parse_runs"
+    __table_args__ = (
+        Index("uq_document_parse_runs_current", "asset_id", unique=True,
+              sqlite_where=text("is_current = 1")),
+        Index("ix_document_parse_runs_asset", "asset_id", "created_at"),
+        Index("ix_document_parse_runs_status", "status", "created_at"),
+        CheckConstraint(
+            "status IN ('pending','running','completed','failed')",
+            name="ck_document_parse_run_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    doc_type: Mapped[str] = mapped_column(String(20), default="unknown", server_default="unknown", nullable=False)
+    ir_version: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", nullable=False)
+    parser_name: Mapped[str] = mapped_column(String(80), default="unknown", server_default="unknown", nullable=False)
+    parser_version: Mapped[str] = mapped_column(String(80), default="0", server_default="0", nullable=False)
+    config_version: Mapped[str] = mapped_column(String(80), default="v1", server_default="v1", nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}", nullable=False)
+    is_current: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    page_count: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    text_chars: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    quality_status: Mapped[str] = mapped_column(String(20), default="failed", server_default="failed", nullable=False)
+    quality_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}", nullable=False)
+    markdown_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supersedes_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
+    __table_args__ = (
+        UniqueConstraint("parse_run_id", "page_number", name="uq_document_pages_run_number"),
+        Index("ix_document_pages_run", "parse_run_id", "page_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    parse_run_id: Mapped[str] = mapped_column(
+        ForeignKey("document_parse_runs.id", ondelete="CASCADE"), nullable=False,
+    )
+    page_number: Mapped[int] = mapped_column(nullable=False)
+    width: Mapped[float | None] = mapped_column(nullable=True)
+    height: Mapped[float | None] = mapped_column(nullable=True)
+    rotation: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    render_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    extraction: Mapped[str] = mapped_column(String(20), default="native_text", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="parsed", nullable=False)
+    text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class DocumentBlock(Base):
+    __tablename__ = "document_blocks"
+    __table_args__ = (
+        UniqueConstraint("parse_run_id", "block_id", name="uq_document_blocks_run_block"),
+        Index("ix_document_blocks_run_order", "parse_run_id", "global_order"),
+        Index("ix_document_blocks_page_order", "page_id", "order"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    parse_run_id: Mapped[str] = mapped_column(
+        ForeignKey("document_parse_runs.id", ondelete="CASCADE"), nullable=False,
+    )
+    page_id: Mapped[str] = mapped_column(
+        ForeignKey("document_pages.id", ondelete="CASCADE"), nullable=False,
+    )
+    block_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    parent_block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    global_order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    block_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    level: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    latex: Mapped[str | None] = mapped_column(Text, nullable=True)
+    table_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    figure_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bbox_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction: Mapped[str] = mapped_column(String(20), default="native_text", nullable=False)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class DocumentSection(Base):
+    __tablename__ = "document_sections"
+    __table_args__ = (
+        UniqueConstraint("parse_run_id", "section_id", name="uq_document_sections_run_section"),
+        Index("ix_document_sections_run_order", "parse_run_id", "order"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    parse_run_id: Mapped[str] = mapped_column(
+        ForeignKey("document_parse_runs.id", ondelete="CASCADE"), nullable=False,
+    )
+    section_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    title: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    level: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    page_start: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+    page_end: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+    block_ids_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class DocumentChunk(Base):
+    """Rebuildable retrieval chunk derived from a parse run."""
+
+    __tablename__ = "document_chunks"
+    __table_args__ = (
+        Index("ix_document_chunks_run_order", "parse_run_id", "order"),
+        Index("ix_document_chunks_asset", "asset_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    parse_run_id: Mapped[str] = mapped_column(
+        ForeignKey("document_parse_runs.id", ondelete="CASCADE"), nullable=False,
+    )
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
+    section_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    page_numbers_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    block_ids_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)
+    embedding_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class NotebookBlockSource(Base):
+    """Traceability: a Notebook body block came from these document blocks."""
+
+    __tablename__ = "notebook_block_sources"
+    __table_args__ = (
+        UniqueConstraint("notebook_id", "block_id", "document_block_id",
+                         name="uq_notebook_block_source_edge"),
+        Index("ix_notebook_block_sources_block", "notebook_id", "block_id"),
+        Index("ix_notebook_block_sources_run", "parse_run_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    block_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    generation_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    parse_run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    document_block_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    page_number: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    body_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class NotebookSection(Base):
+    """Derived index of Notebook body headings/sections (rebuildable)."""
+
+    __tablename__ = "notebook_sections"
+    __table_args__ = (
+        UniqueConstraint("notebook_id", "block_id", name="uq_notebook_sections_block"),
+        Index("ix_notebook_sections_order", "notebook_id", "order"),
+        Index("ix_notebook_sections_course", "course_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    course_id: Mapped[str | None] = mapped_column(
+        ForeignKey("courses.id", ondelete="SET NULL"), nullable=True,
+    )
+    block_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    level: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+    heading: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    revision: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class NotebookEditSuggestion(Base):
+    """Pending Agent edit proposal against one Notebook document revision."""
+
+    __tablename__ = "notebook_edit_suggestions"
+    __table_args__ = (
+        Index("ix_notebook_edit_suggestions_status", "notebook_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=False)
+    base_revision: Mapped[int] = mapped_column(nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    ops_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    proposed_document_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
 class ProcessingJob(Base):
@@ -721,6 +958,12 @@ class Note(Base):
     revision_number: Mapped[int] = mapped_column(default=1, nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+    # Legacy body retirement: content is copied into Notebook.document_json and
+    # the row becomes read-only evidence.  Columns are kept so the migration is
+    # auditable and reversible without deleting user content.
+    migrated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    migrated_revision: Mapped[int | None] = mapped_column(nullable=True)
+    migration_batch: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     course: Mapped[Course] = relationship(back_populates="notes")
     knowledge_node: Mapped[KnowledgeNode] = relationship(back_populates="notes")
@@ -848,6 +1091,14 @@ class MessageEvidence(Base):
     claim_key: Mapped[str] = mapped_column(String(200), default="answer", nullable=False)
     evidence_type: Mapped[str] = mapped_column(String(40), default="course_direct", nullable=False)
     support_level: Mapped[str] = mapped_column(String(30), default="direct", nullable=False)
+    # Document IR / Notebook evidence (source_ref_id remains for legacy rows).
+    notebook_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    document_block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    parse_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    body_block_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    location_label: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
     message: Mapped[ConversationMessage] = relationship(back_populates="evidence")
@@ -1017,22 +1268,25 @@ def default_notebook_id(connection, course_id: str) -> str:
 
 @event.listens_for(Note, "before_insert")
 def assign_notebook(mapper, connection, target) -> None:
-    """Derive legacy Note placement only from its explicit source Material."""
+    """Derive legacy Note placement from its source Material / Notebook.
+
+    ``Material.course_id`` is a deprecated field and no longer decides course
+    ownership; a Notebook-owned Material inherits the Notebook.
+    """
     if target.material_id:
-        material = connection.execute(select(Material.course_id, Material.notebook_id).where(
+        material = connection.execute(select(Material.notebook_id).where(
             Material.id == target.material_id)).one()
-        if material.course_id != target.course_id:
-            raise ValueError("Note and material must belong to the same course")
         if target.notebook_id is not None and target.notebook_id != material.notebook_id:
             raise ValueError("Note and material must belong to the same notebook")
-        target.notebook_id = material.notebook_id
+        if material.notebook_id is not None:
+            target.notebook_id = material.notebook_id
     # Legacy course knowledge Notes can remain unbound. Never select a course
     # default Notebook on their behalf; Notebook-backed Notes pass an explicit
     # ID (or inherit it from a Notebook-owned Material above).
     if target.notebook_id is None:
         return
     owner = connection.scalar(select(Notebook.course_id).where(Notebook.id == target.notebook_id))
-    if owner != target.course_id:
+    if owner is not None and owner != target.course_id:
         raise ValueError("Notebook must belong to the same course")
     next_slot = connection.scalar(Notebook.__table__.update().where(Notebook.id == target.notebook_id)
                                   .values(next_note_slot=Notebook.next_note_slot + 1)

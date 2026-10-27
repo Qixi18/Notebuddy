@@ -4,7 +4,7 @@ import { KnowledgeTreeScene } from '../src/features/tree/KnowledgeTreeScene'
 import { FOREST_LAYOUT_VERSION } from '../src/features/tree/forestGroveLayout'
 import { notebookGeometry, overviewLeaves, sceneInitialCamera } from '../src/features/tree/treeGeometry'
 import type { NotebookRead, SectionRead } from '../src/types'
-import type { CrossCourseRelation, ForestCourse } from '../src/features/forest/types'
+import type { TreeRelation, ForestCourse } from '../src/features/forest/types'
 
 beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => window.setTimeout(() => callback(0), 0))
@@ -219,7 +219,7 @@ describe('tree actions', () => {
     const courses = Array.from({ length: 9 }, (_, index) => ({ ...course, course_id: `course-${index}`, position: index }))
     const a = book(1); a.course_id = 'course-0'
     const b = book(1); b.course_id = 'course-8'; b.id = 'target-book'; b.chapters[0].sections = [{ ...section(0), id: 'target-note', notebook_id: b.id }]
-    const relation: CrossCourseRelation = { id: 'vine', source_course_id: a.course_id, target_course_id: b.course_id, source_note_id: 'note-0', target_note_id: 'target-note', source_title: '知识点0', target_title: '目标知识点', source_course_name: '甲', target_course_name: '乙', relation_type: 'related', reason: '课程证据', status: 'confirmed', origin: 'ai', source_revision: 1, target_revision: 1, stale: false, source_ref_ids: [], target_ref_ids: [] }
+    const relation: TreeRelation = { id: 'vine', source_course_id: a.course_id, target_course_id: b.course_id, source_block_id: 'note-0', target_block_id: 'target-note', source_title: '知识点0', target_title: '目标知识点', source_course_name: '甲', target_course_name: '乙', relation_type: 'related', reason: '课程证据', status: 'confirmed', origin: 'ai', source_revision: 1, target_revision: 1, stale: false, source_ref_ids: [], target_ref_ids: [] }
     const onViewChange = vi.fn()
     const onVisibleCourseIdsChange = vi.fn()
     const props = { courses, trees: [{ course_id: a.course_id, notebooks: [a] }], relations: [relation], selectedRelationId: 'vine', onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn(), onRelation: vi.fn(), onViewChange, onVisibleCourseIdsChange }

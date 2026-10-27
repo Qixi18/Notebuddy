@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { KnowledgeTreeScene } from '../src/features/tree/KnowledgeTreeScene'
 import type { ForestCourse } from '../src/features/forest/types'
 import type { NotebookRead, SectionRead } from '../src/types'
-import type { CrossCourseRelation } from '../src/features/forest/types'
+import type { TreeRelation } from '../src/features/forest/types'
 import { forestCanopyGeometry } from '../src/features/tree/courseCanopyGeometry'
 import { notebookGeometry } from '../src/features/tree/treeGeometry'
 import { FOREST_LAYOUT_VERSION } from '../src/features/tree/forestGroveLayout'
@@ -68,7 +68,7 @@ it('stages and initially frames a complete three-tree grove with aligned caption
   const onViewChange = vi.fn()
   const grouped = Array.from({ length: 3 }, (_, index) => ({ ...course, course_id: `grove-${index}`, name: `课程${index}`, position: index }))
   const directories = grouped.map((row, index) => ({ course_id: row.course_id, notebooks: [{ ...book, id: `grove-book-${index}`, course_id: row.course_id, chapters: [{ ...book.chapters[0], sections: [{ ...section, id: `grove-note-${index}`, notebook_id: `grove-book-${index}` }] }] }] }))
-  const edge = { id: 'grove-edge', source_course_id: grouped[0].course_id, target_course_id: grouped[2].course_id, source_note_id: 'grove-note-0', target_note_id: 'grove-note-2', source_title: '起点', target_title: '终点', status: 'confirmed', origin: 'ai', stale: false } as CrossCourseRelation
+  const edge = { id: 'grove-edge', source_course_id: grouped[0].course_id, target_course_id: grouped[2].course_id, source_block_id: 'grove-note-0', target_block_id: 'grove-note-2', source_title: '起点', target_title: '终点', status: 'confirmed', origin: 'ai', stale: false } as TreeRelation
   const { container } = render(<KnowledgeTreeScene {...props} courses={grouped} trees={directories} relations={[edge]} onViewChange={onViewChange} />)
   const roots = [...container.querySelectorAll('.kt-forest-botanical')].map(element => {
     const [x, y] = element.getAttribute('transform')!.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
@@ -109,7 +109,7 @@ it('reframes a different relation sharing the same two real notes after a reader
   const otherCourse = { ...course, course_id: 'other', name: '数字逻辑' }
   const otherNote = { ...section, id: 'other-note', notebook_id: 'other-book' }
   const otherBook = { ...book, id: 'other-book', course_id: 'other', chapters: [{ ...book.chapters[0], sections: [otherNote] }] }
-  const relation: CrossCourseRelation = { id: 'r1', source_course_id: 'c', target_course_id: 'other', source_note_id: section.id, target_note_id: otherNote.id, source_title: section.title, target_title: otherNote.title, source_course_name: course.name, target_course_name: otherCourse.name, relation_type: 'related', reason: '真实联系', status: 'confirmed', origin: 'ai', activation_mode: 'automatic', evidence_fingerprint: null, source_revision: 1, target_revision: 1, stale: false, source_ref_ids: [], target_ref_ids: [] }
+  const relation: TreeRelation = { id: 'r1', source_course_id: 'c', target_course_id: 'other', source_block_id: section.id, target_block_id: otherNote.id, source_title: section.title, target_title: otherNote.title, source_course_name: course.name, target_course_name: otherCourse.name, relation_type: 'related', reason: '真实联系', status: 'confirmed', origin: 'ai', activation_mode: 'automatic', evidence_fingerprint: null, source_revision: 1, target_revision: 1, stale: false, source_ref_ids: [], target_ref_ids: [] }
   const shared = { ...props, courses: [course, otherCourse], trees: [...props.trees, { course_id: 'other', notebooks: [otherBook] }], relations: [relation, { ...relation, id: 'r2' }] }
   const view = render(<KnowledgeTreeScene {...shared} selectedRelationId="r1" />)
   await waitFor(() => expect(view.container.querySelector('.vine-leaf.is-selected')?.getAttribute('data-relation-id')).toBe('r1'))

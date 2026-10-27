@@ -1,17 +1,20 @@
-"""Background processing for image Assets, separate from Material parsing."""
+"""Background processing for image Assets through the unified Document pipeline."""
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 
 from app.db.database import SessionLocal
-from app.db.model_utils import new_id
-from app.db.models import Asset, AssetParseResult, AssetProcessingJob
-from app.notes.assets import storage_path
-from app.parsers.ocr import OCRUnavailable, ocr_image
+from app.db.models import Asset, AssetProcessingJob
+from app.document_processing.service import (
+    DocumentProcessingError,
+    create_parse_run,
+    execute_parse_run,
+    fail_parse_run,
+)
+from app.notes.assets import AssetUnavailable, storage_path
 
 
 def claim_next_asset_job() -> str | None:
@@ -36,49 +39,59 @@ def process_asset_job(job_id: str) -> None:
         if job is None or job.status != "processing":
             return
         asset = db.get(Asset, job.asset_id)
-        if asset is None or asset.state != "ready":
-            job.status = "failed"
-            job.error_code = "asset_unavailable"
-            job.error_message = "原始图片资源当前不可用"
-            job.finished_at = datetime.now(UTC)
-            job.updated_at = job.finished_at
-            db.add(AssetParseResult(
-                id=new_id(), asset_id=job.asset_id, job_id=job.id,
-                provider="none", parser_version="image-parse-v1", status="failed",
-                result_json=None, warnings_json=json.dumps([job.error_message], ensure_ascii=False),
-                created_at=job.finished_at, completed_at=job.finished_at,
-            ))
-            db.commit()
-            return
+        run_id: str | None = None
         try:
-            text, provider, confidence = ocr_image(storage_path(asset), page_number=1)
-            result = {"text": text, "confidence": confidence, "kind": "ocr_text"}
-            warnings = [] if text else ["OCR 未识别到文字；图片仍保留，可人工查看或重试"]
-            job.status = "completed" if text else "completed_with_warnings"
+            if asset is None or asset.state != "ready":
+                raise DocumentProcessingError(
+                    "原始图片资源当前不可用", code="asset_unavailable",
+                )
+            try:
+                source_path = storage_path(asset)
+            except AssetUnavailable as exc:
+                raise DocumentProcessingError(str(exc), code="asset_missing") from exc
+
+            run = create_parse_run(db, asset=asset)
+            run_id = run.id
+            db.commit()
+            outcome = execute_parse_run(db, run.id, source_path=source_path,
+                                        title=asset.original_name)
+            quality = outcome.ir.quality
             job.error_code = None
             job.error_message = None
-        except OCRUnavailable as exc:
-            provider = "tesseract"
-            result = None
-            warnings = [str(exc)]
+            if quality.status in {"complete", "partial"} and quality.generation_allowed:
+                job.status = "completed"
+            elif quality.status in {"needs_ocr", "needs_vision", "partial"}:
+                job.status = "completed_with_warnings"
+                job.error_code = (
+                    "ocr_unavailable" if quality.status == "needs_ocr"
+                    else "vision_unavailable" if quality.status == "needs_vision"
+                    else "parse_quality_partial"
+                )
+                job.error_message = quality.generation_block_reason or "图片解析不完整，可人工核对"
+            else:
+                job.status = "failed"
+                job.error_code = "parse_quality_insufficient"
+                job.error_message = quality.generation_block_reason or "图片没有可用内容"
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            job = db.get(AssetProcessingJob, job_id)
+            if job is None:
+                return
+            code = exc.code if isinstance(exc, DocumentProcessingError) else "image_parse_failed"
+            message = str(exc) or type(exc).__name__
+            if run_id:
+                try:
+                    fail_parse_run(db, run_id, code=code, message=message)
+                except Exception:  # pragma: no cover
+                    db.rollback()
             job.status = "failed"
-            job.error_code = "ocr_unavailable" if "未启用" in str(exc) or "依赖未安装" in str(exc) else "ocr_failed"
-            job.error_message = str(exc)
-        except Exception as exc:  # provider/parser boundary; preserve the input Asset.
-            provider = "tesseract"
-            result = None
-            warnings = [f"图片解析失败：{type(exc).__name__}"]
-            job.status = "failed"
-            job.error_code = "image_parse_failed"
-            job.error_message = warnings[0]
-        finished = datetime.now(UTC)
-        job.finished_at = finished
-        job.updated_at = finished
-        db.add(AssetParseResult(
-            id=new_id(), asset_id=asset.id, job_id=job.id, provider=provider,
-            parser_version="image-parse-v1", status=job.status,
-            result_json=json.dumps(result, ensure_ascii=False) if result is not None else None,
-            warnings_json=json.dumps(warnings, ensure_ascii=False),
-            created_at=finished, completed_at=finished,
-        ))
-        db.commit()
+            job.error_code = code
+            job.error_message = message[:2000]
+            db.commit()
+        finally:
+            job = db.get(AssetProcessingJob, job_id)
+            if job is not None:
+                job.finished_at = datetime.now(UTC)
+                job.updated_at = job.finished_at
+                db.commit()

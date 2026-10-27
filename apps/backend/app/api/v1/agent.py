@@ -32,7 +32,6 @@ from app.db.database import get_db
 from app.db.models import (
     ConversationMessage,
     Material,
-    Note,
     Notebook,
 )
 from app.schemas.api import AgentMessageCreate
@@ -42,6 +41,7 @@ from app.services.conversations import (
     derive_conversation_title,
     persist_assistant_message,
 )
+from app.services.course_scope import material_in_course
 
 router = APIRouter()
 
@@ -69,27 +69,28 @@ def send_agent_message(
             raise HTTPException(status_code=409, detail="该问题已提交过，请勿重复发送")
 
     selected = db.get(Material, payload.material_id) if payload.material_id else None
-    if payload.material_id and (selected is None or selected.course_id != conversation.course_id or selected.deleted_at is not None):
+    if payload.material_id and (
+        selected is None or selected.deleted_at is not None
+        or not material_in_course(db, selected, conversation.course_id)
+    ):
         raise HTTPException(status_code=404, detail="所选资料不属于当前课程")
 
     reading = payload.reading_context
-    reading_note_id = reading.note_id if reading else None
-    if reading_note_id:
-        note = db.get(Note, reading_note_id)
-        if note is None or note.course_id != conversation.course_id:
-            raise HTTPException(status_code=404, detail="正在阅读的笔记不属于当前课程")
-    if payload.scope == "note" and not reading_note_id:
-        raise HTTPException(status_code=422, detail="锁定当前笔记模式需要先打开一篇笔记")
-
+    if reading is not None and reading.note_id:
+        raise HTTPException(
+            status_code=422,
+            detail="分节笔记上下文已退役；请使用整篇笔记上下文（notebook_context）",
+        )
     notebook_context = payload.notebook_context
+    locked_notebook_id = notebook_context.notebook_id if notebook_context else None
+    if payload.scope == "note" and not locked_notebook_id:
+        raise HTTPException(status_code=422, detail="锁定当前笔记模式需要先打开一本笔记")
+
     notebook_title = ""
     if notebook_context is not None:
-        if reading is not None:
-            raise HTTPException(status_code=422, detail="整篇笔记上下文不能与分节笔记上下文同时提交")
-        if payload.scope == "note":
-            raise HTTPException(status_code=422, detail="整篇笔记暂不支持“锁定当前小节”范围")
         book = db.get(Notebook, notebook_context.notebook_id)
-        if (book is None or (book.course_id is not None and book.course_id != conversation.course_id)
+        if (book is None or book.deleted_at is not None
+                or book.course_id != conversation.course_id
                 or notebook_context.course_id != conversation.course_id):
             raise HTTPException(status_code=404, detail="正在编辑的笔记不存在或无法访问")
         if book.document_revision != notebook_context.revision:
@@ -109,8 +110,8 @@ def send_agent_message(
         conversation.default_scope = new_scope
         conversation.scope = new_scope
         if new_scope == "note":
-            conversation.note_id = reading_note_id
-            conversation.note_title = (reading.note_title if reading else None) or conversation.note_title
+            conversation.note_id = locked_notebook_id
+            conversation.note_title = notebook_title or (reading.note_title if reading else None) or conversation.note_title
         else:
             conversation.note_id = None
             conversation.note_title = None
@@ -147,8 +148,8 @@ def send_agent_message(
                 course_name=course.name,
                 question=payload.question,
                 scope=payload.scope,
-                locked_note_id=reading_note_id if payload.scope == "note" else None,
-                editable_note_id=reading_note_id,
+                locked_notebook_id=locked_notebook_id if payload.scope == "note" else None,
+                editable_notebook_id=locked_notebook_id,
                 reading_context=reading_section,
                 material_id=payload.material_id,
                 allow_web=payload.allow_web,

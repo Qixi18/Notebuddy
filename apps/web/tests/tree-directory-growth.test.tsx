@@ -58,20 +58,20 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
   // Changing the notebook count selects a new crown silhouette. The existing
   // knowledge point keeps its real identity and notebook ownership as it moves.
   const oldLeaf = screen.getByRole('button', { name: '打开知识点：旧知识点' })
-  expect(oldLeaf.closest('[data-note-id]')?.getAttribute('data-note-id')).toBe('old-note')
+  expect(oldLeaf.closest('[data-note-id]')?.getAttribute('data-note-id')).toBe(JSON.stringify(['old-book', 'old-note']))
   expect(oldLeaf.closest('[data-notebook-id]')?.getAttribute('data-notebook-id')).toBe(old.id)
   expect(container.querySelectorAll('.kt-branch[data-notebook-id="old-book"]')).toHaveLength(1)
   expect(container.querySelectorAll('.kt-branch[data-notebook-id="new-book"]')).toHaveLength(1)
   expect(container.querySelector('.kt-canvas > g')?.getAttribute('transform')).toBe(camera)
 })
-test.each(['home', 'forest'])('%s grows a real generated Note in the same scene and stops polling when its pending material completes', async mode => {
+test.each(['home', 'forest'])('%s grows generated Notebook body in the same scene and stops polling when processing finishes', async mode => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)
   let generated = false
   const course = { id: 'c', name: '课程', created_at: '2026-10-15', last_opened_at: null }
   const section = { id: 'real-generated-note', notebook_id: 'book', tree_slot: 0, material_id: 'material', title: '成功生成的知识点' }
   vi.mocked(api.getForest).mockResolvedValue({ courses: [{ course_id: 'c', name: '课程', semester: 1, position: 0, level: 'foundation', learning_state: 'learning', prerequisites: [], revision: 0 }] } as never)
-  vi.mocked(api.getCourseTree).mockImplementation(async id => ({ course_id: id, notebooks: [{ id: 'book', course_id: id, title: '笔记本', tree_slot: 0, order_revision: 0, chapters: [{ id: 'material', title: '等待处理的第一讲', status: generated ? 'completed' : 'pending', sections: generated ? [section] : [] }], historical_sections: [], removed_chapters: [] }] }) as never)
+  vi.mocked(api.getCourseTree).mockImplementation(async id => ({ course_id: id, notebooks: [{ id: 'book', course_id: id, title: '笔记本', tree_slot: 0, order_revision: 0, processing: !generated, chapters: generated ? [{ id: 'body', title: '正文小节', status: 'parsed', sections: [section] }] : [], historical_sections: [], removed_chapters: [] }] }) as never)
   const { container } = render(<MemoryRouter initialEntries={[mode === 'home' ? '/' : '/forest']}><WorkspaceProvider value={{ courses: [course], coursesLoading: false, refreshCourses: vi.fn() } as unknown as WorkspaceContextValue}>{mode === 'home' ? <HomePage /> : <ForestPage />}</WorkspaceProvider></MemoryRouter>)
   await screen.findByRole('button', { name: '续读笔记本：笔记本' })
   expect(container.querySelector('[data-note-id="real-generated-note"]')).toBeNull()
@@ -81,7 +81,7 @@ test.each(['home', 'forest'])('%s grows a real generated Note in the same scene 
   generated = true // The persistent material job has now committed the real directory.
   await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
   const leaf = await screen.findByRole('button', { name: '打开知识点：成功生成的知识点' })
-  expect(leaf.closest('[data-note-id]')?.getAttribute('data-note-id')).toBe('real-generated-note')
+  expect(leaf.closest('[data-note-id]')?.getAttribute('data-note-id')).toBe(JSON.stringify(['book', 'real-generated-note']))
   expect(leaf.closest('[data-notebook-id]')?.getAttribute('data-notebook-id')).toBe('book')
   expect(container.querySelector('.knowledge-tree-scene')).toBe(scene)
   expect(container.querySelector('.kt-canvas > g')?.getAttribute('transform')).toBe(camera)
@@ -99,7 +99,7 @@ test.each(['home', 'forest'])('%s receives automatic vines after background comp
   vi.mocked(api.getLatestForestJob).mockImplementation(async id => id === 'a' ? { id: 'job', status: 'processing', progress: 10 } as never : null)
   vi.mocked(api.getForestJob).mockResolvedValue({ id: 'job', status: 'completed', progress: 100 } as never)
   let completed = false
-  vi.mocked(api.getForestRelations).mockImplementation(async () => completed ? [{ id: 'v', source_course_id: 'a', target_course_id: 'b', source_note_id: 'a-n', target_note_id: 'b-n', source_title: 'a', target_title: 'b', relation_type: 'related', status: 'confirmed', origin: 'ai', activation_mode: 'automatic', stale: false }] as never : [])
+  vi.mocked(api.getForestRelations).mockImplementation(async () => completed ? [{ id: 'v', source_course_id: 'a', target_course_id: 'b', source_notebook_id: 'a-book', target_notebook_id: 'b-book', source_block_id: 'a-n', target_block_id: 'b-n', source_title: 'a', target_title: 'b', relation_type: 'related', status: 'confirmed', origin: 'ai', activation_mode: 'automatic', stale: false }] as never : [])
   const { container } = render(<MemoryRouter initialEntries={[mode === 'home' ? '/' : '/forest']}><WorkspaceProvider value={{ courses, coursesLoading: false, refreshCourses: vi.fn() } as unknown as WorkspaceContextValue}>{mode === 'home' ? <HomePage /> : <ForestPage />}</WorkspaceProvider></MemoryRouter>)
   await screen.findByRole('button', { name: '续读笔记本：a' })
   await waitFor(() => expect(api.getLatestForestJob).toHaveBeenCalledWith('a'))

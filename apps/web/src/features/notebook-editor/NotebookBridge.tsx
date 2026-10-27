@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { SelectionAnchor } from './NotebookEditor'
+import type { DocNode } from './document'
 
 export type NotebookBridgeValue = {
   courseId: string
@@ -9,6 +10,8 @@ export type NotebookBridgeValue = {
   editVersion: number
   excerpt: string
   selection: SelectionAnchor | null
+  isDirty: () => boolean
+  adoptDocument: (content: DocNode, revision: number, updatedAt: string, expectedEditVersion: number) => boolean
   /** Insert AI output after (or replacing) a captured selection. Returns false when the anchor moved. */
   insertAI: (text: string, mode: 'after' | 'replace', anchor: SelectionAnchor | null, expectedRevision?: number, expectedEditVersion?: number) => boolean
 }

@@ -26,6 +26,36 @@ export type Material = {
   deleted_at?: string | null
 }
 
+export type CourseOverviewMaterial = {
+  id: string
+  title: string
+  filename: string
+  status: string
+  page_count: number
+  asset_id: string | null
+  parse_run_id: string | null
+  quality_status: string | null
+  generation_allowed: boolean
+  quality_reason: string | null
+  deleted_at: string | null
+}
+
+export type CourseOverview = {
+  course_id: string
+  name: string
+  counts: {
+    notebooks: number
+    sections: number
+    materials: number
+    materials_needing_attention: number
+    generation_running: number
+    generation_failed: number
+  }
+  notebooks: Array<{ id: string; title: string; revision: number; sections: number; updated_at: string }>
+  materials: CourseOverviewMaterial[]
+  generation_jobs: Array<{ id: string; notebook_id: string; status: string; error_code: string | null; error_message: string | null; generator: string; created_at: string; finished_at: string | null }>
+}
+
 export type Job = {
   id: string
   material_id: string
@@ -189,6 +219,9 @@ export type NotebookGenerationJob = {
   created_at: string
   updated_at: string
   finished_at: string | null
+  generator?: string | null
+  parse_run_ids?: string[]
+  plan?: { new_count?: number; extend_count?: number; skip_count?: number; batches?: number } | null
   candidate: NotebookGenerationCandidate | null
 }
 
@@ -257,7 +290,7 @@ export type Note = {
   updated_at: string
 }
 
-export type NotebookSection = Pick<Note, 'id' | 'knowledge_node_id' | 'material_id' | 'section_key' | 'section_order' | 'title' | 'revision_number' | 'user_locked' | 'updated_at'>
+export type NotebookSection = Pick<Note, 'id' | 'knowledge_node_id' | 'material_id' | 'section_key' | 'section_order' | 'title' | 'revision_number' | 'user_locked' | 'updated_at'> & { block_id?: string }
 export type NotebookChapter = { id: string; title: string; chapter_order: number; status: string; deleted_at: string | null; sections: NotebookSection[] }
 export type Notebook = { course_id: string; title: string; order_revision: number; chapters: NotebookChapter[]; historical_sections: NotebookSection[]; removed_chapters: NotebookChapter[] }
 
@@ -265,6 +298,7 @@ export type Notebook = { course_id: string; title: string; order_revision: numbe
 export type SectionRead = NotebookSection & { notebook_id: string; tree_slot: number }
 export type ChapterRead = Omit<NotebookChapter, 'sections'> & { sections: SectionRead[] }
 export type NotebookRead = Omit<Notebook, 'chapters' | 'historical_sections' | 'removed_chapters'> & {
+  processing?: boolean
   id: string; tree_slot: number; chapters: ChapterRead[]
   historical_sections: SectionRead[]; removed_chapters: ChapterRead[]
 }
@@ -295,6 +329,22 @@ export type NotebookDocumentResponse = {
   revision: number
   updated_at: string
   warning?: string | null
+}
+export type NotebookEditOperation = {
+  op: 'append' | 'insert_after_heading' | 'replace_section' | 'remove_section'
+  anchor?: string
+  content?: string
+}
+export type NotebookEditSuggestion = {
+  id: string
+  notebook_id: string
+  base_revision: number
+  rationale: string
+  operations: NotebookEditOperation[]
+  proposed_content: DocNode | null
+  status: string
+  created_at: string
+  reviewed_at: string | null
 }
 export type NotebookAttachment = {
   id: string

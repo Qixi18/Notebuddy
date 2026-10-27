@@ -40,6 +40,9 @@ class Settings:
     embedding_base_url: str | None
     embedding_api_key: str | None
     embedding_model: str | None
+    notebook_generator: str = "deepseek"
+    generation_batch_chars: int = 18_000
+    generation_max_chars: int = 120_000
     allowed_extensions: tuple[str, ...] = (".pptx", ".pdf", ".docx")
 
     @property
@@ -74,6 +77,9 @@ settings = Settings(
     embedding_base_url=os.getenv("EMBEDDING_BASE_URL") or None,
     embedding_api_key=os.getenv("EMBEDDING_API_KEY") or None,
     embedding_model=os.getenv("EMBEDDING_MODEL") or None,
+    notebook_generator=(os.getenv("NOTEBOOK_GENERATOR", "deepseek").strip().lower() or "deepseek"),
+    generation_batch_chars=max(2_000, int(os.getenv("NOTEBOOK_GENERATION_BATCH_CHARS", "18000"))),
+    generation_max_chars=max(10_000, int(os.getenv("NOTEBOOK_GENERATION_MAX_CHARS", "120000"))),
     allowed_extensions=tuple(
         item.strip().lower() for item in os.getenv("NOTEBOOK_ALLOWED_EXTENSIONS", ".pptx,.pdf,.docx").split(",") if item.strip()
     ) or (".pptx",),

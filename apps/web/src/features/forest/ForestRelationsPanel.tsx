@@ -1,397 +1,162 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+
 import { api } from '../../api'
-import type { CourseTree, NoteSourceRef } from '../../types'
-import { ForestDialog } from './ForestDialog'
-import {
-  relationLabels,
-  type CrossCourseRelation,
-  type ForestCourse,
-  type RelationType,
-} from './types'
-
-type RelationSection = { id: string; title: string; bookTitle: string }
-function allBookSections(tree: CourseTree): RelationSection[] {
-  return tree.notebooks.flatMap(book => [...book.chapters.flatMap(chapter => chapter.sections), ...book.historical_sections].map(section => ({ id: section.id, title: section.title, bookTitle: book.title })))
-}
-
-// Relation summaries do not carry a material ID; a section-only URL resolves the exact note in its real chapter.
-function forestNotePath(courseId: string, section: { id: string; material_id: string | null }) {
-  return `/courses/${courseId}/notes/${encodeURIComponent(section.id)}`
-}
-
-function RelationEvidence({ relation }: { relation: CrossCourseRelation }) {
-  const [sources, setSources] = useState<NoteSourceRef[]>()
-  const [error, setError] = useState<string>()
-  return (
-    <details
-      className="forest-relation-evidence"
-      onToggle={(event) => {
-        if (!event.currentTarget.open || sources || error) return
-        void Promise.all([
-          api.getNoteSources(relation.source_note_id),
-          api.getNoteSources(relation.target_note_id),
-        ])
-          .then(([a, b]) =>
-            setSources(
-              [...a, ...b].filter((source) =>
-                [...relation.source_ref_ids, ...relation.target_ref_ids].includes(source.id),
-              ),
-            ),
-          )
-          .catch((cause) => setError(cause instanceof Error ? cause.message : '来源读取失败'))
-      }}
-    >
-      <summary>
-        核对两端来源 · {relation.source_ref_ids.length + relation.target_ref_ids.length} 条
-      </summary>
-      {error ? (
-        <p role="alert">{error}</p>
-      ) : sources ? (
-        sources.length ? (
-          sources.map((source) => (
-            <blockquote key={source.id}>
-              <p>{source.quote}</p>
-              <small>
-                {source.location_label ?? `第 ${source.page_number} 页`}
-                {source.status && source.status !== 'valid' ? ` · ${source.status}` : ''}
-              </small>
-            </blockquote>
-          ))
-        ) : (
-          <p>没有当前可核对的来源，请打开笔记检查引用。</p>
-        )
-      ) : (
-        <p role="status">正在读取来源…</p>
-      )}
-    </details>
-  )
-}
+import type { ForestCourse, NotebookRelation, RelationType } from './types'
+import { relationLabels } from './types'
 
 export function ForestRelationsPanel({
-  relations,
   courses,
-  onChange,
+  relations,
   onClose,
-  onLocate,
+  onChanged,
   selectedRelationId,
+  onLocate,
 }: {
-  relations: CrossCourseRelation[]
   courses: ForestCourse[]
-  onChange: () => void
+  relations: NotebookRelation[]
   onClose: () => void
-  onLocate?: (relation: CrossCourseRelation) => void
+  onChanged: () => void
   selectedRelationId?: string
+  onLocate?: (relation: NotebookRelation) => void
 }) {
-  const [filter, setFilter] = useState<'pending' | 'confirmed' | 'rejected'>('confirmed')
-  const [manual, setManual] = useState(false)
+  const [notebooks, setNotebooks] = useState<Array<{
+    id: string; title: string; courseId: string; sections: Array<{ id: string; title: string }>
+  }>>([])
   const [sourceCourse, setSourceCourse] = useState('')
   const [targetCourse, setTargetCourse] = useState('')
-  const [sourceSections, setSourceSections] = useState<RelationSection[]>([])
-  const [targetSections, setTargetSections] = useState<RelationSection[]>([])
-  const [sourceNote, setSourceNote] = useState('')
-  const [targetNote, setTargetNote] = useState('')
-  const [type, setType] = useState<RelationType>('related')
+  const [sourceNotebook, setSourceNotebook] = useState('')
+  const [targetNotebook, setTargetNotebook] = useState('')
+  const [sourceBlock, setSourceBlock] = useState('')
+  const [targetBlock, setTargetBlock] = useState('')
+  const [relationType, setRelationType] = useState<RelationType>('related')
   const [reason, setReason] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+
   useEffect(() => {
     let active = true
-    setSourceSections([])
-    setTargetSections([])
-    setSourceNote('')
-    setTargetNote('')
-    if (!manual || !sourceCourse || !targetCourse || sourceCourse === targetCourse) return
-    setLoading(true)
-    void Promise.all([api.getCourseTree(sourceCourse), api.getCourseTree(targetCourse)])
-      .then(([a, b]) => {
-        if (!active) return
-        setSourceSections(allBookSections(a))
-        setTargetSections(allBookSections(b))
-      })
-      .catch((cause) => {
-        if (active) setError(cause instanceof Error ? cause.message : '笔记目录读取失败')
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [manual, sourceCourse, targetCourse])
-  async function act(action: () => Promise<unknown>) {
+    const ids = [...new Set([sourceCourse, targetCourse].filter(Boolean))]
+    void Promise.all(ids.map(async (courseId) => {
+      const tree = await api.getCourseTree(courseId)
+      return tree.notebooks.filter(book => book.course_id === courseId).map(book => ({
+        id: book.id, title: book.title, courseId,
+        sections: book.chapters.filter(chapter => !chapter.deleted_at).flatMap(chapter => chapter.sections)
+          .concat(book.historical_sections).map(section => ({ id: section.block_id ?? section.id, title: section.title })),
+      }))
+    })).then((groups) => { if (active) setNotebooks(groups.flat()) })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '笔记目录读取失败') })
+    return () => { active = false }
+  }, [sourceCourse, targetCourse])
+
+  const ordered = useMemo(() => [...relations].sort((a, b) =>
+    Number(b.id === selectedRelationId) - Number(a.id === selectedRelationId)), [relations, selectedRelationId])
+
+  const sourceOptions = useMemo(
+    () => notebooks.filter((book) => book.courseId === sourceCourse),
+    [notebooks, sourceCourse],
+  )
+  const targetOptions = useMemo(
+    () => notebooks.filter((book) => book.courseId === targetCourse && book.courseId !== sourceCourse),
+    [notebooks, targetCourse, sourceCourse],
+  )
+
+  async function create() {
+    if (!sourceNotebook || !targetNotebook) { setError('请选择两本不同课程中的笔记'); return }
+    if (!reason.trim()) { setError('请填写关联依据'); return }
     setBusy(true)
-    setError(undefined)
     try {
-      await action()
-      onChange()
-      return true
+      await api.createForestRelation({
+        source_notebook_id: sourceNotebook, target_notebook_id: targetNotebook,
+        relation_type: relationType, reason: reason.trim(),
+        source_block_id: sourceBlock || null, target_block_id: targetBlock || null,
+      })
+      setReason('')
+      setSourceNotebook('')
+      setTargetNotebook('')
+      setSourceBlock('')
+      setTargetBlock('')
+      setError(undefined)
+      onChanged()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '关联操作失败')
-      return false
-    } finally {
-      setBusy(false)
-    }
+      setError(cause instanceof Error ? cause.message : '关系创建失败')
+    } finally { setBusy(false) }
   }
-  async function create(event: FormEvent) {
-    event.preventDefault()
-    if (
-      await act(() =>
-        api.createForestRelation({
-          source_note_id: sourceNote,
-          target_note_id: targetNote,
-          relation_type: type,
-          reason: reason.trim(),
-        }),
-      )
-    ) {
-      setManual(false)
-      setFilter('confirmed')
-    }
+
+  async function remove(id: string) {
+    setBusy(true)
+    try { await api.deleteForestRelation(id); onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '关系删除失败') }
+    finally { setBusy(false) }
   }
-  const available = courses.filter((course) => course.note_count > 0)
+
+  async function confirm(id: string) {
+    setBusy(true)
+    try { await api.refreshForestRelation(id); setError(undefined); onChanged() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '关联核对失败') }
+    finally { setBusy(false) }
+  }
+
   return (
-    <ForestDialog title="跨课程藤蔓" onClose={onClose} wide>
-      <p className="forest-dialog-intro">
-        连接两门课程中真实的笔记。自动关联通过版本和来源校验后生效，属于模型推断；隐藏后不会自动恢复。
-      </p>
-      <div className="forest-relation-toolbar">
-        <div role="group" aria-label="关联状态">
-          {(['pending', 'confirmed', 'rejected'] as const).map((status) => (
-            <button
-              type="button"
-              className={filter === status && !manual ? 'active' : ''}
-              onClick={() => {
-                setFilter(status)
-                setManual(false)
-              }}
-              key={status}
-            >
-              {status === 'pending' ? '待校验' : status === 'confirmed' ? '已生效' : '已隐藏'} (
-              {relations.filter((r) => r.status === status).length})
-            </button>
+    <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="跨课关联">
+      <div className="nb-modal is-wide">
+        <div className="nb-modal-head"><h2>跨课关联</h2><button type="button" onClick={onClose} aria-label="关闭">×</button></div>
+        <p className="muted-copy">连接不同课程的笔记，记录它们之间的联系和依据。</p>
+        <div className="forest-relation-form">
+          <label>来源课程<select value={sourceCourse} onChange={(event) => { setSourceCourse(event.target.value); setSourceNotebook(''); setSourceBlock('') }}><option value="">选择课程</option>{courses.map((course) => <option key={course.course_id} value={course.course_id}>{course.name}</option>)}</select></label>
+          <label>来源笔记<select value={sourceNotebook} onChange={(event) => { setSourceNotebook(event.target.value); setSourceBlock('') }}><option value="">选择笔记</option>{sourceOptions.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
+          <label>来源小节<select value={sourceBlock} onChange={event => setSourceBlock(event.target.value)}><option value="">整本笔记</option>{sourceOptions.find(book => book.id === sourceNotebook)?.sections.map(section => <option key={section.id} value={section.id}>{section.title}</option>)}</select></label>
+          <label>关系类型<select value={relationType} onChange={(event) => setRelationType(event.target.value as RelationType)}>{Object.entries(relationLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>目标课程<select value={targetCourse} onChange={(event) => { setTargetCourse(event.target.value); setTargetNotebook(''); setTargetBlock('') }}><option value="">选择课程</option>{courses.filter((course) => course.course_id !== sourceCourse).map((course) => <option key={course.course_id} value={course.course_id}>{course.name}</option>)}</select></label>
+          <label>目标笔记<select value={targetNotebook} onChange={(event) => { setTargetNotebook(event.target.value); setTargetBlock('') }}><option value="">选择笔记</option>{targetOptions.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
+          <label>目标小节<select value={targetBlock} onChange={event => setTargetBlock(event.target.value)}><option value="">整本笔记</option>{targetOptions.find(book => book.id === targetNotebook)?.sections.map(section => <option key={section.id} value={section.id}>{section.title}</option>)}</select></label>
+          <label className="forest-relation-reason">关联依据<textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={2} maxLength={4000} /></label>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void create()}>{busy ? '保存中…' : '建立关联'}</button>
+        </div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <div className="forest-relation-list">
+          {ordered.length === 0 ? <p className="muted-copy">还没有跨课关联。</p> : ordered.map((relation) => (
+            <article className="forest-relation-row" key={relation.id}>
+              <h3>{relation.source_title} → {relation.target_title}</h3>
+              <Link to={`/courses/${encodeURIComponent(relation.source_course_id)}/notebooks/${encodeURIComponent(relation.source_notebook_id)}${relation.source_block_id ? `?section=${encodeURIComponent(relation.source_block_id)}` : ''}`}>{relation.source_course_name} · {relation.source_title}</Link>
+              <strong>{relationLabels[relation.relation_type]} · {relation.origin === 'ai' ? '自动关联（模型推断）' : '手动关联'}</strong>
+              <Link to={`/courses/${encodeURIComponent(relation.target_course_id)}/notebooks/${encodeURIComponent(relation.target_notebook_id)}${relation.target_block_id ? `?section=${encodeURIComponent(relation.target_block_id)}` : ''}`}>{relation.target_course_name} · {relation.target_title}</Link>
+              <small>{relation.reason}</small>
+              {(relation.source_block_id || relation.target_block_id) && <RelationSources relation={relation} />}
+              {relation.stale && <><p role="status">关联小节的正文已变化，请核对关联依据。</p><button type="button" disabled={busy} onClick={() => void confirm(relation.id)}>确认关联仍有效</button></>}
+              {onLocate && <button type="button" className="text-button" onClick={() => onLocate(relation)}>在树中定位端点</button>}
+              <button type="button" className="text-button" disabled={busy} onClick={() => void remove(relation.id)}>{relation.origin === 'ai' ? '隐藏关联' : '删除'}</button>
+            </article>
           ))}
         </div>
-        <button type="button" className="forest-action" onClick={() => setManual(true)}>
-          手动连接笔记
-        </button>
       </div>
-      {error && (
-        <p role="alert" className="forest-error">
-          {error}
-        </p>
-      )}
-      {manual ? (
-        <form className="forest-manual-relation" onSubmit={(event) => void create(event)}>
-          {available.length < 2 && <p>至少两门课程有笔记后，才能建立跨课程藤蔓。</p>}
-          <div className="forest-form-pair">
-            <label>
-              起点课程
-              <select
-                value={sourceCourse}
-                onChange={(event) => setSourceCourse(event.target.value)}
-                required
-              >
-                <option value="">选择课程</option>
-                {available.map((course) => (
-                  <option value={course.course_id} key={course.course_id}>
-                    {course.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              终点课程
-              <select
-                value={targetCourse}
-                onChange={(event) => setTargetCourse(event.target.value)}
-                required
-              >
-                <option value="">选择另一门课程</option>
-                {available
-                  .filter((course) => course.course_id !== sourceCourse)
-                  .map((course) => (
-                    <option value={course.course_id} key={course.course_id}>
-                      {course.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
-          {loading && <p role="status">正在读取笔记目录…</p>}
-          <div className="forest-form-pair">
-            <label>
-              起点笔记
-              <select
-                value={sourceNote}
-                onChange={(event) => setSourceNote(event.target.value)}
-                required
-                disabled={!sourceSections.length}
-              >
-                <option value="">选择真实笔记</option>
-                {sourceSections.map((section) => (
-                  <option value={section.id} key={section.id}>
-                    {section.bookTitle} · {section.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              终点笔记
-              <select
-                value={targetNote}
-                onChange={(event) => setTargetNote(event.target.value)}
-                required
-                disabled={!targetSections.length}
-              >
-                <option value="">选择真实笔记</option>
-                {targetSections.map((section) => (
-                  <option value={section.id} key={section.id}>
-                    {section.bookTitle} · {section.title}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label>
-            关系
-            <select value={type} onChange={(event) => setType(event.target.value as RelationType)}>
-              {Object.entries(relationLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            连接理由
-            <textarea
-              required
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              rows={3}
-              maxLength={2000}
-              placeholder="这两个知识点如何联系？"
-            />
-          </label>
-          <button
-            className="forest-action"
-            disabled={
-              busy || !sourceNote || !targetNote || !reason.trim() || sourceCourse === targetCourse
-            }
-            type="submit"
-          >
-            {busy ? '正在连接…' : '建立藤蔓'}
-          </button>
-        </form>
-      ) : (
-        <div className="forest-relation-list">
-          {relations
-            .filter((relation) => relation.status === filter)
-            .sort((a, b) => Number(b.id === selectedRelationId) - Number(a.id === selectedRelationId))
-            .map((relation) => (
-              <article key={relation.id} className={`forest-relation-card${relation.id === selectedRelationId ? ' forest-relation-selected' : ''}`}>
-                <span className="forest-relation-kind">
-                  {relationLabels[relation.relation_type]} ·{' '}
-                  {relation.activation_mode === 'automatic' ? '自动关联 · 模型推断' : relation.status === 'pending' ? '等待后台校验 · 模型推断' : '手动关联'}
-                </span>
-                <h3>
-                  {relation.source_title} <span aria-hidden="true">↝</span> {relation.target_title}
-                </h3>
-                <p className="forest-relation-courses">
-                  {relation.source_course_name} / {relation.target_course_name}
-                </p>
-                <p>{relation.reason}</p>
-                <div className="forest-relation-note-links">
-                  <a
-                    href={forestNotePath(relation.source_course_id, {
-                      id: relation.source_note_id,
-                      material_id: null,
-                    })}
-                  >
-                    核对起点笔记
-                  </a>
-                  <a
-                    href={forestNotePath(relation.target_course_id, {
-                      id: relation.target_note_id,
-                      material_id: null,
-                    })}
-                  >
-                    核对终点笔记
-                  </a>
-                </div>
-                {relation.stale && (
-                  <p className="forest-stale">笔记已修改，需重新生成并核对关联；当前不绘制藤蔓。</p>
-                )}
-                <RelationEvidence key={JSON.stringify([relation.id, relation.source_revision, relation.target_revision, relation.source_ref_ids, relation.target_ref_ids, relation.stale, relation.evidence_fingerprint])} relation={relation} />
-                {relation.stale && (
-                  <button
-                    className="forest-action"
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(() =>
-                        api.createForestRelation({
-                          source_note_id: relation.source_note_id,
-                          target_note_id: relation.target_note_id,
-                          relation_type: relation.relation_type,
-                          reason: relation.reason,
-                        }),
-                      )
-                    }
-                  >
-                    重新核对并连接
-                  </button>
-                )}
-                <div className="forest-relation-actions">
-                  {onLocate && relation.status === 'confirmed' && !relation.stale && <button type="button" onClick={() => onLocate(relation)}>在树中定位端点</button>}
-                  {filter === 'rejected' ? (
-                    <button type="button" disabled={busy} onClick={() => void act(() => api.createForestRelation({ source_note_id: relation.source_note_id, target_note_id: relation.target_note_id, relation_type: relation.relation_type, reason: relation.reason }))}>主动恢复并核对来源</button>
-                  ) : filter === 'pending' ? (
-                    <>
-                      <button
-                        className="forest-action"
-                        type="button"
-                        disabled={busy || relation.stale}
-                        onClick={() =>
-                          void act(() => api.reviewForestRelation(relation.id, 'confirm'))
-                        }
-                      >
-                        确认关联
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          void act(() => api.reviewForestRelation(relation.id, 'reject'))
-                        }
-                      >
-                        隐藏关联
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void act(() => api.deleteForestRelation(relation.id))}
-                    >
-                      隐藏关联
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))}
-          {!relations.some((relation) => relation.status === filter) && (
-            <p className="forest-empty-message">
-              {filter === 'pending'
-                ? '暂时没有待校验的关联。有效自动关联会直接生效。'
-                : filter === 'confirmed'
-                  ? '还没有跨课程藤蔓。可以手动连接两片笔记叶子。'
-                  : '没有已隐藏的关联。'}
-            </p>
-          )}
-        </div>
-      )}
-    </ForestDialog>
+    </div>
   )
+}
+
+function RelationSources({ relation }: { relation: NotebookRelation }) {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState<Array<{ asset_name: string; quote: string; page_number: number; parse_run_id: string; status: string }>>()
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    setRows(undefined)
+    setError(undefined)
+    void Promise.all([
+      relation.source_block_id ? api.getNotebookBlockSources(relation.source_notebook_id, relation.source_block_id) : Promise.resolve([]),
+      relation.target_block_id ? api.getNotebookBlockSources(relation.target_notebook_id, relation.target_block_id) : Promise.resolve([]),
+    ]).then(groups => { if (active) setRows(groups.flat()) })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : '来源读取失败') })
+    return () => { active = false }
+  }, [open, relation.source_notebook_id, relation.target_notebook_id, relation.source_block_id,
+    relation.target_block_id, relation.source_fingerprint, relation.target_fingerprint, relation.stale])
+  return <details onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>核对两端来源</summary>
+    {open && (error ? <p role="alert">{error}</p> : !rows ? <p role="status">正在读取来源…</p>
+      : rows.length === 0 ? <p>这些小节尚未关联原始资料，请直接核对笔记正文。</p>
+        : rows.map((row, index) => <blockquote key={`${row.parse_run_id}:${index}`}>
+          <p>{row.quote}</p><small>{row.asset_name} · 第 {row.page_number} 页{row.status !== 'active' ? ' · 来源待核对' : ''}</small>
+        </blockquote>))}
+  </details>
 }

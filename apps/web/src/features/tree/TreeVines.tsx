@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { CrossCourseRelation } from '../forest/types'
+import type { TreeRelation } from '../forest/types'
 import { ForestDialog } from '../forest/ForestDialog'
 import type { Point } from './treeGeometry'
 import type { CourseCanopy } from './courseCanopyGeometry'
@@ -45,8 +45,8 @@ function GroupPreview({ preview, id, title, text, onEnter, onLeave }: { preview:
 }
 
 export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, noteBooks = new Map(), courseGeometry, viewKey, onSelectedPoint, stemHitRange, leafExclusions, layout = 'row' }: {
-  relations: CrossCourseRelation[]; endpoints: Map<string, Point>; noteBooks?: Map<string, string>
-  selectedId?: string; onRelation: (relation: CrossCourseRelation) => void; zoom: number
+  relations: TreeRelation[]; endpoints: Map<string, Point>; noteBooks?: Map<string, string>
+  selectedId?: string; onRelation: (relation: TreeRelation) => void; zoom: number
   courseGeometry?: Map<string, VineCourseGeometry>; viewKey?: string
   onSelectedPoint?: (relationId: string, point: Point) => void
   stemHitRange?: [number, number]
@@ -77,8 +77,8 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
       const pair = JSON.stringify(group.courses), order = counts.get(pair) ?? 0
       counts.set(pair, order + 1)
       const selected = group.relations.find(relation => relation.id === selectedId)
-      const representative = selected ?? group.relations.find(relation => endpoints.has(relation.source_note_id) && endpoints.has(relation.target_note_id)) ?? group.relations[0]
-      let start = representative && endpoints.get(representative.source_note_id), end = representative && endpoints.get(representative.target_note_id)
+      const representative = selected ?? group.relations.find(relation => endpoints.has(relation.source_block_id) && endpoints.has(relation.target_block_id)) ?? group.relations[0]
+      let start = representative && endpoints.get(representative.source_block_id), end = representative && endpoints.get(representative.target_block_id)
       const a = courseGeometry?.get(group.courses[0]), b = courseGeometry?.get(group.courses[1])
       let midpoint: Point | undefined
       if (a && b) {
@@ -86,7 +86,7 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
         const leftId = left === a ? group.courses[0] : group.courses[1]
         const rightId = right === a ? group.courses[0] : group.courses[1]
         const notebookFor = (courseId: string) => representative
-          ? noteBooks.get(representative.source_course_id === courseId ? representative.source_note_id : representative.target_note_id)
+          ? noteBooks.get(representative.source_course_id === courseId ? representative.source_block_id : representative.target_block_id)
           : undefined
         const between = [...courseGeometry!.values()].find(course => course.x > left.x + 30 && course.x < right.x - 30)
         // Long background vines across an intervening tree obscure its crown.
@@ -106,7 +106,7 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
     const first = group.relations[0]
     return `${first.source_course_name ?? group.courses[0]}与${first.target_course_name ?? group.courses[1]}`
   }
-  const relationTitle = (relation: CrossCourseRelation) => `查看${relation.source_title}与${relation.target_title}的${relation.origin === 'ai' ? '模型推断关联' : '手动关联'}`
+  const relationTitle = (relation: TreeRelation) => `查看${relation.source_title}与${relation.target_title}的${relation.origin === 'ai' ? '模型推断关联' : '手动关联'}`
   const activate = (id: string) => { const relation = relationMap.get(id); if (relation) { dismiss(); setOpenGroup(undefined); onRelation(relation) } }
   const currentGroup = openGroup ? groupMap.get(openGroup) : undefined
   const previewRelation = preview?.kind === 'relation' ? relationMap.get(preview.id) : undefined

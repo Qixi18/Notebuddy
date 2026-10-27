@@ -41,19 +41,19 @@ def _arg_summary(name: str, arguments: dict[str, Any]) -> str:
     """给时间线「执行中」一行用的参数摘要。"""
     if name == "search_course":
         return f"检索「{str(arguments.get('query') or '')[:30]}」"
-    if name == "read_note":
+    if name == "read_notebook":
         return "读取笔记正文"
-    if name == "list_course_notes":
+    if name == "list_course_notebooks":
         return "浏览笔记列表"
     if name == "search_forest":
         return f"跨课程搜索「{str(arguments.get('query') or '')[:30]}」"
-    if name == "get_note_coverage":
-        return "检查课件覆盖"
+    if name == "get_source_coverage":
+        return "检查资料引用覆盖"
     if name == "explain_term":
         return f"定位术语「{str(arguments.get('term') or '')[:20]}」"
     if name == "web_search":
         return f"联网搜索「{str(arguments.get('query') or '')[:30]}」"
-    if name == "propose_note_edits":
+    if name == "propose_notebook_edits":
         return f"准备笔记修改建议：{str(arguments.get('rationale') or '')[:40]}"
     if name == "propose_knowledge_node":
         return f"提议知识节点「{str(arguments.get('candidate_name') or '')[:20]}」"
@@ -79,8 +79,8 @@ def run_agent(
     course_name: str,
     question: str,
     scope: AgentScope = "course",
-    locked_note_id: str | None = None,
-    editable_note_id: str | None = None,
+    locked_notebook_id: str | None = None,
+    editable_notebook_id: str | None = None,
     reading_context: str = "",
     material_id: str | None = None,
     allow_web: bool = True,
@@ -90,7 +90,7 @@ def run_agent(
 ) -> Iterator[dict[str, Any]]:
     persona = resolve_persona(teacher_persona)
     teaching_context = infer_context(question, learning_goal)
-    specs = build_tool_specs(scope=scope, editable_note=bool(editable_note_id), allow_web=allow_web)
+    specs = build_tool_specs(scope=scope, editable_notebook=bool(editable_notebook_id), allow_web=allow_web)
     messages = build_agent_messages(
         question,
         course_name=course_name,
@@ -170,8 +170,8 @@ def run_agent(
                     name=call["name"],
                     arguments=arguments,
                     scope=scope,
-                    locked_note_id=locked_note_id,
-                    editable_note_id=editable_note_id,
+                    locked_notebook_id=locked_notebook_id,
+                    editable_notebook_id=editable_notebook_id,
                     allow_web=allow_web,
                 )
                 collected_chunks.extend(outcome.chunks)

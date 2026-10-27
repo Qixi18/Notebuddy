@@ -1,6 +1,6 @@
 import { useEffect, useState, type RefObject } from 'react'
 import type { CourseTree } from '../../types'
-import type { CrossCourseRelation, ForestCourse } from '../forest/types'
+import type { TreeRelation, ForestCourse } from '../forest/types'
 import { courseCanopyGeometry } from '../tree/courseCanopyGeometry'
 import { notebookGeometry, type Point } from '../tree/treeGeometry'
 import { TreeVines, type VineCourseGeometry } from '../tree/TreeVines'
@@ -12,7 +12,7 @@ const HOME_STEM_HIT_RANGE: [number, number] = [.32, .68]
 /** Map independent xMidYMax tree SVGs into one non-zooming connection layer. */
 export function HomeCourseVines({ host, courses, trees, selectedBooks, relations, selectedRelationId, onRelation }: {
   host: RefObject<HTMLDivElement | null>; courses: ForestCourse[]; trees: CourseTree[]; selectedBooks: Record<string, string>
-  relations: CrossCourseRelation[]; selectedRelationId?: string; onRelation: (relation: CrossCourseRelation) => void
+  relations: TreeRelation[]; selectedRelationId?: string; onRelation: (relation: TreeRelation) => void
 }) {
   const [layout, setLayout] = useState<Layout>()
   useEffect(() => {

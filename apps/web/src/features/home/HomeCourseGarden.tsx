@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { CourseTree, NotebookRead, SectionRead } from '../../types'
-import type { CrossCourseRelation, ForestCourse } from '../forest/types'
+import type { TreeRelation, ForestCourse } from '../forest/types'
 import { stateLabels } from '../forest/types'
 import { notebookGeometry } from '../tree/treeGeometry'
 import { HomeCourseTree, type HomeLeafPreview } from './HomeCourseTree'
@@ -14,7 +14,7 @@ type Actions = {
 }
 export function HomeCourseGarden({ courses, trees, relations = [], selectedRelationId, onRelation = () => {}, onVisibleCourseIdsChange, ...actions }: Actions & {
   courses: ForestCourse[]; trees: CourseTree[]; onVisibleCourseIdsChange?: (ids: string[]) => void
-  relations?: CrossCourseRelation[]; selectedRelationId?: string; onRelation?: (relation: CrossCourseRelation) => void
+  relations?: TreeRelation[]; selectedRelationId?: string; onRelation?: (relation: TreeRelation) => void
 }) {
   const grove = useRef<HTMLDivElement>(null)
   const [selectedBooks, setSelectedBooks] = useState<Record<string, string>>({})

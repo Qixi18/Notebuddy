@@ -4,13 +4,13 @@ import { WatercolorTree } from '../src/features/tree/WatercolorTree'
 import { TreeVines } from '../src/features/tree/TreeVines'
 import { notebookGeometry, sceneInitialCamera } from '../src/features/tree/treeGeometry'
 import type { NotebookRead, SectionRead } from '../src/types'
-import type { CrossCourseRelation, ForestCourse } from '../src/features/forest/types'
+import type { TreeRelation, ForestCourse } from '../src/features/forest/types'
 
 afterEach(cleanup)
 const course: ForestCourse = { course_id: 'course', name: '离散数学', semester: 1, level: 'foundation', learning_state: 'learning', position: 0, revision: 1, note_count: 200, material_count: 1, prerequisites: [] }
 const section = (bookId: string, slot: number): SectionRead => ({ id: `${bookId}-note-${slot}`, notebook_id: bookId, tree_slot: slot, knowledge_node_id: `node-${slot}`, material_id: 'chapter', section_key: String(slot), section_order: slot, title: `${bookId}第${slot}个很长的中文知识点标题用于确认标签准确命中`, revision_number: 1, user_locked: false, updated_at: '' })
 const book = (slot: number, count = 7): NotebookRead => ({ id: `book-${slot}`, course_id: 'course', title: `第${slot}本数学笔记`, tree_slot: slot, order_revision: 0, chapters: [{ id: 'chapter', title: '第一讲', chapter_order: 0, status: 'completed', deleted_at: null, sections: Array.from({ length: count }, (_, index) => section(`book-${slot}`, index)) }], historical_sections: [], removed_chapters: [] })
-const relation: CrossCourseRelation = { id: 'vine', source_course_id: 'course', target_course_id: 'other', source_note_id: 'from', target_note_id: 'to', source_title: '源知识点', target_title: '目标知识点', source_course_name: '甲', target_course_name: '乙', relation_type: 'related', reason: '证据', status: 'confirmed', origin: 'ai', source_revision: 1, target_revision: 1, stale: false, source_ref_ids: [], target_ref_ids: [] }
+const relation: TreeRelation = { id: 'vine', source_course_id: 'course', target_course_id: 'other', source_block_id: 'from', target_block_id: 'to', source_title: '源知识点', target_title: '目标知识点', source_course_name: '甲', target_course_name: '乙', relation_type: 'related', reason: '证据', status: 'confirmed', origin: 'ai', source_revision: 1, target_revision: 1, stale: false, source_ref_ids: [], target_ref_ids: [] }
 function tree(zoom: number, count = 7, onNote = vi.fn()) {
   return render(<svg><g transform={`translate(47,91) scale(${zoom})`}><WatercolorTree tree={{ course, x: 0, y: 0, seed: 1 }} branches={Array.from({ length: count }, (_, slot) => notebookGeometry(book(slot)))} zoom={zoom} pins={new Set()} growingNotes={new Set()} search="" onRoot={vi.fn()} onNotebook={vi.fn()} onNote={onNote} onExpand={vi.fn()} onExpandBooks={vi.fn()} onFocus={vi.fn()} onReveal={vi.fn()} /></g></svg>)
 }

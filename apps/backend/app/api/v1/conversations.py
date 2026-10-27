@@ -31,6 +31,7 @@ from app.services.conversations import (
     derive_conversation_title,
     persist_assistant_message,
 )
+from app.services.course_scope import material_in_course
 
 router = APIRouter()
 
@@ -68,6 +69,9 @@ def _message_read(db: Session, message: ConversationMessage, conversation_title:
                 location_label = item.source_ref.page_block.location_label or item.source_ref.page_block.page.location_label
         elif item.web_source is not None:
             snippet = item.web_source.snippet
+        else:
+            snippet = item.snippet
+            location_label = item.location_label
         evidence.append(MessageEvidenceRead(
             id=item.id,
             claim_key=item.claim_key,
@@ -194,7 +198,10 @@ def send_message(
                 return _message_read(db, answer)
 
     selected = db.get(Material, payload.material_id) if payload.material_id else None
-    if payload.material_id and (selected is None or selected.course_id != conversation.course_id or selected.deleted_at is not None):
+    if payload.material_id and (
+        selected is None or selected.deleted_at is not None
+        or not material_in_course(db, selected, conversation.course_id)
+    ):
         raise HTTPException(status_code=404, detail="所选资料不属于当前课程")
     history = [(message.role, message.content) for message in conversation.messages]
     is_first_turn = not any(message.role == "user" for message in conversation.messages)

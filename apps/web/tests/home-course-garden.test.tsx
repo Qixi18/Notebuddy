@@ -5,7 +5,7 @@ import type { ForestCourse } from '../src/features/forest/types'
 import { HomeCourseGarden } from '../src/features/home/HomeCourseGarden'
 import { api } from '../src/api'
 
-vi.mock('../src/api', () => ({ api: { getNote: vi.fn(async (id: string) => ({ id, course_id: 'c0', notebook_id: `b${id[4]}`, content_markdown: '# 标题\n\n## 一句话理解\n\n这是从真实笔记读取的内容预览。' })) } }))
+vi.mock('../src/api', () => ({ api: { getNotebookSections: vi.fn(async (_course: string, book: string) => [{ block_id: `note${book[1]}-0`, excerpt: '这是从真实笔记读取的内容预览。' }]) } }))
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 const courses = [0, 1, 2].map(index => ({ course_id: `c${index}`, name: `课程${index}`, learning_state: 'learning', note_count: 8, material_count: 2, prerequisites: [] })) as unknown as ForestCourse[]
@@ -44,7 +44,7 @@ test('bare leaves show their own note preview on focus and retain exact navigati
   const preview = await screen.findByRole('tooltip')
   expect(within(preview).getByText('知识点0-0')).toBeTruthy()
   expect(await within(preview).findByText('这是从真实笔记读取的内容预览。')).toBeTruthy()
-  expect(api.getNote).toHaveBeenCalledWith('note0-0')
+  expect(api.getNotebookSections).toHaveBeenCalledWith('c0', 'b0')
   fireEvent.keyDown(window, { key: 'Escape' })
   expect(screen.queryByRole('tooltip')).toBeNull()
   fireEvent.change(screen.getByLabelText('课程0的笔记本目录'), { target: { value: 'b3' } })

@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.api.v1.shared import ensure_course
 from app.db.database import get_db
 from app.db.models import CurriculumImport, ForestJob
-from app.forest.curriculum import confirm_import, create_import
-from app.forest.jobs import enqueue_relations, retry_job
+from app.forest.curriculum import CurriculumError, confirm_import, create_import
+from app.forest.jobs import retry_job
 from app.schemas.forest_imports import CurriculumConfirm, CurriculumImportRead, ForestJobRead
 from app.services.uploads import UploadRejected
 
@@ -88,6 +88,7 @@ def retry_import(import_id: str, db: Session = Depends(get_db)):
     if job is None:
         raise HTTPException(404, "培养方案任务不存在")
     retry_job(db, job)
+    db.commit()
     db.refresh(record)
     return _read(db, record)
 
@@ -105,9 +106,13 @@ def confirm_curriculum(import_id: str, payload: CurriculumConfirm, db: Session =
 @router.post("/forest/courses/{course_id}/suggest-relations", response_model=ForestJobRead)
 def suggest_relations(course_id: str, db: Session = Depends(get_db)):
     ensure_course(db, course_id)
-    job = enqueue_relations(db, course_id, explicit=True)
+    from app.forest.notebook_relations import enqueue_notebook_relations
+
+    job = enqueue_notebook_relations(db, course_id)
     if job is None:
-        raise HTTPException(409, "课程还没有真实笔记，请先导入课件并生成笔记")
+        raise HTTPException(409, "至少需要两门课程有可用笔记正文，才能生成跨课关联")
+    if job.status == "failed":
+        retry_job(db, job)
     db.commit()
     db.refresh(job)
     return job
@@ -128,7 +133,7 @@ def get_latest_course_forest_job(course_id: str, db: Session = Depends(get_db)):
     ensure_course(db, course_id)
     return db.scalar(
         select(ForestJob)
-        .where(ForestJob.course_id == course_id, ForestJob.kind == "cross_course_relations")
+        .where(ForestJob.course_id == course_id, ForestJob.kind == "notebook_relations")
         .order_by(ForestJob.created_at.desc(), ForestJob.id.desc())
         .limit(1)
     )
@@ -136,4 +141,11 @@ def get_latest_course_forest_job(course_id: str, db: Session = Depends(get_db)):
 
 @router.post("/forest/jobs/{job_id}/retry", response_model=ForestJobRead)
 def retry_forest_job(job_id: str, db: Session = Depends(get_db)):
-    return retry_job(db, get_job(job_id, db))
+    try:
+        job = retry_job(db, get_job(job_id, db))
+    except CurriculumError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    db.commit()
+    db.refresh(job)
+    return job

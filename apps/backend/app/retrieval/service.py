@@ -1,3 +1,13 @@
+"""Two-path retrieval over Document IR and Notebook body.
+
+- Source-material path: current ParseRun -> DocumentChunk.
+- Notebook path: derived NotebookSection (rebuilt on every body save).
+
+Both paths resolve course ownership through ``Notebook.course_id``; neither
+uses ``RetrievalChunk.course_id`` or ``Material.course_id``.  Results carry the
+parse run / body revision and block ids so an answer can cite traceable evidence.
+"""
+
 from __future__ import annotations
 
 import json
@@ -5,17 +15,25 @@ import math
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from app.db.models import Material, MaterialPage, PageBlock, RetrievalChunk, SourceRef
+from app.db.models import (
+    Asset,
+    DocumentChunk,
+    DocumentParseRun,
+    Material,
+    Notebook,
+    NotebookAsset,
+    NotebookSection,
+)
 from app.retrieval.embedding import EmbeddingClient, EmbeddingError
 from app.services.provider_audit import begin_call, finish_call, provider_status_from_error
 
 
 @dataclass(frozen=True)
 class RetrievedChunk:
-    material_id: str
+    material_id: str | None
     lecture_title: str
     page_number: int
     text: str
@@ -25,62 +43,12 @@ class RetrievedChunk:
     location_label: str | None = None
     score_source: str = "keyword"
     direct_support: bool = True
-
-
-def index_material(db: Session, material_id: str) -> None:
-    material = db.get(Material, material_id)
-    if material is None:
-        return
-    blocks = list(
-        db.scalars(
-            select(PageBlock)
-            .join(MaterialPage, PageBlock.page_id == MaterialPage.id)
-            .where(
-                MaterialPage.material_id == material_id,
-                MaterialPage.is_active.is_(True),
-                PageBlock.content != "",
-            )
-            .order_by(PageBlock.id)
-        ).all()
-    )
-    client = EmbeddingClient()
-    vectors: list[list[float]] = []
-    texts = [block.content.strip() for block in blocks]
-    if client.configured and texts:
-        audit, started = begin_call(
-            db,
-            provider="embedding",
-            operation="index_material",
-            course_id=material.course_id,
-            material_id=material.id,
-            model=client.settings.embedding_model,
-            request_units=len(texts),
-        )
-        try:
-            vectors = client.embed(texts)
-        except EmbeddingError as exc:
-            finish_call(
-                db,
-                audit,
-                started,
-                status=provider_status_from_error(exc),
-                error_type=type(exc).__name__,
-            )
-            vectors = []
-        else:
-            finish_call(db, audit, started, status="success", response_units=len(vectors))
-
-    for index, block in enumerate(blocks):
-        chunk = db.scalar(select(RetrievalChunk).where(RetrievalChunk.page_block_id == block.id))
-        if chunk is None:
-            chunk = RetrievalChunk(
-                course_id=material.course_id, page_block_id=block.id, text=texts[index]
-            )
-            db.add(chunk)
-        chunk.text = texts[index]
-        chunk.embedding_model = settings_model() if vectors else None
-        chunk.embedding_json = json.dumps(vectors[index], ensure_ascii=False) if vectors else None
-    db.commit()
+    kind: str = "document"
+    notebook_id: str | None = None
+    document_block_id: str | None = None
+    parse_run_id: str | None = None
+    block_id: str | None = None
+    notebook_revision: int | None = None
 
 
 def retrieve(
@@ -92,87 +60,166 @@ def retrieve(
     page_number: int | None = None,
     limit: int = 5,
 ) -> list[RetrievedChunk]:
-    source_ref_id = select(SourceRef.id).where(
-        SourceRef.page_block_id == PageBlock.id,
-        SourceRef.status == "active",
-    ).limit(1).scalar_subquery()
+    terms = query_terms(question)
+    query_vector = _embed_query(db, course_id, question)
+    documents = _retrieve_documents(
+        db, course_id=course_id, terms=terms, query_vector=query_vector,
+        material_id=material_id, page_number=page_number,
+    )
+    notebooks = _retrieve_notebooks(
+        db, course_id=course_id, terms=terms, query_vector=query_vector,
+    )
+    merged = sorted(documents + notebooks, key=lambda item: item.score, reverse=True)
+    return merged[:limit]
+
+
+def _embed_query(db: Session, course_id: str, question: str) -> list[float] | None:
+    client = EmbeddingClient()
+    if not client.configured:
+        return None
+    audit, started = begin_call(
+        db, provider="embedding", operation="embed_query", course_id=course_id,
+        model=client.settings.embedding_model, request_units=1,
+    )
+    try:
+        vector = client.embed([question])[0]
+    except EmbeddingError as exc:
+        finish_call(db, audit, started, status=provider_status_from_error(exc),
+                    error_type=type(exc).__name__)
+        return None
+    finish_call(db, audit, started, status="success", response_units=1)
+    return vector
+
+
+def _retrieve_documents(
+    db: Session,
+    *,
+    course_id: str,
+    terms: list[str],
+    query_vector: list[float] | None,
+    material_id: str | None,
+    page_number: int | None,
+) -> list[RetrievedChunk]:
     query = (
-        select(RetrievalChunk, PageBlock, MaterialPage, Material, source_ref_id.label("source_ref_id"))
-        .join(PageBlock, RetrievalChunk.page_block_id == PageBlock.id)
-        .join(MaterialPage, PageBlock.page_id == MaterialPage.id)
-        .join(Material, MaterialPage.material_id == Material.id)
+        select(DocumentChunk, Asset, Notebook)
+        .join(DocumentParseRun, DocumentParseRun.id == DocumentChunk.parse_run_id)
+        .join(Asset, Asset.id == DocumentParseRun.asset_id)
+        .join(NotebookAsset, and_(
+            NotebookAsset.asset_id == Asset.id,
+            NotebookAsset.is_owner.is_(True),
+            NotebookAsset.detached_at.is_(None),
+        ))
+        .join(Notebook, Notebook.id == NotebookAsset.notebook_id)
         .where(
-            RetrievalChunk.course_id == course_id,
-            Material.deleted_at.is_(None),
-            MaterialPage.is_active.is_(True),
-            PageBlock.content != "",
+            Notebook.course_id == course_id,
+            Notebook.deleted_at.is_(None),
+            DocumentParseRun.is_current.is_(True),
+            DocumentParseRun.status == "completed",
         )
     )
     if material_id:
-        query = query.where(Material.id == material_id)
-    if page_number:
-        query = query.where(MaterialPage.page_number == page_number)
-
-    terms = query_terms(question)
-    query_vector: list[float] | None = None
-    client = EmbeddingClient()
-    if client.configured:
-        audit, started = begin_call(
-            db,
-            provider="embedding",
-            operation="embed_query",
-            course_id=course_id,
-            model=client.settings.embedding_model,
-            request_units=1,
-        )
-        try:
-            query_vector = client.embed([question])[0]
-        except EmbeddingError as exc:
-            finish_call(
-                db,
-                audit,
-                started,
-                status=provider_status_from_error(exc),
-                error_type=type(exc).__name__,
-            )
-            query_vector = None
-        else:
-            finish_call(db, audit, started, status="success", response_units=1)
+        material = db.get(Material, material_id)
+        query = query.where(or_(
+            Asset.id == material_id,
+            Asset.id == (material.asset_id if material is not None else None),
+        ))
+    rows = db.execute(query).all()
     results: list[RetrievedChunk] = []
-    for chunk, block, page, material, source_id in db.execute(query).all():
-        text = chunk.text.strip()
-        haystack = text.lower()
-        lexical_score = float(sum(haystack.count(term) for term in terms))
-        vector_score = 0.0
+    for chunk, asset, notebook in rows:
+        page_numbers = _json_list(chunk.page_numbers_json)
+        if page_number and page_number not in page_numbers:
+            continue
+        lexical = _lexical_score(chunk.text, terms)
+        vector = 0.0
         if query_vector and chunk.embedding_json:
             try:
-                vector_score = cosine_similarity(query_vector, json.loads(chunk.embedding_json))
+                vector = cosine_similarity(query_vector, json.loads(chunk.embedding_json))
             except (TypeError, ValueError, json.JSONDecodeError):
-                vector_score = 0.0
-        score = vector_score * 10 + lexical_score
-        if score > 0:
-            results.append(
-                RetrievedChunk(
-                    material_id=material.id,
-                    lecture_title=material.lecture_title,
-                    page_number=page.page_number,
-                    text=text,
-                    score=score,
-                    page_block_id=chunk.page_block_id,
-                    source_ref_id=source_id,
-                    location_label=block.location_label or page.location_label,
-                    score_source="hybrid" if vector_score else "keyword",
-                    direct_support=lexical_score > 0 or vector_score >= 0.55,
-                )
-            )
-    results.sort(key=lambda item: item.score, reverse=True)
-    return results[:limit]
+                vector = 0.0
+        score = vector * 10 + lexical
+        if score <= 0:
+            continue
+        body_block_ids = _json_list(chunk.block_ids_json)
+        results.append(RetrievedChunk(
+            material_id=asset.id,
+            lecture_title=asset.original_name,
+            page_number=page_numbers[0] if page_numbers else 0,
+            text=chunk.text,
+            score=score,
+            page_block_id=body_block_ids[0] if body_block_ids else None,
+            source_ref_id=None,
+            location_label=(f"第 {page_numbers[0]} 页" if page_numbers else None),
+            score_source="hybrid" if vector else "keyword",
+            direct_support=lexical > 0 or vector >= 0.55,
+            kind="document",
+            notebook_id=notebook.id,
+            document_block_id=body_block_ids[0] if body_block_ids else None,
+            parse_run_id=chunk.parse_run_id,
+        ))
+    return results
+
+
+def _retrieve_notebooks(
+    db: Session, *, course_id: str, terms: list[str], query_vector: list[float] | None,
+) -> list[RetrievedChunk]:
+    rows = db.execute(
+        select(NotebookSection, Notebook)
+        .join(Notebook, Notebook.id == NotebookSection.notebook_id)
+        .where(
+            Notebook.course_id == course_id,
+            Notebook.deleted_at.is_(None),
+        )
+    ).all()
+    results: list[RetrievedChunk] = []
+    for section, notebook in rows:
+        heading_score = 3.0 * _lexical_score(section.heading, terms)
+        body_score = _lexical_score(section.text, terms)
+        score = heading_score + body_score
+        if score <= 0:
+            continue
+        results.append(RetrievedChunk(
+            material_id=None,
+            lecture_title=notebook.title,
+            page_number=0,
+            text=(f"{section.heading}\n{section.text}" if section.heading else section.text)[:4_000],
+            score=score,
+            location_label=f"第 {section.order + 1} 节",
+            score_source="keyword",
+            direct_support=True,
+            kind="notebook",
+            notebook_id=notebook.id,
+            block_id=section.block_id,
+            notebook_revision=section.revision,
+        ))
+    return results
+
+
+def _lexical_score(text: str, terms: list[str]) -> float:
+    haystack = (text or "").lower()
+    if not haystack:
+        return 0.0
+    return float(sum(haystack.count(term) for term in terms))
+
+
+def _json_list(raw: str | None) -> list:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
 
 
 def build_context(chunks: list[RetrievedChunk]) -> str:
-    return "\n\n".join(
-        f"[第 {chunk.page_number} 页 | {chunk.lecture_title}]\n{chunk.text}" for chunk in chunks
-    )
+    blocks = []
+    for chunk in chunks:
+        if chunk.kind == "notebook":
+            header = f"[课程笔记：{chunk.lecture_title} | {chunk.location_label or '当前正文'}]"
+        else:
+            header = f"[课程资料：{chunk.lecture_title} | 第 {chunk.page_number} 页]"
+        blocks.append(f"{header}\n{chunk.text}")
+    return "\n\n".join(blocks)
 
 
 def settings_model() -> str:

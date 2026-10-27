@@ -43,10 +43,10 @@ test('course settings stay separate from the root book menu and preserve multi-b
 })
 test('confirmed endpoints beyond overview remain visible and connected in the shared scene', async () => {
   vi.mocked(api.getForest).mockResolvedValue({ courses: courses.slice(0, 2) } as never)
-  vi.mocked(api.getForestRelations).mockResolvedValue([{ id: 'r', source_course_id: 'c0', target_course_id: 'c1', source_note_id: 'c0-note-18', target_note_id: 'c1-note-18', source_title: 'c0知识点18', target_title: 'c1知识点18', relation_type: 'related', status: 'confirmed', origin: 'manual', stale: false }] as never)
+  vi.mocked(api.getForestRelations).mockResolvedValue([{ id: 'r', source_course_id: 'c0', target_course_id: 'c1', source_notebook_id: 'b-c0', target_notebook_id: 'b-c1', source_block_id: 'c0-note-18', target_block_id: 'c1-note-18', source_title: 'c0知识点18', target_title: 'c1知识点18', relation_type: 'related', status: 'confirmed', origin: 'manual', stale: false }] as never)
   const { container } = renderPage()
-  await waitFor(() => expect(container.querySelector('[data-note-id="c0-note-18"]')).toBeTruthy())
-  expect(container.querySelector('[data-note-id="c1-note-18"]')).toBeTruthy()
+  await waitFor(() => expect(container.querySelector('[data-note-id]') && [...container.querySelectorAll('[data-note-id]')].find(node => node.getAttribute('data-note-id') === JSON.stringify(['b-c0', 'c0-note-18']))).toBeTruthy())
+  expect([...container.querySelectorAll('[data-note-id]')].find(node => node.getAttribute('data-note-id') === JSON.stringify(['b-c1', 'c1-note-18']))).toBeTruthy()
   expect(container.querySelector('.kt-vine')).toBeTruthy()
 })
 test('failed automatic relation job is visible on actual focus and remains retryable', async () => {

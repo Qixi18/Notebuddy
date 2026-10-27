@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { HomeCourseGarden } from '../src/features/home/HomeCourseGarden'
-import type { ForestCourse, CrossCourseRelation } from '../src/features/forest/types'
+import type { ForestCourse, TreeRelation } from '../src/features/forest/types'
 import type { CourseTree } from '../src/types'
 import { courseCanopyGeometry } from '../src/features/tree/courseCanopyGeometry'
 import { pointAt } from '../src/features/tree/naturalBranchGeometry'
@@ -9,7 +9,7 @@ import { pointAt } from '../src/features/tree/naturalBranchGeometry'
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 const courses = ['a', 'b', 'c'].map((id, i) => ({ course_id: id, name: `课程${id}`, position: i, learning_state: 'learning' })) as ForestCourse[]
 const trees = courses.map(course => ({ course_id: course.course_id, notebooks: Array.from({ length: 5 }, (_, b) => ({ id: `${course.course_id}-book-${b}`, course_id: course.course_id, tree_slot: b, title: `笔记本${b}`, chapters: [{ id: `m-${b}`, sections: [{ id: `${course.course_id}-note-${b}`, title: `知识${b}`, notebook_id: `${course.course_id}-book-${b}`, tree_slot: 0 }] }], historical_sections: [] })) })) as CourseTree[]
-const relations = Array.from({ length: 5 }, (_, i) => ({ id: `relation-${i}`, source_course_id: 'a', target_course_id: 'b', source_note_id: `a-note-${i}`, target_note_id: `b-note-${i}`, source_title: `起点${i}`, target_title: `终点${i}`, source_course_name: '课程a', target_course_name: '课程b', status: 'confirmed', stale: false, reason: `原始依据${i}`, origin: 'ai' })) as CrossCourseRelation[]
+const relations = Array.from({ length: 5 }, (_, i) => ({ id: `relation-${i}`, source_course_id: 'a', target_course_id: 'b', source_block_id: `a-note-${i}`, target_block_id: `b-note-${i}`, source_title: `起点${i}`, target_title: `终点${i}`, source_course_name: '课程a', target_course_name: '课程b', status: 'confirmed', stale: false, reason: `原始依据${i}`, origin: 'ai' })) as TreeRelation[]
 function sizes(width = 480) {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1000, height: 600, left: 0, top: 0 } as DOMRect)
   vi.spyOn(SVGSVGElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: SVGSVGElement) {
@@ -35,7 +35,7 @@ it('draws the same grouped vines on home and opens the exact original relation',
 
 it('keeps the third course and its vine available in the same home view', async () => {
   sizes(300)
-  const third = { ...relations[0], id: 'third', source_course_id: 'b', target_course_id: 'c', source_note_id: 'b-note-0', target_note_id: 'c-note-0', source_course_name: '课程b', target_course_name: '课程c' }
+  const third = { ...relations[0], id: 'third', source_course_id: 'b', target_course_id: 'c', source_block_id: 'b-note-0', target_block_id: 'c-note-0', source_course_name: '课程b', target_course_name: '课程c' }
   const onRelation = vi.fn()
   const { container } = render(<HomeCourseGarden courses={courses} trees={trees} relations={[third]} onRelation={onRelation} onRoot={vi.fn()} onNotebook={vi.fn()} onNote={vi.fn()} />)
   await waitFor(() => expect(container.querySelector('[data-vine-members="third"]')).toBeTruthy())
@@ -47,7 +47,7 @@ it('keeps the third course and its vine available in the same home view', async 
 
 it('retains the third side of a three-course triangle', async () => {
   sizes(300)
-  const across = { ...relations[0], id: 'across', source_course_id: 'a', target_course_id: 'c', source_note_id: 'a-note-0', target_note_id: 'c-note-0', target_course_name: '课程c' }
+  const across = { ...relations[0], id: 'across', source_course_id: 'a', target_course_id: 'c', source_block_id: 'a-note-0', target_block_id: 'c-note-0', target_course_name: '课程c' }
   const { container } = render(<HomeCourseGarden courses={courses} trees={trees} relations={[across]} onRelation={vi.fn()} onRoot={vi.fn()} onNotebook={vi.fn()} onNote={vi.fn()} />)
   await waitFor(() => expect(container.querySelector('[data-vine-members="across"]')).toBeTruthy())
 })
@@ -81,9 +81,9 @@ it('grafts runtime AI results onto their own notebook branches and follows updat
     })
   }
   await expectSource('a-book-0')
-  view.rerender(<HomeCourseGarden {...props} relations={[{ ...relations[0], id: 'new-ai-result', source_note_id: 'a-note-2', target_note_id: 'b-note-2' }]} />)
+  view.rerender(<HomeCourseGarden {...props} relations={[{ ...relations[0], id: 'new-ai-result', source_block_id: 'a-note-2', target_block_id: 'b-note-2' }]} />)
   await expectSource('a-book-2')
-  view.rerender(<HomeCourseGarden {...props} relations={[{ ...relations[0], id: 'outside-preview', source_note_id: 'a-note-4', target_note_id: 'b-note-4' }]} />)
+  view.rerender(<HomeCourseGarden {...props} relations={[{ ...relations[0], id: 'outside-preview', source_block_id: 'a-note-4', target_block_id: 'b-note-4' }]} />)
   await expectSource('a-book-4')
   view.rerender(<HomeCourseGarden {...props} relations={[]} />)
   await waitFor(() => expect(view.container.querySelector('.kt-vine')).toBeNull())

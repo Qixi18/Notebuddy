@@ -10,6 +10,9 @@ from app.retrieval.service import RetrievedChunk
 COURSE_MARKER = re.compile(
     r"\[课程资料：([^\]|]+?)\s*\|\s*第\s*([\d、,，\s\-–—~至到]+?)\s*页[^\]]*\]"
 )
+NOTEBOOK_MARKER = re.compile(
+    r"\[课程笔记：([^\]|]+?)\s*\|\s*第\s*(\d+)\s*节[^\]]*\]"
+)
 WEB_MARKER = re.compile(r"\[网络来源\s+(\d+)[^\]]*\]")
 GENERAL_MARKER = re.compile(r"\[通用解释\]")
 INFERENCE_MARKER = re.compile(r"\[模型推断\]")
@@ -76,6 +79,14 @@ def extract_claims(
                     for chunk_index, chunk in enumerate(chunks)
                     if chunk.lecture_title.strip() == lecture_title.strip() and chunk.page_number == page_number
                 )
+        for notebook_title, section_text in NOTEBOOK_MARKER.findall(paragraph):
+            chunk_indexes.extend(
+                chunk_index
+                for chunk_index, chunk in enumerate(chunks)
+                if chunk.kind == "notebook"
+                and chunk.lecture_title.strip() == notebook_title.strip()
+                and (chunk.location_label or "") == f"第 {section_text} 节"
+            )
         web_indexes = [int(item) - 1 for item in WEB_MARKER.findall(paragraph)]
         chunk_indexes = sorted({item for item in chunk_indexes if 0 <= item < len(chunks)})
         web_indexes = sorted({item for item in web_indexes if 0 <= item < len(web_results)})

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { CourseTree, SectionRead } from '../../types'
-import type { Camera, CrossCourseRelation, ForestCourse } from '../forest/types'
+import type { Camera, TreeRelation, ForestCourse } from '../forest/types'
 import type { SavedSlot } from './layout'
 
 export type KnowledgeTreeView = {
@@ -23,13 +23,13 @@ export type KnowledgeTreeSceneProps = {
   onFocusCourse?: (courseId: string) => void
   search?: string
   pinnedNoteIds?: string[]
-  relations?: CrossCourseRelation[]
+  relations?: TreeRelation[]
   selectedRelationId?: string
   onVisibleCourseIdsChange?: (courseIds: string[]) => void
   onRoot: (courseId: string) => void
   onNotebook: (courseId: string, notebookId: string) => void
   onNote: (courseId: string, notebookId: string, section: SectionRead) => void
-  onRelation: (relation: CrossCourseRelation) => void
+  onRelation: (relation: TreeRelation) => void
   className?: string
   toolbar?: ReactNode
   backdrop?: ReactNode

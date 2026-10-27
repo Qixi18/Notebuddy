@@ -36,4 +36,7 @@ class NotebookGenerationJobRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     finished_at: datetime | None
+    generator: str | None = None
+    parse_run_ids: list[str] = []
+    plan: dict | None = None
     candidate: NotebookGenerationCandidateRead | None = None

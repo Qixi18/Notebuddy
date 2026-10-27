@@ -9,6 +9,7 @@ import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features
 import { countText, docToMarkdown, emptyDocument, excerptAroundSelection, extractOutline, normalizeDocument, stableStringify, type DocNode } from '../features/notebook-editor/document'
 import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
 import { useNotebookSave } from '../features/notebook-editor/useNotebookSave'
+import { SourceUploadPanel } from '../features/notebook-workspace/SourceUploadPanel'
 import type { NotebookRevision } from '../types'
 import './NotebookPage.css'
 
@@ -51,10 +52,21 @@ function UnboundNotebookBody({ notebookId }: { notebookId: string | undefined })
     return true
   }, [editVersion, save.revision])
 
+  const adoptDocument = useCallback((document: DocNode, revision: number, updatedAt: string, expectedEditVersion: number) => {
+    if (editVersion !== expectedEditVersion || save.isDirty() || save.revision !== revision - 1) return false
+    const normalized = normalizeDocument(document)
+    editorRef.current?.replaceContent(normalized)
+    setContent(normalized)
+    setEditVersion((value) => value + 1)
+    save.reset(normalized, revision, updatedAt)
+    return true
+  }, [editVersion, save.isDirty, save.reset, save.revision])
+
   const bridgeValue = useMemo<NotebookBridgeValue | null>(() => conversationCourseId && notebookId && notebook ? {
     courseId: conversationCourseId, notebookId, title, revision: save.revision, editVersion,
     excerpt: excerptAroundSelection(content, selection?.text), selection, insertAI,
-  } : null, [content, conversationCourseId, editVersion, insertAI, notebook, notebookId, save.revision, selection, title])
+    isDirty: save.isDirty, adoptDocument,
+  } : null, [adoptDocument, content, conversationCourseId, editVersion, insertAI, notebook, notebookId, save.isDirty, save.revision, selection, title])
   useRegisterNotebookBridge(bridgeValue)
 
   useEffect(() => {
@@ -97,6 +109,25 @@ function UnboundNotebookBody({ notebookId }: { notebookId: string | undefined })
     } catch (cause) {
       setTitleError(cause instanceof Error ? cause.message : '名称保存失败')
     } finally { setRenaming(false) }
+  }
+
+  async function refreshAfterGeneration() {
+    if (!notebookId) return
+    if (save.isDirty()) {
+      setNotice('讲解已写入服务器，但你有未保存的编辑；已保留本地内容，保存后再刷新可看到生成结果。')
+      return
+    }
+    try {
+      const document = await api.getUnboundNotebookDocument(notebookId)
+      const next = normalizeDocument(document.content)
+      editorRef.current?.replaceContent(next)
+      setContent(next)
+      setEditVersion((version) => version + 1)
+      save.reset(next, document.revision, document.updated_at)
+      setNotice('资料解析与讲解已写入正文。')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : '生成结果刷新失败')
+    }
   }
 
   function restoreDraft() {
@@ -228,6 +259,7 @@ function UnboundNotebookBody({ notebookId }: { notebookId: string | undefined })
     <div className="notebook-document-workspace">
       <aside className="notebook-document-sidebar" aria-label="笔记目录">
         <div className="notebook-document-sidebar-heading">资料与目录</div>
+        <SourceUploadPanel notebookId={notebookId} onDocumentUpdated={() => void refreshAfterGeneration()} />
         <nav className="notebook-document-section-body" aria-label="笔记目录">
           {headings.length ? headings.map((heading) => <button className={`notebook-document-outline-item notebook-document-outline-h${heading.level}`} key={heading.id} type="button" onClick={() => editorRef.current?.focusBlock(heading.id)}>{heading.text}</button>) : <p className="notebook-document-sidebar-empty">正文标题会显示在这里</p>}
         </nav>

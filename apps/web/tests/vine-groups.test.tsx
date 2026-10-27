@@ -1,11 +1,11 @@
 import { expect, it } from 'vitest'
 import { groupForestVines, visibleVineRelations } from '../src/features/tree/vineGroups'
-import type { CrossCourseRelation } from '../src/features/forest/types'
+import type { TreeRelation } from '../src/features/forest/types'
 import { buildVine, resolveVineLod } from '../src/features/tree/vineGeometry'
 
-const relations = Array.from({ length: 35 }, (_, i) => ({ id: `r-${i}`, source_course_id: 'a', target_course_id: 'b', source_note_id: `a-${i}`, target_note_id: `b-${i}`, origin: 'ai', status: 'confirmed', stale: false } as CrossCourseRelation))
-const endpoints = new Map(relations.flatMap((r, i) => [[r.source_note_id, { x: 100, y: i * 10 }], [r.target_note_id, { x: 800, y: i * 10 }]] as const))
-const books = new Map(relations.flatMap((r, i) => [[r.source_note_id, `a-book-${i % 7}`], [r.target_note_id, `b-book-${i % 7}`]]))
+const relations = Array.from({ length: 35 }, (_, i) => ({ id: `r-${i}`, source_course_id: 'a', target_course_id: 'b', source_block_id: `a-${i}`, target_block_id: `b-${i}`, origin: 'ai', status: 'confirmed', stale: false } as TreeRelation))
+const endpoints = new Map(relations.flatMap((r, i) => [[r.source_block_id, { x: 100, y: i * 10 }], [r.target_block_id, { x: 800, y: i * 10 }]] as const))
+const books = new Map(relations.flatMap((r, i) => [[r.source_block_id, `a-book-${i % 7}`], [r.target_block_id, `b-book-${i % 7}`]]))
 
 it('retains every unique relation across no more than four stems, regardless of input order', () => {
   const groups = groupForestVines(relations, endpoints, books)

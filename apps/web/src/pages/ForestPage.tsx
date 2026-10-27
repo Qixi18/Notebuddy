@@ -10,15 +10,14 @@ import { HomeCoursesDialog } from '../features/forest/HomeCoursesDialog'
 import { HOME_COURSE_LIMIT } from '../features/workspace/homeCourses'
 import { KnowledgeTreeScene, type KnowledgeTreeView } from '../features/tree/KnowledgeTreeScene'
 import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
-import { useAutomaticVines } from '../features/forest/useAutomaticVines'
+import { useNotebookRelations } from '../features/forest/useNotebookRelations'
 import { useTreeDirectories } from '../features/forest/useTreeDirectories'
 import { readSceneSnapshot, saveSceneSnapshot } from '../features/tree/snapshot'
 import { notebookPath } from '../features/notebook/navigation'
-import type { ForestCourse } from '../features/forest/types'
+import type { ForestCourse, ForestSearchResult } from '../features/forest/types'
 import type { NotebookSection } from '../types'
 import '../features/forest/forest.css'
 
-type SearchResult = { course_id: string; course_name: string; notebook_id: string | null; note_id: string; title: string; material_id: string | null }
 export function ForestPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -37,18 +36,19 @@ export function ForestPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [search, setSearch] = useState('')
-  const [results, setResults] = useState<SearchResult[]>([])
+  const [results, setResults] = useState<ForestSearchResult[]>([])
   const [searchError, setSearchError] = useState<string>()
   const [searching, setSearching] = useState(false)
   const [selectedRelation, setSelectedRelation] = useState<string | undefined>(query.get('relation') ?? undefined)
   const directories = useTreeDirectories()
-  const vines = useAutomaticVines(directories.watchKey, directories.settledVersion, directories.refresh)
+  const vines = useNotebookRelations(directories.trees, directories.settledVersion, directories.watchKey, directories.refresh)
   const { relations } = vines
   const [dismissedJob, setDismissedJob] = useState<string>()
-  const job = Object.entries(vines.jobs).find(([id, value]) => id === focusId && value.id !== dismissedJob)?.[1] ?? Object.values(vines.jobs).find(value => value.id !== dismissedJob && ['pending', 'processing', 'failed'].includes(value.status))
+  const job = Object.entries(vines.jobs).find(([id, value]) => id === focusId && value.id !== dismissedJob)?.[1]
+    ?? Object.values(vines.jobs).find(value => value.id !== dismissedJob && ['pending', 'processing', 'failed'].includes(value.status))
   const [visibleIds, setVisibleIds] = useState<string[]>([])
   const visibleDirectories = useCallback((ids: string[]) => { setVisibleIds(ids); directories.watch(ids) }, [directories.watch])
-  const pins = relations.filter(relation => relation.status === 'confirmed' && !relation.stale && visibleIds.includes(relation.source_course_id) && visibleIds.includes(relation.target_course_id)).slice(0, 6).flatMap(relation => [relation.source_note_id, relation.target_note_id])
+  const pins = relations.filter(relation => relation.status === 'confirmed' && !relation.stale && visibleIds.includes(relation.source_course_id) && visibleIds.includes(relation.target_course_id)).slice(0, 6).flatMap(relation => [relation.source_block_id, relation.target_block_id])
   const mounted = useRef(true)
   const forestRead = useRef(0)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -65,9 +65,9 @@ export function ForestPage() {
   useEffect(() => { if (query.get('course')) setFocusId(query.get('course')!) }, [query])
   useEffect(() => { if (query.get('relation')) setSelectedRelation(query.get('relation')!) }, [query])
   useEffect(() => {
-    const selected = relations.find(relation => relation.id === selectedRelation && relation.status === 'confirmed' && !relation.stale)
+    const selected = vines.records.find(relation => relation.id === selectedRelation)
     if (selected) directories.load([selected.source_course_id, selected.target_course_id])
-  }, [selectedRelation, relations, directories.load])
+  }, [selectedRelation, vines.records, directories.load])
   useEffect(() => {
     let active = true
     const text = search.trim()
@@ -84,7 +84,7 @@ export function ForestPage() {
   const [panelBookId, setPanelBookId] = useState('')
   const panelBook = courseTree?.notebooks.find(book => book.id === panelBookId) ?? courseTree?.notebooks[0]
   const returnState = { sceneReturn: focusId ? `/forest?course=${encodeURIComponent(focusId)}` : '/forest', sceneEntry: location.key }
-  function openNote(courseId: string, notebookId: string, section: Pick<NotebookSection, 'id' | 'material_id'>) { navigate(notebookPath(courseId, section, undefined, notebookId), { state: returnState }) }
+  function openNote(courseId: string, notebookId: string, section: Pick<NotebookSection, 'id' | 'material_id' | 'block_id'>) { navigate(notebookPath(courseId, section, undefined, notebookId), { state: returnState }) }
   function focus(id: string) { setFocusId(id); directories.load([id]); setQuery({ course: id }, { replace: true }); setSearch('') }
   const rememberView = (view: KnowledgeTreeView) => saveSceneSnapshot('forest', { view, courseIds: courses.map(course => course.course_id) })
   const homeCount = courses.filter(course => course.learning_state === 'learning').length
@@ -112,7 +112,7 @@ export function ForestPage() {
   const tools = <div className="forest-explore-tools">
     <div className="forest-search"><label><input aria-label="搜索课程或知识点" placeholder="寻找课程或知识点" value={search} onChange={event => setSearch(event.target.value)} /></label>{search.trim() && <div className="forest-search-results" aria-label="搜索结果">
       {courses.filter(course => course.name.toLowerCase().includes(search.toLowerCase())).slice(0, 8).map(course => <button key={course.course_id} onClick={() => focus(course.course_id)}><span>课程</span><strong>{course.name}</strong></button>)}
-      {results.map(item => <button key={item.note_id} onClick={() => item.notebook_id ? openNote(item.course_id, item.notebook_id, { id: item.note_id, material_id: item.material_id }) : navigate(`/courses/${item.course_id}/notes/${item.note_id}`, { state: returnState })}><span>笔记</span><strong>{item.title}</strong><small>{item.course_name}</small></button>)}
+      {results.map(item => <button key={`${item.notebook_id}:${item.block_id ?? ''}`} onClick={() => navigate(notebookPath(item.course_id, item.block_id ? { id: item.block_id, block_id: item.block_id, material_id: null } : undefined, undefined, item.notebook_id), { state: returnState })}><span>笔记</span><strong>{item.title}</strong><small>{item.course_name} · {item.snippet}</small></button>)}
       {searching && <p role="status">寻找知识点…</p>}{searchError && <p role="alert">{searchError}</p>}
     </div>}</div>
     <div className="forest-legend" aria-label="课程学习状态"><span><i className="forest-state-planned" />未开始</span><span><i className="forest-state-learning" />在学</span><span><i className="forest-state-completed" />已完成</span></div>
@@ -136,7 +136,7 @@ export function ForestPage() {
     </div>
     {root && <NotebookRootMenu courseId={root} courseName={courses.find(course => course.course_id === root)?.name ?? '课程'} onClose={() => setRoot(undefined)} returnState={returnState} />}
     {homeOpen && <HomeCoursesDialog courses={courses} busyCourseId={homeBusy} error={homeError} onToggle={course => void toggleHome(course)} onClose={() => setHomeOpen(false)} />}
-    {dialog === 'relations' && <ForestRelationsPanel relations={relations} courses={courses} selectedRelationId={selectedRelation} onLocate={relation => { setSelectedRelation(relation.id); directories.load([relation.source_course_id, relation.target_course_id]); setDialog(undefined) }} onChange={() => void reload()} onClose={() => setDialog(undefined)} />}
+    {dialog === 'relations' && <ForestRelationsPanel relations={vines.records} courses={courses} selectedRelationId={selectedRelation} onLocate={relation => { setSelectedRelation(relation.id); directories.load([relation.source_course_id, relation.target_course_id]); setDialog(undefined) }} onChanged={() => void reload()} onClose={() => setDialog(undefined)} />}
     {dialog === 'import' && <CurriculumImportPanel courses={courses} onConfirmed={() => { void reload(); void refreshCourses() }} onClose={() => setDialog(undefined)} />}
   </div>
 }

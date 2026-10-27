@@ -1,35 +1,28 @@
 from __future__ import annotations
 
-import json
-from typing import Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.v1.shared import ensure_course, ensure_note
+from app.api.v1.shared import ensure_course
 from app.db.database import get_db
-from app.db.models import Course, CrossCourseRelation, Note
+from app.db.models import Course, Notebook, NotebookRelation, NotebookSection
 from app.forest.service import (
     ForestConflict,
-    active_note_sources,
     list_forest_courses,
-    note_is_visible,
-    relation_display,
-    relation_fingerprint,
+    notebook_relation_display,
+    relation_anchor_fingerprint,
     update_profile,
-    visible_note_predicate,
 )
 from app.notes.notebook import list_course_notebooks, notebook_outline
 from app.schemas.forest import (
-    CrossCourseRelationCreate,
-    CrossCourseRelationRead,
-    CrossCourseRelationReview,
     ForestCourseRead,
     ForestCourseUpdate,
     ForestRead,
     ForestSearchRead,
+    NotebookRelationCreate,
+    NotebookRelationRead,
 )
 from app.schemas.notebook import CourseTreeRead
 
@@ -57,32 +50,37 @@ def search_forest(
     term = q.strip()
     if not term:
         return []
-    rows = (
-        db.execute(
-            select(
-                Course.id.label("course_id"),
-                Course.name.label("course_name"),
-                Note.id.label("note_id"),
-                Note.title,
-                Note.material_id,
-                Note.notebook_id,
-            )
-            .join(Note, Note.course_id == Course.id)
-            .where(
-                Course.deleted_at.is_(None),
-                visible_note_predicate(),
-                or_(
-                    Note.title.icontains(term, autoescape=True),
-                    Course.name.icontains(term, autoescape=True),
-                ),
-            )
-            .order_by(Course.name, Note.title, Note.id)
-            .limit(40)
+    rows = db.execute(
+        select(
+            Course.id, Course.name, Notebook.id, Notebook.title,
+            NotebookSection.block_id, NotebookSection.heading, NotebookSection.text,
         )
-        .mappings()
-        .all()
-    )
-    return [dict(row) for row in rows]
+        .join(Notebook, Notebook.course_id == Course.id)
+        .outerjoin(NotebookSection, NotebookSection.notebook_id == Notebook.id)
+        .where(
+            Course.deleted_at.is_(None),
+            Notebook.deleted_at.is_(None),
+            or_(
+                Notebook.title.icontains(term, autoescape=True),
+                NotebookSection.heading.icontains(term, autoescape=True),
+                NotebookSection.text.icontains(term, autoescape=True),
+            ),
+        )
+        .order_by(Course.name, Notebook.title, NotebookSection.order)
+        .limit(40)
+    ).all()
+    results: list[dict] = []
+    for course_id, course_name, notebook_id, title, block_id, heading, text in rows:
+        snippet = " ".join((text or "").split())[:240]
+        results.append({
+            "course_id": course_id,
+            "course_name": course_name,
+            "notebook_id": notebook_id,
+            "block_id": block_id,
+            "title": f"{title} · {heading}" if heading else title,
+            "snippet": snippet,
+        })
+    return results
 
 
 @router.patch("/forest/courses/{course_id}", response_model=ForestCourseRead)
@@ -104,145 +102,90 @@ def patch_profile(
     return next(row for row in list_forest_courses(db) if row["course_id"] == course_id)
 
 
-@router.get("/forest/relations", response_model=list[CrossCourseRelationRead])
-def get_relations(
-    status: Literal["confirmed", "pending", "rejected", "all"] = "confirmed",
-    db: Session = Depends(get_db),
-) -> list[dict]:
-    query = select(CrossCourseRelation).order_by(
-        CrossCourseRelation.created_at, CrossCourseRelation.id
-    )
-    if status != "all":
-        query = query.where(CrossCourseRelation.status == status)
+@router.get("/forest/relations", response_model=list[NotebookRelationRead])
+def get_relations(db: Session = Depends(get_db)) -> list[dict]:
+    relations = db.scalars(select(NotebookRelation).order_by(
+        NotebookRelation.created_at, NotebookRelation.id,
+    )).all()
     return [
-        row
-        for relation in db.scalars(query).all()
-        if (row := relation_display(db, relation)) is not None
+        row for relation in relations
+        if (row := notebook_relation_display(db, relation)) is not None
     ]
 
 
-@router.post("/forest/relations", response_model=CrossCourseRelationRead, status_code=201)
-def create_relation(payload: CrossCourseRelationCreate, db: Session = Depends(get_db)) -> dict:
-    source, target = (
-        ensure_note(db, payload.source_note_id),
-        ensure_note(db, payload.target_note_id),
-    )
-    if not note_is_visible(db, source) or not note_is_visible(db, target):
-        raise HTTPException(status_code=404, detail="关系所引用的笔记或资料已移除")
+@router.post("/forest/relations", response_model=NotebookRelationRead, status_code=201)
+def create_relation(payload: NotebookRelationCreate, db: Session = Depends(get_db)) -> dict:
+    source = db.get(Notebook, payload.source_notebook_id)
+    target = db.get(Notebook, payload.target_notebook_id)
+    for notebook in (source, target):
+        if notebook is None or notebook.deleted_at is not None or notebook.course_id is None:
+            raise HTTPException(status_code=404, detail="关系引用的笔记不存在或尚未归入课程")
+    assert source is not None and target is not None
+    fingerprints = _validate_relation_anchors(source, target, payload.source_block_id, payload.target_block_id)
     if source.id == target.id or source.course_id == target.course_id:
-        raise HTTPException(status_code=422, detail="跨课关系必须引用不同课程中的两篇真实笔记")
-    if payload.relation_type == "related" and source.id > target.id:
-        source, target = target, source
-    source_refs, target_refs = active_note_sources(db, source), active_note_sources(db, target)
-    if not source_refs or not target_refs:
-        raise HTTPException(status_code=422, detail="两端笔记都需要可核对的当前课件来源")
-    values = {
-        "source_course_id": source.course_id,
-        "target_course_id": target.course_id,
-        "source_note_id": source.id,
-        "target_note_id": target.id,
-        "source_revision": source.revision_number,
-        "target_revision": target.revision_number,
-        "relation_type": payload.relation_type,
-        "reason": payload.reason,
-        "status": "confirmed",
-        "origin": "manual",
-        "activation_mode": "manual",
-        "evidence_fingerprint": relation_fingerprint(db, source, target, [r.id for r in source_refs], [r.id for r in target_refs]),
-        "source_ref_ids_json": json.dumps([ref.id for ref in source_refs]),
-        "target_ref_ids_json": json.dumps([ref.id for ref in target_refs]),
-    }
-    existing = db.scalar(
-        select(CrossCourseRelation).where(
-            CrossCourseRelation.source_note_id == source.id,
-            CrossCourseRelation.target_note_id == target.id,
-            CrossCourseRelation.relation_type == payload.relation_type,
-        )
-    )
+        raise HTTPException(status_code=422, detail="跨课关系必须引用不同课程中的两本笔记")
+    existing = db.scalar(select(NotebookRelation).where(
+        NotebookRelation.source_notebook_id == payload.source_notebook_id,
+        NotebookRelation.target_notebook_id == payload.target_notebook_id,
+        NotebookRelation.relation_type == payload.relation_type,
+        NotebookRelation.source_block_id == payload.source_block_id,
+        NotebookRelation.target_block_id == payload.target_block_id,
+    ))
     if existing is not None:
-        display = relation_display(db, existing)
-        if display is None or (not display["stale"] and existing.status != "rejected"):
-            raise HTTPException(status_code=409, detail="这两篇笔记的同类型关系已存在")
-        # Reconnecting is explicit user confirmation of the current evidence. Keep
-        # the relationship ID while protecting against another simultaneous review.
-        changed = db.execute(
-            update(CrossCourseRelation)
-            .where(
-                CrossCourseRelation.id == existing.id,
-                CrossCourseRelation.source_revision == existing.source_revision,
-                CrossCourseRelation.target_revision == existing.target_revision,
-                CrossCourseRelation.source_ref_ids_json == existing.source_ref_ids_json,
-                CrossCourseRelation.target_ref_ids_json == existing.target_ref_ids_json,
-                *[
-                    exists(
-                        select(1).where(
-                            Note.id == note.id, Note.revision_number == note.revision_number
-                        )
-                    )
-                    for note in (source, target)
-                ],
-            )
-            .values(**values)
-        )
-        if changed.rowcount != 1:
-            db.rollback()
-            raise HTTPException(status_code=409, detail="关系或笔记已变化，请刷新后重新连接")
-        relation = existing
-    else:
-        relation = CrossCourseRelation(**values)
-        db.add(relation)
+        raise HTTPException(status_code=409, detail="这两本笔记的同类型关系已存在")
+    relation = NotebookRelation(
+        source_notebook_id=payload.source_notebook_id,
+        target_notebook_id=payload.target_notebook_id,
+        relation_type=payload.relation_type,
+        description=payload.reason,
+        source_block_id=payload.source_block_id,
+        target_block_id=payload.target_block_id,
+        source_fingerprint=fingerprints[0], target_fingerprint=fingerprints[1],
+    )
+    db.add(relation)
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status_code=409, detail="这两篇笔记的同类型关系已存在") from exc
+        raise HTTPException(status_code=409, detail="这两本笔记的同类型关系已存在") from exc
     db.refresh(relation)
-    return relation_display(db, relation)
-
-
-def _ensure_relation(db: Session, relation_id: str) -> tuple[CrossCourseRelation, dict]:
-    relation = db.get(CrossCourseRelation, relation_id)
-    display = relation_display(db, relation) if relation is not None else None
+    display = notebook_relation_display(db, relation)
     if display is None:
-        raise HTTPException(status_code=404, detail="跨课关系不存在或引用的课程/资料已移除")
-    return relation, display
+        raise HTTPException(status_code=409, detail="关系创建后无法展示，请检查课程归属")
+    return display
 
 
-@router.post("/forest/relations/{relation_id}/review", response_model=CrossCourseRelationRead)
-def review_relation(
-    relation_id: str, payload: CrossCourseRelationReview, db: Session = Depends(get_db)
-) -> dict:
-    relation, display = _ensure_relation(db, relation_id)
-    if payload.decision == "confirm":
-        if display["stale"]:
-            raise HTTPException(
-                status_code=409, detail="笔记版本或来源已变化，请重新建立或生成关系"
-            )
-        predicates = [
-            exists(select(1).where(Note.id == note_id, Note.revision_number == revision))
-            for note_id, revision in [
-                (relation.source_note_id, relation.source_revision),
-                (relation.target_note_id, relation.target_revision),
-            ]
-        ]
-        changed = db.execute(
-            update(CrossCourseRelation)
-            .where(CrossCourseRelation.id == relation_id, *predicates)
-            .values(status="confirmed", activation_mode="manual")
-        )
-        if changed.rowcount != 1:
-            db.rollback()
-            raise HTTPException(status_code=409, detail="笔记版本已变化，请刷新后重试")
-    else:
-        relation.status = "rejected"
+def _validate_relation_anchors(source, target, source_block_id, target_block_id):
+    fingerprints = (
+        relation_anchor_fingerprint(source, source_block_id),
+        relation_anchor_fingerprint(target, target_block_id),
+    )
+    if any(block_id is not None and fingerprint is None for block_id, fingerprint in zip(
+        (source_block_id, target_block_id), fingerprints, strict=True,
+    )):
+        raise HTTPException(422, "关联小节不存在于所选笔记的当前正文，请重新选择")
+    return fingerprints
+
+
+@router.post("/forest/relations/{relation_id}/refresh", response_model=NotebookRelationRead)
+def refresh_relation(relation_id: str, db: Session = Depends(get_db)) -> dict:
+    relation = db.get(NotebookRelation, relation_id)
+    if relation is None or notebook_relation_display(db, relation) is None:
+        raise HTTPException(404, "关系不存在或笔记已不可用")
+    source = db.get(Notebook, relation.source_notebook_id)
+    target = db.get(Notebook, relation.target_notebook_id)
+    relation.source_fingerprint, relation.target_fingerprint = _validate_relation_anchors(
+        source, target, relation.source_block_id, relation.target_block_id,
+    )
     db.commit()
-    db.refresh(relation)
-    return relation_display(db, relation)
+    return notebook_relation_display(db, relation)
 
 
 @router.delete("/forest/relations/{relation_id}")
 def delete_relation(relation_id: str, db: Session = Depends(get_db)) -> dict:
-    relation, _ = _ensure_relation(db, relation_id)
-    relation.status = "rejected"
+    relation = db.get(NotebookRelation, relation_id)
+    if relation is None:
+        raise HTTPException(status_code=404, detail="关系不存在")
+    db.delete(relation)
     db.commit()
     return {"deleted": True}

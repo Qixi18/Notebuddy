@@ -1,8 +1,9 @@
-import type { Course, NotebookSummary } from '../types'
+import type { Course, CourseOverview, NotebookSummary } from '../types'
 import { request } from './http'
 
 export const courseApi = {
   listCourses: () => request<Course[]>('/api/v1/courses'),
+  getCourseOverview: (courseId: string) => request<CourseOverview>(`/api/v1/courses/${courseId}/overview`),
   listDeletedCourses: () => request<Course[]>('/api/v1/courses/deleted'),
   restoreCourse: (id: string) => request<Course>(`/api/v1/courses/${id}/restore`, { method: 'POST' }),
   listDeletedNotebooks: () => request<NotebookSummary[]>('/api/v1/notebooks/deleted'),

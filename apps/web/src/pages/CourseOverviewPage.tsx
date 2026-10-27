@@ -5,22 +5,22 @@ import { featurePath, useWorkspace } from '../components/AppLayout'
 import { ProcessingStatus } from '../components/ProcessingStatus'
 import { CourseKnowledgeStructure } from './CourseKnowledgeStructure'
 import { api } from '../api'
-import type { NotebookSummary } from '../types'
+import type { CourseOverview } from '../types'
 import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 
 type CourseTab = 'overview' | 'structure'
 
 export function CourseOverviewPage() {
   const { courseId = '' } = useParams()
-  const { course, courseContentLoading, materials, notes, graph, job, coursesLoading, refreshCourses } = useWorkspace()
+  const { course, courseContentLoading, materials, job, coursesLoading, refreshCourses } = useWorkspace()
   const [activeTab, setActiveTab] = useState<CourseTab>('overview')
   const navigate = useNavigate()
-  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
+  const [overview, setOverview] = useState<CourseOverview>()
   const [rootOpen, setRootOpen] = useState(false)
   const [bookError, setBookError] = useState<string>()
   useEffect(() => {
     let active = true
-    void api.listNotebooks(courseId).then(items => { if (active) setNotebooks(items) }).catch((cause: unknown) => { if (active) setBookError(cause instanceof Error ? cause.message : '笔记本列表读取失败') })
+    void api.getCourseOverview(courseId).then(value => { if (active) setOverview(value) }).catch((cause: unknown) => { if (active) setBookError(cause instanceof Error ? cause.message : '课程概览读取失败') })
     return () => { active = false }
   }, [courseId])
 
@@ -38,8 +38,11 @@ export function CourseOverviewPage() {
   }
 
   const latestMaterial = materials[0]
-  const materialCount = materials.length
+  const materialCount = overview?.counts.materials ?? materials.length
   const readyCount = materials.filter((material) => material.status === 'completed').length
+  const notebooks = overview?.notebooks ?? []
+  const sectionCount = overview?.counts.sections ?? 0
+  const needsAttention = overview?.counts.materials_needing_attention ?? 0
 
   function focusTab(tab: CourseTab) {
     setActiveTab(tab)
@@ -74,7 +77,7 @@ export function CourseOverviewPage() {
         <section id="course-panel-overview" className="course-overview-panel" role="tabpanel" aria-labelledby="course-tab-overview">
           <div className="course-overview-intro">
             <div className="course-overview-mark" aria-hidden="true">⌂</div>
-            <div><h2>继续这门课程</h2><p>{materialCount ? `${readyCount} 份资料已完成整理。` : '上传课件后，NoteBuddy 会将来源、知识结构和学习笔记归入当前课程。'}</p></div>
+            <div><h2>继续这门课程</h2><p>{materialCount ? `${readyCount} 份资料已完成整理${needsAttention ? `，${needsAttention} 份解析需检查` : ''}。` : '上传课件后，NoteBuddy 会将来源、知识结构和学习笔记归入当前课程。'}</p></div>
           </div>
 
           <div className="course-entry-list">
@@ -84,14 +87,14 @@ export function CourseOverviewPage() {
               <span className="course-entry-copy"><strong>课程资料</strong><small>{materialCount ? `${materialCount} 份资料 · 查看解析状态与页码来源` : '上传课件并查看解析状态与页码来源'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>
             </Link>
-            <Link className="course-entry-row" to={featurePath(courseId, 'notes')}>
+            <Link className="course-entry-row" to={notebooks[0] ? `/courses/${courseId}/notebooks/${notebooks[0].id}` : featurePath(courseId, 'materials')}>
               <span className="course-entry-icon course-entry-icon-notes" aria-hidden="true">▤</span>
-              <span className="course-entry-copy"><strong>课程笔记</strong><small>{notes.length ? `${notes.length} 条笔记 · 阅读、编辑并核对引用` : '阅读整理内容，或从已解析的资料开始生成'}</small></span>
+              <span className="course-entry-copy"><strong>课程笔记</strong><small>{sectionCount ? `${sectionCount} 个小节 · 阅读、编辑并核对来源` : '阅读整理内容，或从已解析的资料开始生成'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>
             </Link>
             <button className="course-entry-row" type="button" onClick={() => focusTab('structure')}>
               <span className="course-entry-icon course-entry-icon-structure" aria-hidden="true">⌘</span>
-              <span className="course-entry-copy"><strong>知识结构</strong><small>{graph.nodes.length ? `${graph.nodes.length} 个知识点 · 查看课程脉络与关联` : '从课程资料整理知识点和概念关联'}</small></span>
+              <span className="course-entry-copy"><strong>知识结构</strong><small>{sectionCount ? `${sectionCount} 个小节 · 查看课程脉络与关联` : '从课程资料整理知识点和概念关联'}</small></span>
               <span className="course-entry-arrow" aria-hidden="true">→</span>
             </button>
           </div>

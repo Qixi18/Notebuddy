@@ -4,9 +4,8 @@ import { api } from '../../api'
 import type { HomeLeafPreview } from './HomeCourseTree'
 import './note-preview.css'
 
-function excerpt(markdown: string) {
-  const paragraph = markdown.split('\n').map(line => line.trim()).find(line => line && !/^(#|\$\$|---)/.test(line)) ?? ''
-  const plain = paragraph.replace(/^[-*]\s+/, '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`]/g, '')
+function excerpt(text: string) {
+  const plain = text.replace(/\s+/g, ' ').trim()
   return plain.length > 145 ? `${plain.slice(0, 145)}…` : plain
 }
 export function HomeNotePreview({ id, preview, courseId, onEnter, onLeave, onDismiss }: {
@@ -16,7 +15,8 @@ export function HomeNotePreview({ id, preview, courseId, onEnter, onLeave, onDis
   const [loaded, setLoaded] = useState<{ id: string; text: string }>()
   const host = useRef<HTMLDivElement>(null)
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false })
-  const noteId = preview.leaf.section.id
+  const blockId = preview.leaf.section.block_id ?? preview.leaf.section.id
+  const noteId = JSON.stringify([preview.book.id, blockId, preview.leaf.section.revision_number])
   const text = loaded?.id === noteId ? loaded.text : undefined
   useLayoutEffect(() => {
     const measure = () => {
@@ -35,11 +35,14 @@ export function HomeNotePreview({ id, preview, courseId, onEnter, onLeave, onDis
   }, [preview.target, text])
   useEffect(() => {
     let active = true
-    void api.getNote(noteId).then(note => {
-      if (active) setLoaded({ id: noteId, text: note.course_id === courseId && note.notebook_id === preview.book.id ? excerpt(note.content_markdown) : '预览暂不可用，点击叶子打开笔记。' })
+    if (preview.book.course_id !== courseId || preview.leaf.section.notebook_id !== preview.book.id) return
+    void api.getNotebookSections(courseId, preview.book.id).then(sections => {
+      const section = sections.find(row => row.block_id === blockId)
+      if (active) setLoaded({ id: noteId, text: section ? excerpt(section.excerpt)
+        || '此小节暂时没有正文，点击叶子打开笔记。' : '预览暂不可用，点击叶子打开笔记。' })
     }).catch(() => { if (active) setLoaded({ id: noteId, text: '预览暂不可用，点击叶子打开笔记。' }) })
     return () => { active = false }
-  }, [noteId, preview.book.id, courseId])
+  }, [noteId, blockId, preview.book.id, preview.book.course_id, preview.leaf.section.notebook_id, courseId])
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') onDismiss() }
     window.addEventListener('keydown', dismiss)

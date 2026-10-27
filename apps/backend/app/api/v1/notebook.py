@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select, update
@@ -10,14 +12,15 @@ from app.db.models import (
     Asset,
     Course,
     Material,
-    Note,
     Notebook,
     NotebookAsset,
     NotebookAttachment,
     NotebookCoverAsset,
+    NotebookEditSuggestion,
     NotebookReadingPosition,
     NotebookRelation,
     NotebookRevisionAsset,
+    NotebookSection,
     ProcessingJob,
     utc_now,
 )
@@ -38,20 +41,23 @@ from app.notes.document import (
     DocumentValidationError,
     attachment_ids,
     document_to_blocks,
-    dump_document,
     legacy_blocks_to_document,
     load_document,
     normalize_document,
-    validate_document,
 )
-from app.notes.history import get_snapshot, list_snapshots, record_snapshot
+from app.notes.edits import EditRejected, apply_edits
+from app.notes.history import get_snapshot, list_snapshots
+from app.notes.index import sections_for_notebook
 from app.notes.notebook import default_notebook, list_course_notebooks, notebook_outline
+from app.notes.store import DocumentConflict, block_source_payload, write_document
 from app.schemas.notebook import (
-    ChapterContentRead,
+    BlockSourceRead,
     NotebookAttachmentRead,
     NotebookBindRequest,
     NotebookDocumentRead,
     NotebookDocumentUpdate,
+    NotebookEditSuggestionRead,
+    NotebookEditSuggestionReview,
     NotebookMoveRequest,
     NotebookOrderUpdate,
     NotebookRead,
@@ -282,27 +288,30 @@ def put_unbound_document(notebook_id: str, payload: NotebookDocumentUpdate,
     book = db.get(Notebook, notebook_id)
     if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未绑定的笔记不存在")
+    if payload.blocks is not None and not load_document(book.document_json).legacy:
+        raise HTTPException(409, "笔记已使用新版编辑器，请刷新页面后继续编辑")
     try:
-        content = validate_document(normalize_document(payload.content)) if payload.content is not None else \
-            validate_document(legacy_blocks_to_document([block.model_dump() for block in payload.blocks or []]))
+        if payload.content is not None:
+            content = payload.content
+        else:
+            blocks = [block.model_dump() for block in payload.blocks or []]
+            if len({block["id"] for block in blocks}) != len(blocks):
+                raise HTTPException(422, "正文块编号不能重复")
+            content = legacy_blocks_to_document(blocks)
+        _ensure_document_image_ownership(db, notebook_id, normalize_document(content))
+        next_revision, stored = write_document(
+            db, book, content, expected_revision=payload.expected_revision,
+            origin="autosave", legacy_compatible=payload.blocks is not None,
+        )
+    except DocumentConflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     except DocumentValidationError as exc:
         raise HTTPException(422, str(exc)) from exc
-    _ensure_document_image_ownership(db, notebook_id, content)
-    now = utc_now()
-    next_revision = payload.expected_revision + 1
-    result = db.execute(update(Notebook).where(
-        Notebook.id == notebook_id,
-        Notebook.course_id.is_(None),
-        Notebook.document_revision == payload.expected_revision,
-    ).values(document_json=dump_document(content), document_revision=next_revision, updated_at=now))
-    if result.rowcount != 1:
-        db.rollback()
-        raise HTTPException(409, "笔记已在别处更新，请先刷新后再保存")
-    record_snapshot(db, notebook_id, next_revision, content)
     db.commit()
-    return {"schema_version": 2, "content": content,
-            "blocks": document_to_blocks(content), "revision": next_revision,
-            "updated_at": now}
+    return {"schema_version": 2, "content": stored,
+            "blocks": document_to_blocks(stored), "revision": next_revision,
+            "updated_at": book.updated_at}
 
 
 @router.get("/notebooks/{notebook_id}/revisions",
@@ -341,31 +350,23 @@ def restore_unbound_revision(notebook_id: str, revision: int,
     snapshot = get_snapshot(db, notebook_id, revision)
     if snapshot is None:
         raise HTTPException(404, "历史版本不存在")
-    stored = load_document(snapshot.document_json)
+    stored_snapshot = load_document(snapshot.document_json)
     try:
-        content = validate_document(normalize_document(stored.content))
+        _restore_document_image_ownership(db, notebook_id, stored_snapshot.content, snapshot.id)
+        next_revision, content = write_document(
+            db, book, stored_snapshot.content,
+            expected_revision=payload.expected_revision, origin="restore",
+        )
+    except DocumentConflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     except DocumentValidationError as exc:
+        db.rollback()
         raise HTTPException(422, f"历史版本内容已失效：{exc}") from exc
-    now = utc_now()
-    next_revision = payload.expected_revision + 1
-    result = db.execute(update(Notebook).where(
-        Notebook.id == notebook_id, Notebook.course_id.is_(None),
-        Notebook.document_revision == payload.expected_revision,
-    ).values(document_json=dump_document(content),
-             document_revision=next_revision, updated_at=now))
-    if result.rowcount != 1:
-        db.rollback()
-        raise HTTPException(409, "笔记已在别处更新，请先刷新后再恢复")
-    try:
-        _restore_document_image_ownership(db, notebook_id, content, snapshot.id)
-    except HTTPException:
-        db.rollback()
-        raise
-    record_snapshot(db, notebook_id, next_revision, content, origin="restore")
     db.commit()
     return {"schema_version": 2, "content": content,
             "blocks": document_to_blocks(content), "revision": next_revision,
-            "updated_at": now}
+            "updated_at": book.updated_at}
 
 
 @router.post("/notebooks/{notebook_id}/bind", response_model=NotebookSummary)
@@ -389,6 +390,9 @@ def bind_notebook(notebook_id: str, payload: NotebookBindRequest, db: Session = 
     book.display_order = book.tree_slot
     book.order_revision = next_order_revision
     db.flush()
+    db.execute(update(NotebookSection).where(
+        NotebookSection.notebook_id == notebook_id,
+    ).values(course_id=course.id))
     bound_book = book
     db.commit()
     db.refresh(bound_book)
@@ -410,6 +414,9 @@ def unbind_notebook(notebook_id: str, db: Session = Depends(get_db)):
     book.display_order = 0
     book.order_revision = 0
     book.is_default = False
+    db.execute(update(NotebookSection).where(
+        NotebookSection.notebook_id == notebook_id,
+    ).values(course_id=None))
     db.commit()
     db.refresh(book)
     return _summary(book)
@@ -565,6 +572,9 @@ def move_notebook(notebook_id: str, payload: NotebookMoveRequest, db: Session = 
     book.display_order = book.tree_slot
     book.order_revision = course.notebook_order_revision + 1
     book.is_default = slot is None
+    db.execute(update(NotebookSection).where(
+        NotebookSection.notebook_id == notebook_id,
+    ).values(course_id=course.id))
     db.commit()
     db.refresh(book)
     return _summary(book)
@@ -660,32 +670,160 @@ def put_notebook_document(course_id: str, notebook_id: str, payload: NotebookDoc
         raise HTTPException(409, "笔记已使用新版编辑器，请刷新页面后继续编辑")
     try:
         if payload.content is not None:
-            content = validate_document(normalize_document(payload.content))
+            content = payload.content
         else:
             blocks = [block.model_dump() for block in payload.blocks or []]
             if len({block["id"] for block in blocks}) != len(blocks):
                 raise HTTPException(422, "正文块编号不能重复")
-            content = validate_document(legacy_blocks_to_document(blocks))
+            content = legacy_blocks_to_document(blocks)
+        _ensure_document_image_ownership(db, notebook_id, normalize_document(content))
+        next_revision, stored = write_document(
+            db, book, content, expected_revision=payload.expected_revision,
+            origin="autosave", legacy_compatible=payload.blocks is not None,
+        )
+    except DocumentConflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     except DocumentValidationError as exc:
         raise HTTPException(422, str(exc)) from exc
+    db.commit()
+    return {"schema_version": 2, "content": stored,
+            "blocks": document_to_blocks(stored),
+            "revision": next_revision, "updated_at": book.updated_at}
 
-    _ensure_document_image_ownership(db, notebook_id, content)
 
+@router.get("/notebooks/{notebook_id}/edit-suggestions",
+            response_model=list[NotebookEditSuggestionRead])
+def list_edit_suggestions(notebook_id: str, status: str | None = "pending",
+                          db: Session = Depends(get_db)):
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    query = select(NotebookEditSuggestion).where(
+        NotebookEditSuggestion.notebook_id == notebook_id,
+    )
+    if status:
+        query = query.where(NotebookEditSuggestion.status == status)
+    rows = db.scalars(query.order_by(
+        NotebookEditSuggestion.created_at.desc()).limit(50)).all()
+    result = []
+    for row in rows:
+        try:
+            operations = json.loads(row.ops_json)
+            proposed = load_document(row.proposed_document_json)
+            result.append({
+                "id": row.id, "notebook_id": row.notebook_id,
+                "base_revision": row.base_revision, "rationale": row.rationale,
+                "operations": operations if isinstance(operations, list) else [],
+                "proposed_content": proposed.content if proposed.warning is None else None,
+                "status": row.status, "created_at": row.created_at,
+                "reviewed_at": row.reviewed_at,
+            })
+        except (TypeError, ValueError):
+            result.append({
+                "id": row.id, "notebook_id": row.notebook_id,
+                "base_revision": row.base_revision, "rationale": row.rationale,
+                "operations": [], "proposed_content": None,
+                "status": row.status, "created_at": row.created_at,
+                "reviewed_at": row.reviewed_at,
+            })
+    return result
+
+
+@router.post("/notebooks/{notebook_id}/edit-suggestions/{suggestion_id}/review",
+             response_model=NotebookDocumentRead)
+def review_edit_suggestion(notebook_id: str, suggestion_id: str,
+                           payload: NotebookEditSuggestionReview,
+                           db: Session = Depends(get_db)):
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    suggestion = db.get(NotebookEditSuggestion, suggestion_id)
+    if suggestion is None or suggestion.notebook_id != notebook_id:
+        raise HTTPException(404, "修改建议不存在")
+    if suggestion.status != "pending":
+        raise HTTPException(409, "该建议已处理")
     now = utc_now()
-    next_revision = payload.expected_revision + 1
-    result = db.execute(update(Notebook).where(
-        Notebook.id == notebook_id, Notebook.course_id == course_id,
-        Notebook.document_revision == payload.expected_revision,
-    ).values(document_json=dump_document(content, legacy_compatible=payload.blocks is not None),
-             document_revision=next_revision, updated_at=now))
-    if result.rowcount != 1:
+    if payload.decision == "reject":
+        changed = db.execute(update(NotebookEditSuggestion).where(
+            NotebookEditSuggestion.id == suggestion_id,
+            NotebookEditSuggestion.notebook_id == notebook_id,
+            NotebookEditSuggestion.status == "pending",
+        ).values(status="rejected", reviewed_at=now))
+        if changed.rowcount != 1:
+            db.rollback()
+            raise HTTPException(409, "该建议已处理")
+        db.commit()
+        stored = load_document(book.document_json)
+        return {"schema_version": 2, "content": stored.content,
+                "blocks": document_to_blocks(stored.content),
+                "revision": book.document_revision, "updated_at": book.updated_at}
+    if book.document_revision != suggestion.base_revision:
+        suggestion.status = "stale"
+        suggestion.reviewed_at = now
+        db.commit()
+        raise HTTPException(409, "笔记正文已变化，该建议已失效；请重新生成修改建议")
+    if payload.expected_revision != book.document_revision:
+        raise HTTPException(409, "笔记正文版本已变化，请刷新后重试")
+    try:
+        operations = json.loads(suggestion.ops_json)
+        if not isinstance(operations, list) or not operations:
+            raise ValueError("修改建议缺少有效操作")
+        selected = payload.selected_operation_indices
+        if selected is not None:
+            if (not selected or len(set(selected)) != len(selected)
+                    or any(index < 0 or index >= len(operations) for index in selected)):
+                raise ValueError("所选修改操作无效")
+            operations = [operations[index] for index in selected]
+        proposed = load_document(suggestion.proposed_document_json) if selected is None else None
+        proposed_content = proposed.content if proposed is not None else apply_edits(
+            load_document(book.document_json).content, operations,
+        )
+    except (TypeError, ValueError, EditRejected) as exc:
+        raise HTTPException(422, f"修改建议内容无效：{exc}") from exc
+    if proposed is not None and proposed.warning:
+        raise HTTPException(422, proposed.warning)
+    _ensure_document_image_ownership(db, notebook_id, proposed_content)
+    changed = db.execute(update(NotebookEditSuggestion).where(
+        NotebookEditSuggestion.id == suggestion_id,
+        NotebookEditSuggestion.notebook_id == notebook_id,
+        NotebookEditSuggestion.status == "pending",
+    ).values(status="applying"))
+    if changed.rowcount != 1:
         db.rollback()
-        raise HTTPException(409, "笔记已在别处更新，请先刷新后再保存")
-    record_snapshot(db, notebook_id, next_revision, content)
+        raise HTTPException(409, "该建议已处理")
+    try:
+        next_revision, content = write_document(
+            db, book, proposed_content,
+            expected_revision=payload.expected_revision, origin="ai_suggestion",
+        )
+    except DocumentConflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    suggestion.status = "accepted" if payload.selected_operation_indices is None else "partially_accepted"
+    suggestion.reviewed_at = now
     db.commit()
     return {"schema_version": 2, "content": content,
             "blocks": document_to_blocks(content),
-            "revision": next_revision, "updated_at": now}
+            "revision": next_revision, "updated_at": book.updated_at}
+
+
+@router.get("/notebooks/{notebook_id}/blocks/{block_id}/sources",
+            response_model=list[BlockSourceRead])
+def get_block_sources(notebook_id: str, block_id: str, db: Session = Depends(get_db)):
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise HTTPException(404, "笔记不存在")
+    return block_source_payload(db, notebook_id, block_id)
+
+
+@router.get("/courses/{course_id}/notebooks/{notebook_id}/sections")
+def get_notebook_sections(course_id: str, notebook_id: str, db: Session = Depends(get_db)):
+    ensure_notebook(db, course_id, notebook_id)
+    return [{
+        "block_id": row.block_id, "heading": row.heading, "level": row.level,
+        "order": row.order, "revision": row.revision, "excerpt": row.text[:300],
+    } for row in sections_for_notebook(db, notebook_id)]
 
 
 @router.get("/courses/{course_id}/notebooks/{notebook_id}/revisions",
@@ -713,36 +851,27 @@ def read_notebook_revision(course_id: str, notebook_id: str, revision: int,
              response_model=NotebookDocumentRead)
 def restore_notebook_revision(course_id: str, notebook_id: str, revision: int,
                               payload: NotebookRestoreRequest, db: Session = Depends(get_db)):
-    ensure_notebook(db, course_id, notebook_id)
+    book = ensure_notebook(db, course_id, notebook_id)
     snapshot = get_snapshot(db, notebook_id, revision)
     if snapshot is None:
         raise HTTPException(404, "历史版本不存在")
     stored = load_document(snapshot.document_json)
     try:
-        content = validate_document(normalize_document(stored.content))
+        _restore_document_image_ownership(db, notebook_id, stored.content, snapshot.id)
+        next_revision, content = write_document(
+            db, book, stored.content,
+            expected_revision=payload.expected_revision, origin="restore",
+        )
+    except DocumentConflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
     except DocumentValidationError as exc:
+        db.rollback()
         raise HTTPException(422, f"历史版本内容已失效：{exc}") from exc
-
-    now = utc_now()
-    next_revision = payload.expected_revision + 1
-    result = db.execute(update(Notebook).where(
-        Notebook.id == notebook_id, Notebook.course_id == course_id,
-        Notebook.document_revision == payload.expected_revision,
-    ).values(document_json=dump_document(content),
-             document_revision=next_revision, updated_at=now))
-    if result.rowcount != 1:
-        db.rollback()
-        raise HTTPException(409, "笔记已在别处更新，请刷新后再恢复")
-    try:
-        _restore_document_image_ownership(db, notebook_id, content, snapshot.id)
-    except HTTPException:
-        db.rollback()
-        raise
-    record_snapshot(db, notebook_id, next_revision, content, origin="restore")
     db.commit()
     return {"schema_version": 2, "content": content,
             "blocks": document_to_blocks(content),
-            "revision": next_revision, "updated_at": now}
+            "revision": next_revision, "updated_at": book.updated_at}
 
 
 @router.post("/courses/{course_id}/notebooks/{notebook_id}/attachments",
@@ -871,21 +1000,6 @@ def get_asset_content(
                                  "Content-Disposition": "inline"})
 
 
-def chapter_content(db: Session, course_id: str, book: Notebook, material_id: str):
-    material = db.get(Material, material_id)
-    if (material is None or material.notebook_id != book.id or book.course_id != course_id
-            or material.deleted_at is not None):
-        raise HTTPException(404, "该笔记本中的章节不存在或已移除")
-    return {"material_id": material_id, "sections": db.scalars(select(Note).where(
-        Note.course_id == course_id, Note.notebook_id == book.id, Note.material_id == material_id
-    ).order_by(Note.section_order, Note.created_at, Note.id)).all()}
-
-
-@router.get("/courses/{course_id}/notebooks/{notebook_id}/chapters/{material_id}", response_model=ChapterContentRead)
-def get_named_chapter(course_id: str, notebook_id: str, material_id: str, db: Session = Depends(get_db)):
-    return chapter_content(db, course_id, ensure_notebook(db, course_id, notebook_id), material_id)
-
-
 def reorder(db: Session, course_id: str, book: Notebook, payload: NotebookOrderUpdate):
     result = db.execute(update(Notebook).where(
         Notebook.id == book.id, Notebook.order_revision == payload.expected_order_revision
@@ -920,17 +1034,21 @@ def get_position(course_id: str, notebook_id: str, db: Session = Depends(get_db)
 
 @router.put("/courses/{course_id}/notebooks/{notebook_id}/reading-position", response_model=ReadingPositionRead)
 def put_position(course_id: str, notebook_id: str, payload: ReadingPositionUpdate, db: Session = Depends(get_db)):
-    ensure_notebook(db, course_id, notebook_id)
+    book = ensure_notebook(db, course_id, notebook_id)
     if payload.chapter_id is not None:
         material = db.get(Material, payload.chapter_id)
-        if (material is None or material.course_id != course_id or material.notebook_id != notebook_id
+        if (material is None or material.notebook_id != notebook_id
                 or material.deleted_at is not None):
             raise HTTPException(404, "阅读章节不存在或不属于当前笔记本")
-    if payload.note_id is not None:
-        note = db.get(Note, payload.note_id)
-        if (note is None or note.course_id != course_id or note.notebook_id != notebook_id
-                or note.material_id != payload.chapter_id):
-            raise HTTPException(404, "阅读小节不存在或不属于当前章节")
+    if payload.block_id is not None:
+        stored = load_document(book.document_json)
+        live = {
+            (node.get("attrs") or {}).get("blockId")
+            for node in stored.content.get("content") or []
+            if isinstance(node, dict)
+        }
+        if payload.block_id not in live:
+            raise HTTPException(404, "阅读位置对应的正文块不存在")
     values = payload.model_dump(exclude={"expected_revision"})
     values.update(revision=payload.expected_revision + 1, updated_at=utc_now())
     if payload.expected_revision == 0:
@@ -962,12 +1080,6 @@ def legacy_book(db: Session, course: Course) -> Notebook:
     if book is None:
         raise HTTPException(404, "此课程尚无笔记本，请先新建笔记本")
     return book
-
-
-@router.get("/courses/{course_id}/notebook/chapters/{material_id}", response_model=ChapterContentRead)
-def get_chapter(course_id: str, material_id: str, db: Session = Depends(get_db)):
-    course = ensure_course(db, course_id)
-    return chapter_content(db, course_id, legacy_book(db, course), material_id)
 
 
 @router.patch("/courses/{course_id}/notebook/order", response_model=NotebookRead)

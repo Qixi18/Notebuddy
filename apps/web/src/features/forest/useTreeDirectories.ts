@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
 import type { CourseTree } from '../../types'
+import { projectDirectory } from './notebookRelations'
+
+const isProcessing = (tree?: CourseTree) => tree?.notebooks.some(book => book.processing
+  || book.chapters.some(chapter => ['pending', 'processing'].includes(chapter.status))) ?? false
 
 export function useTreeDirectories() {
   const [trees, setTrees] = useState<Record<string, CourseTree>>({})
@@ -17,11 +21,12 @@ export function useTreeDirectories() {
     const existing = inFlight.current.get(id)
     if (existing) return existing
     requested.current.add(id)
-    const pending = api.getCourseTree(id).then(tree => {
+    const pending = api.getCourseTree(id).then(raw => {
       if (!mounted.current) return
+      const tree = projectDirectory(raw)
       const previous = snapshots.current[id]
-      const pendingBefore = previous?.notebooks.some(book => book.chapters.some(chapter => ['pending', 'processing'].includes(chapter.status)))
-      const pendingAfter = tree.notebooks.some(book => book.chapters.some(chapter => ['pending', 'processing'].includes(chapter.status)))
+      const pendingBefore = isProcessing(previous)
+      const pendingAfter = isProcessing(tree)
       snapshots.current[id] = tree
       if (pendingBefore && !pendingAfter) setSettledVersion(value => value + 1)
       setTrees(current => ({ ...current, [id]: tree }))
@@ -42,7 +47,16 @@ export function useTreeDirectories() {
     setWatchKey([...watched.current].sort().join('|'))
     load(ids)
   }, [load])
-  const pendingKey = watchKey.split('|').filter(id => trees[id]?.notebooks.some(book => book.chapters.some(chapter => chapter.status === 'pending' || chapter.status === 'processing'))).join('|')
+  useEffect(() => {
+    const resume = () => { if (document.visibilityState !== 'hidden') void refresh() }
+    window.addEventListener('focus', resume)
+    document.addEventListener('visibilitychange', resume)
+    return () => {
+      window.removeEventListener('focus', resume)
+      document.removeEventListener('visibilitychange', resume)
+    }
+  }, [refresh])
+  const pendingKey = watchKey.split('|').filter(id => isProcessing(trees[id])).join('|')
   useEffect(() => {
     if (!pendingKey) return
     const timer = window.setInterval(() => {
@@ -50,5 +64,6 @@ export function useTreeDirectories() {
     }, 2000)
     return () => window.clearInterval(timer)
   }, [pendingKey, refresh])
-  return { trees: Object.values(trees), errors, load, watch, refresh, watchKey, settledVersion }
+  const directories = useMemo(() => Object.values(trees), [trees])
+  return { trees: directories, errors, load, watch, refresh, watchKey, settledVersion }
 }

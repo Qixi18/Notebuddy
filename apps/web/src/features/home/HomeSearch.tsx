@@ -55,7 +55,7 @@ export function HomeSearch({ courses, onCourse, onNote }: {
     </div>
     {open && text && <section id={resultsId} className="home-search-results" aria-label="搜索结果">
       {matches.map(course => <button key={course.id} aria-label={`课程 ${course.name}`} onClick={() => choose(() => onCourse(course.id))}><span>课程</span><strong>{course.name}</strong></button>)}
-      {results.map(note => <button key={note.note_id} onClick={() => choose(() => onNote(note))}><span>笔记</span><strong>{note.title}</strong><small>{note.course_name}</small></button>)}
+      {results.map(note => <button key={`${note.notebook_id}:${note.block_id ?? ''}`} onClick={() => choose(() => onNote(note))}><span>笔记</span><strong>{note.title}</strong><small>{note.course_name}</small></button>)}
       {loading && <p role="status">正在寻找知识点…</p>}
       {error && <p role="alert">{error}</p>}
       {!loading && !error && !matches.length && !results.length && <p role="status">没有找到相关课程或知识点</p>}

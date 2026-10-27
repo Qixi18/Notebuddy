@@ -138,6 +138,42 @@ class NotebookRevisionSummary(BaseModel):
     created_at: datetime
 
 
+class BlockSourceRead(BaseModel):
+    block_id: str
+    document_block_id: str
+    parse_run_id: str
+    parse_version: str | None = None
+    asset_id: str
+    asset_name: str
+    page_number: int
+    location_label: str
+    quote: str
+    block_type: str
+    confidence: float | None = None
+    status: str
+    generation_job_id: str | None = None
+
+
+class NotebookEditSuggestionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    notebook_id: str
+    base_revision: int
+    rationale: str
+    operations: list[dict[str, Any]] = Field(default_factory=list)
+    proposed_content: dict[str, Any] | None = None
+    status: str
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+class NotebookEditSuggestionReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["accept", "reject"]
+    expected_revision: int = Field(ge=0)
+    selected_operation_indices: list[int] | None = Field(default=None, max_length=8)
+
+
 class NotebookRevisionRead(NotebookRevisionSummary):
     schema_version: int
     content: dict[str, Any]
@@ -154,6 +190,7 @@ class NotebookRead(BaseModel):
     title: str
     tree_slot: int
     order_revision: int
+    processing: bool = False
     chapters: list[ChapterRead]
     historical_sections: list[SectionRead]
     removed_chapters: list[ChapterRead]
@@ -174,6 +211,7 @@ class ReadingPositionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     chapter_id: str | None = None
     note_id: str | None = None
+    block_id: str | None = Field(default=None, max_length=64)
     mode: Literal["chapter", "book"]
     section_offset: float = Field(ge=0, le=1)
     expected_revision: int = Field(ge=0)
@@ -184,6 +222,7 @@ class ReadingPositionRead(BaseModel):
     notebook_id: str
     chapter_id: str | None
     note_id: str | None
+    block_id: str | None = None
     mode: Literal["chapter", "book"]
     section_offset: float
     revision: int

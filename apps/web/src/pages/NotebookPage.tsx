@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { useWorkspace } from '../components/AppLayout'
-import type { AssetResource, Note, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
+import type { AssetResource, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
 import type { AssetProcessingJob } from '../types'
 import {
   NotebookEditor, type AIAction, type NotebookEditorHandle, type SelectionAnchor,
@@ -52,13 +52,10 @@ function NotebookPageBody() {
   const [uploadError, setUploadError] = useState<string>()
   const [imageError, setImageError] = useState<string>()
   const [titleError, setTitleError] = useState<string>()
-  const [importing, setImporting] = useState(false)
   const [resourcesOpen, setResourcesOpen] = useState(true)
   const [directoryOpen, setDirectoryOpen] = useState(true)
   const [activeBlockId, setActiveBlockId] = useState<string>()
   const [titleSaving, setTitleSaving] = useState(false)
-  const [linkedNote, setLinkedNote] = useState<Note>()
-  const [linkedNoteError, setLinkedNoteError] = useState<string>()
   const [selection, setSelection] = useState<SelectionAnchor | null>(null)
   const [editVersion, setEditVersion] = useState(0)
   const [draftFound, setDraftFound] = useState<NotebookDraft | null>(null)
@@ -101,6 +98,16 @@ function NotebookPageBody() {
     return true
   }, [editVersion, save.revision])
 
+  const adoptDocument = useCallback((document: DocNode, revision: number, updatedAt: string, expectedEditVersion: number) => {
+    if (editVersion !== expectedEditVersion || save.isDirty() || save.revision !== revision - 1) return false
+    const normalized = normalizeDocument(document)
+    editorRef.current?.replaceContent(normalized)
+    setContent(normalized)
+    setEditVersion((value) => value + 1)
+    save.reset(normalized, revision, updatedAt)
+    return true
+  }, [editVersion, save.isDirty, save.reset, save.revision])
+
   const bridgeValue = useMemo<NotebookBridgeValue | null>(() => courseId && notebookId && loaded ? {
     courseId,
     notebookId,
@@ -110,7 +117,9 @@ function NotebookPageBody() {
     excerpt: excerptAroundSelection(content, selection?.text),
     selection,
     insertAI,
-  } : null, [content, courseId, editVersion, insertAI, loaded, notebookId, save.revision, selection, title])
+    isDirty: save.isDirty,
+    adoptDocument,
+  } : null, [adoptDocument, content, courseId, editVersion, insertAI, loaded, notebookId, save.isDirty, save.revision, selection, title])
   useRegisterNotebookBridge(bridgeValue)
 
   useEffect(() => {
@@ -243,30 +252,8 @@ function NotebookPageBody() {
     return () => { active = false; window.clearInterval(timer) }
   }, [courseId, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision])
 
-  useEffect(() => {
-    if (!courseId || !notebookId || !linkedSectionId) { setLinkedNote(undefined); return }
-    let active = true
-    setLinkedNote(undefined)
-    setLinkedNoteError(undefined)
-    void api.getNote(linkedSectionId).then((note) => {
-      if (!active) return
-      if (note.course_id !== courseId || note.notebook_id !== notebookId) {
-        setLinkedNoteError('这个小节不属于当前笔记。')
-        return
-      }
-      setLinkedNote(note)
-    }).catch((cause: unknown) => {
-      if (active) setLinkedNoteError(cause instanceof Error ? cause.message : '小节读取失败')
-    })
-    return () => { active = false }
-  }, [courseId, linkedSectionId, notebookId])
-
   const headings = useMemo(() => extractOutline(content), [content])
-  const canImportExisting = (content.content ?? []).every((node) => node.type === 'paragraph' && !plainText(node).trim())
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
-  const hasExistingSections = Boolean(outline?.chapters.some((chapter) => chapter.sections.length) || outline?.historical_sections.length)
-  const linkedBlockId = linkedNote ? `source-${linkedNote.id}` : undefined
-  const linkedNoteInDocument = Boolean(linkedBlockId && headings.some((heading) => heading.id === linkedBlockId))
   const wordCount = useMemo(() => countText(content), [content])
   const dirty = save.state !== 'saved' || title !== (outline?.title ?? '')
 
@@ -277,8 +264,8 @@ function NotebookPageBody() {
 
   useEffect(() => {
     if (!loaded) return
-    const targetId = linkedBlockId && headings.some((heading) => heading.id === linkedBlockId)
-      ? linkedBlockId
+    const targetId = linkedSectionId && headings.some((heading) => heading.id === linkedSectionId)
+      ? linkedSectionId
       : !linkedSectionId && linkedChapterId
         ? headings.find((heading) => heading.level === 1 && heading.text === outline?.chapters.find((chapter) => chapter.id === linkedChapterId)?.title)?.id
         : undefined
@@ -290,7 +277,7 @@ function NotebookPageBody() {
       editorRef.current?.focusBlock(targetId)
       setActiveBlockId(targetId)
     }, 120)
-  }, [courseId, headings, linkedBlockId, linkedChapterId, linkedSectionId, loaded, notebookId, outline?.chapters])
+  }, [courseId, headings, linkedChapterId, linkedSectionId, loaded, notebookId, outline?.chapters])
 
   const handleChange = useCallback((doc: DocNode) => {
     if (!editorReadyRef.current) return
@@ -393,61 +380,6 @@ function NotebookPageBody() {
       setImageError(cause instanceof Error ? cause.message : '图片上传失败')
       return null
     }
-  }
-
-  async function importExistingNotes() {
-    if (!courseId || !notebookId || !outline || importing || !canImportExisting) return
-    const targetEditor = editorRef.current?.editor
-    if (!targetEditor) return
-    const originalContent = stableStringify(targetEditor.getJSON())
-    setImporting(true)
-    try {
-      const chapters = await Promise.all(outline.chapters.filter((chapter) => chapter.sections.length).map(async (chapter) => ({
-        title: chapter.title,
-        notes: (await api.getNotebookChapter(courseId, notebookId, chapter.id)).sections,
-      })))
-      const blocks: Array<{ id: string; type: 'h1' | 'h2' | 'p' | 'bullet'; text: string }> = []
-      chapters.forEach(({ title: chapterTitle, notes }) => {
-        blocks.push({ id: crypto.randomUUID(), type: 'h1', text: chapterTitle })
-        notes.forEach((note) => {
-          blocks.push({ id: `source-${note.id}`, type: 'h2', text: note.title })
-          blocks.push({ id: crypto.randomUUID(), type: 'p', text: note.content_markdown })
-        })
-      })
-      if (outline.historical_sections.length) {
-        const historical = await Promise.all(outline.historical_sections.map((section) => api.getNote(section.id)))
-        blocks.push({ id: crypto.randomUUID(), type: 'h1', text: '历史笔记' })
-        historical.forEach((note) => {
-          blocks.push({ id: `source-${note.id}`, type: 'h2', text: note.title })
-          blocks.push({ id: crypto.randomUUID(), type: 'p', text: note.content_markdown })
-        })
-      }
-      const document = legacyBlocksToDocument(blocks)
-      if (!pageActiveRef.current || editorRef.current?.editor !== targetEditor) return
-      if (stableStringify(targetEditor.getJSON()) !== originalContent) {
-        setNotice('导入期间正文发生了变化，已取消导入以保留当前编辑。')
-        return
-      }
-      editorRef.current?.replaceContent(document)
-      setContent(document)
-      setEditVersion((value) => value + 1)
-      save.markEdited(document)
-      setDirectoryOpen(true)
-      setNotice('已导入已有分节笔记，原分节内容保持不变。')
-    } catch (cause) {
-      setTitleError(cause instanceof Error ? cause.message : '已有笔记导入失败')
-    } finally { setImporting(false) }
-  }
-
-  function appendLinkedNote() {
-    if (!linkedNote || !editorRef.current?.editor) return
-    const document = legacyBlocksToDocument([
-      { id: `source-${linkedNote.id}`, type: 'h2', text: linkedNote.title },
-      { id: crypto.randomUUID(), type: 'p', text: linkedNote.content_markdown },
-    ])
-    const editor = editorRef.current.editor
-    editor.chain().focus().insertContentAt(editor.state.doc.content.size, document.content ?? []).run()
-    setDirectoryOpen(true)
   }
 
   function restoreDraft() {
@@ -658,9 +590,6 @@ function NotebookPageBody() {
               }}
             >{heading.text}</button>) : <p className="notebook-document-sidebar-empty">正文标题会显示在这里</p>}
           </nav>}
-          {canImportExisting && hasExistingSections && <button className="notebook-document-import" type="button" disabled={importing} onClick={() => void importExistingNotes()}>
-            {importing ? '正在导入…' : '导入已有分节笔记'}
-          </button>}
         </section>
       </aside>
 
@@ -673,12 +602,6 @@ function NotebookPageBody() {
             {save.lastSavedAt && <span>最后编辑 {clock(save.lastSavedAt)}</span>}
           </div>
           {titleError && <p className="notebook-document-error" role="alert">{titleError}</p>}
-          {linkedNoteError && <p className="notebook-document-error" role="alert">{linkedNoteError}</p>}
-          {linkedNote && !linkedNoteInDocument && <section className="notebook-document-source-note" aria-label="来源小节">
-            <div><strong>{linkedNote.title}</strong><span>来源小节</span></div>
-            <p>{linkedNote.content_markdown}</p>
-            <button type="button" onClick={appendLinkedNote}>加入当前笔记</button>
-          </section>}
           <NotebookEditor
             ref={editorRef}
             initialContent={content}

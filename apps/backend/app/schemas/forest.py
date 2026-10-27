@@ -1,5 +1,6 @@
-"""Public contracts for forest profiles and reviewed cross-course relations."""
+"""Public contracts for forest profiles and Notebook-to-Notebook relations."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -7,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 ForestLevel = Literal["foundation", "professional", "application", "unspecified"]
 LearningState = Literal["planned", "learning", "completed"]
 RelationType = Literal["related", "prerequisite", "application"]
-RelationStatus = Literal["pending", "confirmed", "rejected"]
 
 
 class ForestCourseRead(BaseModel):
@@ -18,8 +18,10 @@ class ForestCourseRead(BaseModel):
     learning_state: LearningState
     position: int
     revision: int
-    note_count: int
+    note_count: int          # number of Notebook body sections (kept for UI compatibility)
     material_count: int
+    notebook_count: int = 0
+    section_count: int = 0
     prerequisites: list[str]
 
 
@@ -30,10 +32,10 @@ class ForestRead(BaseModel):
 class ForestSearchRead(BaseModel):
     course_id: str
     course_name: str
-    note_id: str
-    notebook_id: str | None = None
+    notebook_id: str
+    block_id: str | None = None
     title: str
-    material_id: str | None
+    snippet: str = ""
 
 
 class ForestCourseUpdate(BaseModel):
@@ -63,35 +65,35 @@ class ForestCourseUpdate(BaseModel):
         return list(dict.fromkeys(cleaned))
 
 
-class CrossCourseRelationRead(BaseModel):
+class NotebookRelationRead(BaseModel):
     id: str
-    source_course_id: str
-    target_course_id: str
-    source_note_id: str
-    target_note_id: str
+    source_course_id: str | None
+    target_course_id: str | None
+    source_notebook_id: str
+    target_notebook_id: str
     source_title: str
     target_title: str
     source_course_name: str
     target_course_name: str
     relation_type: RelationType
     reason: str
-    status: RelationStatus
-    origin: Literal["manual", "ai"]
-    activation_mode: Literal["automatic", "manual"] | None = None
-    evidence_fingerprint: str | None = None
-    source_revision: int
-    target_revision: int
-    stale: bool
-    source_ref_ids: list[str]
-    target_ref_ids: list[str]
+    created_at: datetime
+    source_block_id: str | None = None
+    target_block_id: str | None = None
+    stale: bool = False
+    origin: Literal["manual", "ai"] = "manual"
+    source_fingerprint: str | None = None
+    target_fingerprint: str | None = None
 
 
-class CrossCourseRelationCreate(BaseModel):
+class NotebookRelationCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    source_note_id: str = Field(min_length=1, max_length=36)
-    target_note_id: str = Field(min_length=1, max_length=36)
-    relation_type: RelationType
+    source_notebook_id: str = Field(min_length=1, max_length=36)
+    target_notebook_id: str = Field(min_length=1, max_length=36)
+    relation_type: RelationType = "related"
     reason: str = Field(min_length=1, max_length=4000)
+    source_block_id: str | None = Field(default=None, min_length=1, max_length=64)
+    target_block_id: str | None = Field(default=None, min_length=1, max_length=64)
 
     @field_validator("reason")
     @classmethod
@@ -99,8 +101,3 @@ class CrossCourseRelationCreate(BaseModel):
         if not value.strip():
             raise ValueError("请填写关联依据")
         return value.strip()
-
-
-class CrossCourseRelationReview(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    decision: Literal["confirm", "reject"]

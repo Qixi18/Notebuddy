@@ -16,11 +16,13 @@ from dataclasses import dataclass
 from typing import Any
 
 SCHEMA_VERSION = 2
-MAX_NODES = 3_000
+# Limits are sized for real migrated vaults: a course notebook with ~70 legacy
+# sections is ~3.2k nodes and ~230KB, still small for SQLite/Tiptap.
+MAX_NODES = 8_000
 MAX_DEPTH = 12
 MAX_BLOCK_TEXT = 20_000
-MAX_TOTAL_TEXT = 500_000
-MAX_DOCUMENT_BYTES = 4_000_000
+MAX_TOTAL_TEXT = 1_000_000
+MAX_DOCUMENT_BYTES = 8_000_000
 MAX_BLOCK_ID = 64
 MAX_ATTACHMENT_ALT = 300
 MAX_LATEX = 2_000
@@ -81,7 +83,7 @@ ALLOWED_ATTRS: dict[str, set[str]] = {
     "tableHeader": {"colspan", "rowspan", "colwidth", "align"},
     "image": {"src", "alt", "title", "attachmentId", "assetId", "width", "height"},
     "inlineMath": {"latex"},
-    "blockMath": {"latex"},
+    "blockMath": {"latex", "blockId"},
     "callout": {"blockId", "tone", "title"},
     "example": {"blockId", "title"},
 }
@@ -498,7 +500,7 @@ def _normalize_nodes(nodes: Any, used: set[str], *, top_level: bool = True) -> l
             raise DocumentValidationError("文档节点格式不正确")
         node = json.loads(json.dumps(node))
         node_type = node.get("type")
-        if top_level and node_type in TOP_LEVEL_TYPES and node_type not in {"horizontalRule", "blockMath", "image"}:
+        if top_level and node_type in TOP_LEVEL_TYPES and node_type not in {"horizontalRule", "image"}:
             attrs = node.setdefault("attrs", {})
             if not isinstance(attrs, dict):
                 raise DocumentValidationError("节点属性格式不正确")

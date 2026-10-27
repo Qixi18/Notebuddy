@@ -102,10 +102,10 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   }, [treeMap, courses])
   const pins = useMemo(() => {
     const result = new Set(pinnedNoteIds)
-    if (mode === 'forest') for (const group of relationGroups) { result.add(group.relations[0].source_note_id); result.add(group.relations[0].target_note_id) }
+    if (mode === 'forest') for (const group of relationGroups) { result.add(group.relations[0].source_block_id); result.add(group.relations[0].target_block_id) }
     if (revealed) result.add(revealed)
     const selected = relations.find(relation => relation.id === selectedRelationId && relation.status === 'confirmed' && !relation.stale)
-    if (selected) { result.add(selected.source_note_id); result.add(selected.target_note_id) }
+    if (selected) { result.add(selected.source_block_id); result.add(selected.target_block_id) }
     return result
   }, [pinnedNoteIds, revealed, relations, selectedRelationId, relationGroups, mode])
   const canopies = useMemo(() => new Map(positions.map(tree => [tree.course.course_id, forestCanopyGeometry(tree.course.course_id, branchMap.get(tree.course.course_id) ?? [], pins, search, selection?.notebookId)])), [positions, branchMap, pins, search, selection?.notebookId])
@@ -234,7 +234,7 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   const focusPins = useMemo(() => {
     const ids = new Set<string>(revealed ? [revealed] : [])
     const selected = relations.find(relation => relation.id === selectedRelationId && relation.status === 'confirmed' && !relation.stale)
-    if (selected) { ids.add(selected.source_note_id); ids.add(selected.target_note_id) }
+    if (selected) { ids.add(selected.source_block_id); ids.add(selected.target_block_id) }
     return ids
   }, [revealed, relations, selectedRelationId])
   // Different relations may share both notes but occupy different vine leaves.

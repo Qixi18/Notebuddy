@@ -9,6 +9,7 @@ from app.db.database import get_db
 from app.db.models import Material
 from app.schemas.api import AssistantClaim, AssistantRequest, AssistantResponse
 from app.services.assistant_sources import sources_from_results
+from app.services.course_scope import material_in_course
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ def _scope(db: Session, course_id: str, material_id: str | None) -> Material | N
     selected_material = db.get(Material, material_id) if material_id else None
     if material_id and selected_material is None:
         raise HTTPException(status_code=404, detail="所选资料不存在")
-    if selected_material and selected_material.course_id != course_id:
+    if selected_material and not material_in_course(db, selected_material, course_id):
         raise HTTPException(status_code=400, detail="所选资料不属于当前课程")
     if selected_material and selected_material.deleted_at is not None:
         raise HTTPException(status_code=404, detail="所选资料不存在")

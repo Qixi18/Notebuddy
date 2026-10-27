@@ -1,4 +1,4 @@
-type Section = { id: string; material_id: string | null; notebook_id?: string | null }
+type Section = { id: string; block_id?: string; material_id: string | null; notebook_id?: string | null }
 type Outline<T extends Section> = {
   chapters: Array<{ id: string; sections: T[] }>
   historical_sections: T[]
@@ -8,7 +8,7 @@ type Outline<T extends Section> = {
 export function resolveSection<T extends Section>(outline: Outline<T>, chapter?: string, section?: string): T | undefined {
   if (section) {
     const match = [...outline.chapters, ...outline.removed_chapters].flatMap((c) => c.sections)
-      .concat(outline.historical_sections).find((s) => s.id === section)
+      .concat(outline.historical_sections).find((s) => (s.block_id ?? s.id) === section)
     return match && (!chapter || chapter === (match.material_id ?? 'history')) ? match : undefined
   }
   if (chapter === 'history') return outline.historical_sections[0]
@@ -24,7 +24,11 @@ export function adjacentSection<T extends Section>(outline: Outline<T>, id: stri
 
 export function notebookPath(courseId: string, section?: Section, mode?: string, notebookId = section?.notebook_id ?? undefined): string {
   const query = new URLSearchParams()
-  if (section) { query.set('chapter', section.material_id ?? 'history'); query.set('section', section.id) }
+  if (section) {
+    if (section.material_id) query.set('chapter', section.material_id)
+    else if (!section.block_id) query.set('chapter', 'history')
+    query.set('section', section.block_id ?? section.id)
+  }
   if (mode === 'book') query.set('mode', 'book')
   return `/courses/${courseId}/${notebookId ? `notebooks/${notebookId}` : 'notebook'}${query.size ? `?${query}` : ''}`
 }

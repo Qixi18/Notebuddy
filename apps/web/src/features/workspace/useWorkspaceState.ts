@@ -99,11 +99,10 @@ export function useWorkspaceState() {
     if (requestedSourcePage.current?.materialId === id) requestedSourcePage.current = undefined
   }, [])
 
-  const refreshNotes = useCallback(async (id: string) => {
-    const next = await api.listNotes(id)
-    if (currentCourseId.current !== id) return
-    setNotes(next)
-    setSelectedNoteId((current) => current && next.some((note) => note.id === current) ? current : next[0]?.id)
+  const refreshNotes = useCallback(async (_id: string) => {
+    // Legacy Note body listing is retired; the Notebook document is the body.
+    setNotes([])
+    setSelectedNoteId(undefined)
   }, [])
 
   const refreshGraph = useCallback(async (id: string) => {
@@ -114,10 +113,8 @@ export function useWorkspaceState() {
   useEffect(() => { void refreshCourses() }, [refreshCourses])
 
   useEffect(() => {
-    if (courseId && !isNotebookRoute(location.pathname)) {
-      void refreshNotes(courseId).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '笔记读取失败'))
-    }
-  }, [courseId, location.pathname, refreshNotes])
+    if (courseId) setNotes([])
+  }, [courseId])
 
   useEffect(() => {
     let active = true
@@ -136,7 +133,7 @@ export function useWorkspaceState() {
 
     void Promise.all([
       api.listMaterials(courseId),
-      isNotebookRoute(location.pathname) ? Promise.resolve([] as Note[]) : api.listNotes(courseId),
+      Promise.resolve([] as Note[]),
       api.getKnowledgeGraph(courseId),
     ]).then(([nextMaterials, nextNotes, nextGraph]) => {
       if (!active) return
@@ -183,7 +180,7 @@ export function useWorkspaceState() {
         setJob(nextJob)
         if ((nextJob.status === 'completed' || nextJob.status === 'failed') && courseId) {
           const refreshes = [refreshMaterials(courseId)]
-          if (nextJob.status === 'completed') refreshes.push(refreshNotes(courseId), refreshGraph(courseId))
+          if (nextJob.status === 'completed') refreshes.push(refreshGraph(courseId))
           await Promise.all(refreshes)
         }
       }).catch((cause: unknown) => {

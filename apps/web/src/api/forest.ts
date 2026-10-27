@@ -1,11 +1,12 @@
 import { request } from './http'
 import type { CourseTree } from '../types'
 import type {
-  CrossCourseRelation,
   CurriculumImport,
   CurriculumRow,
   ForestCourse,
   ForestJob,
+  ForestSearchResult,
+  NotebookRelation,
   RelationType,
 } from '../features/forest/types'
 
@@ -18,37 +19,26 @@ export const forestApi = {
   getCourseTree: (courseId: string) => request<CourseTree>(`${base}/courses/${courseId}/tree`),
   getForest: () => request<{ courses: ForestCourse[] }>(base),
   searchForest: (query: string) =>
-    request<
-      Array<{
-        course_id: string
-        course_name: string
-        note_id: string
-        notebook_id: string | null
-        title: string
-        material_id: string | null
-      }>
-    >(`${base}/search?q=${encodeURIComponent(query)}`),
+    request<ForestSearchResult[]>(`${base}/search?q=${encodeURIComponent(query)}`),
   updateForestCourse: (
     id: string,
     data: Partial<
       Pick<ForestCourse, 'semester' | 'level' | 'learning_state' | 'position' | 'prerequisites'>
     > & { expected_revision: number },
   ) => request<ForestCourse>(`${base}/courses/${id}`, { method: 'PATCH', ...json(data) }),
-  getForestRelations: (status = 'all') =>
-    request<CrossCourseRelation[]>(`${base}/relations?status=${status}`),
+  getForestRelations: () => request<NotebookRelation[]>(`${base}/relations`),
   createForestRelation: (data: {
-    source_note_id: string
-    target_note_id: string
+    source_notebook_id: string
+    target_notebook_id: string
     relation_type: RelationType
     reason: string
-  }) => request<CrossCourseRelation>(`${base}/relations`, { method: 'POST', ...json(data) }),
-  reviewForestRelation: (id: string, decision: 'confirm' | 'reject') =>
-    request<CrossCourseRelation>(`${base}/relations/${id}/review`, {
-      method: 'POST',
-      ...json({ decision }),
-    }),
+    source_block_id?: string | null
+    target_block_id?: string | null
+  }) => request<NotebookRelation>(`${base}/relations`, { method: 'POST', ...json(data) }),
   deleteForestRelation: (id: string) =>
     request<{ deleted: boolean }>(`${base}/relations/${id}`, { method: 'DELETE' }),
+  refreshForestRelation: (id: string) =>
+    request<NotebookRelation>(`${base}/relations/${id}/refresh`, { method: 'POST' }),
   listCurriculumImports: () => request<CurriculumImport[]>(`${base}/curriculum-imports`),
   createCurriculumImport: (data: FormData) =>
     request<CurriculumImport>(`${base}/curriculum-imports`, { method: 'POST', body: data }),

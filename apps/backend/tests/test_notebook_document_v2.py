@@ -1,10 +1,23 @@
+import base64
 import copy
 import os
 from datetime import timedelta
 
-from sqlalchemy import select, update
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, select, update
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
-from app.db.models import Notebook, NotebookAttachment, NotebookDocumentRevision, utc_now
+from app.db.database import Base, get_db
+from app.db.models import (
+    Course,
+    Notebook,
+    NotebookAttachment,
+    NotebookDocumentRevision,
+    utc_now,
+)
+from app.main import app
 from app.notes.attachments import (
     prune_deleted_notebook_directories,
     prune_stray_attachment_files,
@@ -12,7 +25,29 @@ from app.notes.attachments import (
 )
 from app.notes.history import record_snapshot
 
-pytest_plugins = ["tests.test_notebook_api"]
+# A real 1x1 PNG: attachment validation rejects header-only placeholders.
+PNG_1PX = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+@pytest.fixture()
+def setup():
+    engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    with Session(engine, autoflush=False, expire_on_commit=False) as db:
+        course = Course(name="课程")
+        db.add(course)
+        db.commit()
+        app.dependency_overrides[get_db] = lambda: db
+        try:
+            yield TestClient(app), db, course
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+
 
 
 def make_book(client, course, title="文档测试"):
@@ -26,7 +61,7 @@ def document_url(course, book):
 
 
 def test_legacy_blocks_are_converted_without_losing_structure(setup):
-    client, _, course, _, _, _, _ = setup
+    client, _, course = setup
     book = make_book(client, course)
     url = document_url(course, book)
     blocks = [
@@ -53,7 +88,7 @@ def test_legacy_blocks_are_converted_without_losing_structure(setup):
 
 
 def test_v2_document_round_trips_marks_and_stable_ids(setup):
-    client, _, course, _, _, _, _ = setup
+    client, _, course = setup
     book = make_book(client, course)
     url = document_url(course, book)
     content = {
@@ -86,7 +121,7 @@ def test_v2_document_round_trips_marks_and_stable_ids(setup):
 
 
 def test_v2_document_rejects_unsafe_or_unknown_nodes(setup):
-    client, _, course, _, _, _, _ = setup
+    client, _, course = setup
     book = make_book(client, course)
     url = document_url(course, book)
     base = {"type": "doc", "content": [{"type": "paragraph", "attrs": {"blockId": "p"},
@@ -132,7 +167,7 @@ def test_v2_document_rejects_unsafe_or_unknown_nodes(setup):
 
 
 def test_missing_block_ids_are_filled_but_duplicates_are_replaced(setup):
-    client, _, course, _, _, _, _ = setup
+    client, _, course = setup
     book = make_book(client, course)
     url = document_url(course, book)
     content = {"type": "doc", "content": [
@@ -147,7 +182,7 @@ def test_missing_block_ids_are_filled_but_duplicates_are_replaced(setup):
 
 
 def test_legacy_empty_document_and_corrupt_payload_read_as_empty(setup):
-    client, _, course, _, _, _, _ = setup
+    client, _, course = setup
     book = make_book(client, course)
     url = document_url(course, book)
     assert client.get(url).json()["content"] == {"type": "doc", "content": []}
@@ -159,7 +194,7 @@ def test_legacy_empty_document_and_corrupt_payload_read_as_empty(setup):
 
 
 def test_document_history_lists_and_restores_as_new_revision(setup):
-    client, _, course, _, _, _, _ = setup
+    client, _, course = setup
     book = make_book(client, course)
     url = document_url(course, book)
     first = [{"id": "h", "type": "h1", "text": "第一版标题"}]
@@ -196,11 +231,11 @@ def test_document_history_lists_and_restores_as_new_revision(setup):
 
 
 def test_attachment_upload_serves_image_and_rejects_cross_notebook_use(setup, monkeypatch, tmp_path):
-    client, _, course, _, _, _, _ = setup
+    client, _, course = setup
     monkeypatch.setattr("app.core.config.settings.data_dir", tmp_path)
     first = make_book(client, course, "附件本")
     second = make_book(client, course, "另一本")
-    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    png = PNG_1PX
     uploaded = client.post(
         f"/api/v1/courses/{course.id}/notebooks/{first['id']}/attachments",
         files={"file": ("figure.png", png, "image/png")},
@@ -233,7 +268,7 @@ def test_attachment_upload_serves_image_and_rejects_cross_notebook_use(setup, mo
 
 
 def test_history_prunes_by_count_and_age(setup):
-    client, db, course, _, _, _, _ = setup
+    client, db, course = setup
     book = make_book(client, course)
     empty = {"type": "doc", "content": []}
     for revision in range(1, 102):
@@ -256,10 +291,10 @@ def test_history_prunes_by_count_and_age(setup):
 
 
 def test_attachment_cleanup_removes_aged_orphans_but_preserves_history(setup, monkeypatch, tmp_path):
-    client, db, course, _, _, _, _ = setup
+    client, db, course = setup
     monkeypatch.setattr("app.core.config.settings.data_dir", tmp_path)
     book = make_book(client, course)
-    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    png = PNG_1PX
 
     def upload():
         response = client.post(
@@ -294,10 +329,10 @@ def test_attachment_cleanup_removes_aged_orphans_but_preserves_history(setup, mo
 
 
 def test_attachment_cleanup_removes_deleted_notebook_files(setup, monkeypatch, tmp_path):
-    client, db, course, _, _, _, _ = setup
+    client, db, course = setup
     monkeypatch.setattr("app.core.config.settings.data_dir", tmp_path)
     book = make_book(client, course)
-    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    png = PNG_1PX
     response = client.post(
         f"/api/v1/courses/{course.id}/notebooks/{book['id']}/attachments",
         files={"file": ("figure.png", png, "image/png")},
@@ -314,13 +349,13 @@ def test_attachment_cleanup_removes_deleted_notebook_files(setup, monkeypatch, t
 
 
 def test_attachment_cleanup_removes_interrupted_upload_file(setup, monkeypatch, tmp_path):
-    client, db, course, _, _, _, _ = setup
+    client, db, course = setup
     monkeypatch.setattr("app.core.config.settings.data_dir", tmp_path)
     book = make_book(client, course)
     directory = tmp_path / "notebook-attachments" / book["id"]
     directory.mkdir(parents=True)
     stray = directory / ("a" * 32 + ".png")
-    stray.write_bytes(b"\x89PNG\r\n\x1a\n")
+    stray.write_bytes(PNG_1PX)
     stale = (utc_now() - timedelta(days=2)).timestamp()
     os.utime(stray, (stale, stale))
     assert prune_stray_attachment_files(db) == 1

@@ -2,29 +2,19 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.api.v1.shared import ensure_course
 from app.db.database import get_db
 from app.db.models import (
     KnowledgeChange,
-    KnowledgeEdge,
-    KnowledgeNode,
     KnowledgeProposal,
-    Material,
-    MaterialPage,
-    Note,
-    PageBlock,
-    SourceRef,
+    Notebook,
+    NotebookSection,
 )
 from app.knowledge.proposals import apply_proposal
 from app.schemas.api import (
     KnowledgeChangeRead,
-    KnowledgeEdgeRead,
-    KnowledgeGraphRead,
-    KnowledgeNodeRead,
-    KnowledgeNodeSourceRead,
-    KnowledgeNodeWithSourcesRead,
     KnowledgeProposalRead,
     ProposalReview,
 )
@@ -32,58 +22,81 @@ from app.schemas.api import (
 router = APIRouter()
 
 
-@router.get("/courses/{course_id}/knowledge-graph", response_model=KnowledgeGraphRead)
-def get_knowledge_graph(course_id: str, db: Session = Depends(get_db)) -> KnowledgeGraphRead:
+@router.get("/courses/{course_id}/knowledge-graph")
+def get_knowledge_graph(course_id: str, db: Session = Depends(get_db)) -> dict:
+    """Course knowledge structure derived from Notebook body sections.
+
+    ``KnowledgeNode`` is no longer the source of truth; the returned nodes use
+    the stable body block id so every item traces back to the editable text.
+    """
+
     ensure_course(db, course_id)
-    nodes = list(
-        db.scalars(
-            select(KnowledgeNode).options(
-                selectinload(KnowledgeNode.source_refs)
-                .selectinload(SourceRef.page_block)
-                .selectinload(PageBlock.page)
-                .selectinload(MaterialPage.material)
-            )
-            .where(KnowledgeNode.course_id == course_id)
-            .order_by(KnowledgeNode.name)
-        ).all()
-    )
-    edges = list(
-        db.scalars(
-            select(KnowledgeEdge)
-            .where(KnowledgeEdge.course_id == course_id)
-            .order_by(KnowledgeEdge.created_at)
-        ).all()
-    )
-    return KnowledgeGraphRead(
-        nodes=[
-            KnowledgeNodeWithSourcesRead(
-                **KnowledgeNodeRead.model_validate(node).model_dump(),
-                sources=[
-                    KnowledgeNodeSourceRead(
-                        material_id=source.page_block.page.material_id,
-                        lecture_title=source.page_block.page.material.lecture_title,
-                        topic_title=source.page_block.page.material.topic_title,
-                        page_number=source.page_block.page.page_number,
-                    )
-                    for source in node.source_refs
-                    if source.status == "active" and source.page_block.page.is_active and source.page_block.page.material.deleted_at is None
-                ],
-            )
-            for node in nodes
-        ],
-        edges=[KnowledgeEdgeRead.model_validate(edge) for edge in edges],
-        occurrences=[{
-            "id": note.id, "note_id": note.id, "knowledge_node_id": note.knowledge_node_id,
-            "material_id": note.material_id, "section_key": note.section_key,
-            "section_order": note.section_order, "title": note.title,
-        } for note in db.scalars(select(Note).outerjoin(Material, Note.material_id == Material.id)
-                                .where(Note.course_id == course_id, Material.deleted_at.is_(None))
-                                .order_by(Material.chapter_order, Note.section_order, Note.id)).all()],
-    )
+    rows = db.execute(
+        select(NotebookSection, Notebook)
+        .join(Notebook, Notebook.id == NotebookSection.notebook_id)
+        .where(Notebook.course_id == course_id, Notebook.deleted_at.is_(None))
+        .order_by(Notebook.display_order, NotebookSection.order)
+    ).all()
+    nodes = []
+    occurrences = []
+    for section, notebook in rows:
+        name = section.heading.strip() or f"第 {section.order + 1} 节"
+        nodes.append({
+            "id": section.block_id,
+            "course_id": course_id,
+            "name": name,
+            "summary": section.text[:300] or None,
+            "status": "derived",
+            "sources": [],
+            "notebook_id": notebook.id,
+            "notebook_title": notebook.title,
+            "level": section.level,
+            "revision": section.revision,
+        })
+        occurrences.append({
+            "id": section.block_id,
+            "note_id": section.block_id,
+            "knowledge_node_id": section.block_id,
+            "material_id": None,
+            "section_key": section.block_id,
+            "section_order": section.order,
+            "title": name,
+            "notebook_id": notebook.id,
+            "notebook_title": notebook.title,
+        })
+    return {"nodes": nodes, "edges": [], "occurrences": occurrences}
+
+
+@router.get("/courses/{course_id}/knowledge-structure")
+def get_knowledge_structure(course_id: str, db: Session = Depends(get_db)) -> dict:
+    ensure_course(db, course_id)
+    rows = db.execute(
+        select(NotebookSection, Notebook)
+        .join(Notebook, Notebook.id == NotebookSection.notebook_id)
+        .where(Notebook.course_id == course_id, Notebook.deleted_at.is_(None))
+        .order_by(Notebook.display_order, NotebookSection.order)
+    ).all()
+    notebooks: dict[str, dict] = {}
+    for section, notebook in rows:
+        book = notebooks.setdefault(notebook.id, {
+            "notebook_id": notebook.id,
+            "title": notebook.title,
+            "revision": notebook.document_revision,
+            "sections": [],
+        })
+        book["sections"].append({
+            "block_id": section.block_id,
+            "heading": section.heading,
+            "level": section.level,
+            "order": section.order,
+            "excerpt": section.text[:300],
+        })
+    return {"course_id": course_id, "notebooks": list(notebooks.values())}
 
 
 @router.get("/courses/{course_id}/knowledge-proposals", response_model=list[KnowledgeProposalRead])
-def list_knowledge_proposals(course_id: str, status: str | None = None, db: Session = Depends(get_db)) -> list[KnowledgeProposal]:
+def list_knowledge_proposals(course_id: str, status: str | None = None,
+                             db: Session = Depends(get_db)) -> list[KnowledgeProposal]:
     ensure_course(db, course_id)
     query = select(KnowledgeProposal).where(KnowledgeProposal.course_id == course_id)
     if status:

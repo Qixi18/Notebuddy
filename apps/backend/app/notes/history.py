@@ -63,6 +63,7 @@ def record_snapshot(db: Session, notebook_id: str, revision: int, content: dict,
     excess = NotebookDocumentRevision.revision <= lowest
     db.execute(delete(NotebookDocumentRevision).where(
         NotebookDocumentRevision.notebook_id == notebook_id,
+        NotebookDocumentRevision.retention == "rolling",
         or_(excess, expired),
     ).execution_options(synchronize_session=False))
     db.flush()

@@ -51,7 +51,7 @@ class ForestJobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    kind: Literal["curriculum_import", "cross_course_relations", "validate_legacy_relations"]
+    kind: Literal["curriculum_import", "notebook_relations", "cross_course_relations", "validate_legacy_relations"]
     status: Literal["pending", "processing", "completed", "failed"]
     progress: int
     error_message: str | None

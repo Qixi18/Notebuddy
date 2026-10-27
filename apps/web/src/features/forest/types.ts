@@ -10,30 +10,47 @@ export type ForestCourse = {
   revision: number
   note_count: number
   material_count: number
+  notebook_count?: number
+  section_count?: number
   prerequisites: string[]
 }
 export type RelationType = 'related' | 'prerequisite' | 'application'
-export type CrossCourseRelation = {
+export type ForestSearchResult = {
+  course_id: string
+  course_name: string
+  notebook_id: string
+  block_id: string | null
+  title: string
+  snippet: string
+}
+export type NotebookRelation = {
   id: string
   source_course_id: string
   target_course_id: string
-  source_note_id: string
-  target_note_id: string
+  source_notebook_id: string
+  target_notebook_id: string
   source_title: string
   target_title: string
   source_course_name: string
   target_course_name: string
   relation_type: RelationType
   reason: string
-  status: 'pending' | 'confirmed' | 'rejected'
+  created_at: string
+  source_block_id?: string | null
+  target_block_id?: string | null
+  stale?: boolean
+  origin?: 'manual' | 'ai'
+  source_fingerprint?: string | null
+  target_fingerprint?: string | null
+}
+
+/** Display anchors projected from the current Notebook directories. */
+export type TreeRelation = NotebookRelation & {
+  source_block_id: string
+  target_block_id: string
+  status: 'confirmed'
   origin: 'manual' | 'ai'
-  activation_mode: 'automatic' | 'manual' | null
-  evidence_fingerprint: string | null
-  source_revision: number
-  target_revision: number
   stale: boolean
-  source_ref_ids: string[]
-  target_ref_ids: string[]
 }
 export type CurriculumRow = {
   key: string
@@ -57,7 +74,7 @@ export type CurriculumImport = {
 }
 export type ForestJob = {
   id: string
-  kind: 'curriculum_import' | 'cross_course_relations'
+  kind: 'curriculum_import' | 'notebook_relations' | 'cross_course_relations'
   status: 'pending' | 'processing' | 'completed' | 'failed'
   progress: number
   error_message: string | null

@@ -30,7 +30,7 @@ export function ForestCoursePanel({
   onUpdated: (course: ForestCourse) => void
   onOpen: (section: NotebookSection) => void
   onFit: () => void
-  onJob: (job: ForestJob) => void
+  onJob?: (job: ForestJob) => void
 }) {
   const [semester, setSemester] = useState(course.semester?.toString() ?? '')
   const [level, setLevel] = useState(course.level)
@@ -67,7 +67,7 @@ export function ForestCoursePanel({
     setBusy(true)
     setError(undefined)
     try {
-      onJob(await api.suggestForestRelations(course.course_id))
+      onJob?.(await api.suggestForestRelations(course.course_id))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '关联建议生成失败')
     } finally {
@@ -206,14 +206,14 @@ export function ForestCoursePanel({
           </button>
         </form>
       </details>
-      <button
+      {onJob && <button
         className="forest-suggest-button"
         type="button"
         disabled={busy || course.note_count === 0}
         onClick={() => void suggest()}
       >
         生成跨课程关联建议
-      </button>
+      </button>}
     </aside>
   )
 }

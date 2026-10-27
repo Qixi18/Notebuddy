@@ -1,24 +1,25 @@
-"""Forest domain rules without modifying course notes or legacy graph edges."""
+"""Forest domain rules over Notebook body and Notebook relations.
+
+No function here reads or writes a legacy Note body.  Course profiles are
+unchanged; counts and relations are derived from Notebook / NotebookSection.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 
-from sqlalchemy import case, exists, func, or_, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session, aliased
 
 from app.db.models import (
     Course,
-    CrossCourseRelation,
     ForestCourseProfile,
     Material,
-    MaterialPage,
-    Note,
-    PageBlock,
-    SourceRef,
-    note_source_refs,
+    Notebook,
+    NotebookRelation,
+    NotebookSection,
 )
 
 
@@ -58,7 +59,9 @@ def ensure_profile(db: Session, course: Course) -> ForestCourseProfile:
     has_material = (
         db.scalar(
             select(Material.id)
-            .where(Material.course_id == course.id, Material.deleted_at.is_(None))
+            .join(Notebook, Notebook.id == Material.notebook_id)
+            .where(Notebook.course_id == course.id, Notebook.deleted_at.is_(None),
+                   Material.deleted_at.is_(None))
             .limit(1)
         )
         is not None
@@ -78,115 +81,33 @@ def ensure_profile(db: Session, course: Course) -> ForestCourseProfile:
     return db.get(ForestCourseProfile, course.id, populate_existing=True)
 
 
-def _historical_material_exists(*, active: bool):
-    query = (
-        select(1)
-        .select_from(note_source_refs)
-        .join(SourceRef, SourceRef.id == note_source_refs.c.source_ref_id)
-        .join(PageBlock, PageBlock.id == SourceRef.page_block_id)
-        .join(MaterialPage, MaterialPage.id == PageBlock.page_id)
-        .join(Material, Material.id == MaterialPage.material_id)
-        .where(note_source_refs.c.note_id == Note.id, Material.course_id == Note.course_id)
-    )
-    if active:
-        query = query.where(Material.deleted_at.is_(None))
-    return exists(query)
-
-
-def visible_note_predicate():
-    """Exclude removed lectures, including pre-notebook historical references."""
-    direct_material = exists(
-        select(1).where(
-            Material.id == Note.material_id,
-            Material.course_id == Note.course_id,
-            Material.deleted_at.is_(None),
-        )
-    )
-    return or_(
-        direct_material,
-        (
-            Note.material_id.is_(None)
-            & (
-                ~_historical_material_exists(active=False)
-                | _historical_material_exists(active=True)
-            )
-        ),
-    )
-
-
-def note_is_visible(db: Session, note: Note) -> bool:
-    return (
-        db.scalar(
-            select(Note.id)
-            .join(Course, Course.id == Note.course_id)
-            .where(Note.id == note.id, Course.deleted_at.is_(None), visible_note_predicate())
-        )
-        is not None
-    )
-
-
-def active_note_sources(db: Session, note: Note) -> list[SourceRef]:
-    """Return only linked, current, same-course quotes verifiable in a real block."""
-    query = (
-        select(SourceRef, PageBlock.content)
-        .join(note_source_refs, note_source_refs.c.source_ref_id == SourceRef.id)
-        .join(PageBlock, PageBlock.id == SourceRef.page_block_id)
-        .join(MaterialPage, MaterialPage.id == PageBlock.page_id)
-        .join(Material, Material.id == MaterialPage.material_id)
-        .where(
-            note_source_refs.c.note_id == note.id,
-            SourceRef.status == "active",
-            SourceRef.source_type == "course_material",
-            MaterialPage.is_active.is_(True),
-            Material.course_id == note.course_id,
-            Material.deleted_at.is_(None),
-        )
-    )
-    if note.material_id is not None:
-        query = query.where(Material.id == note.material_id)
-    result = []
-    for ref, content in db.execute(query.order_by(SourceRef.id)).all():
-        quote = " ".join(ref.quote.split())
-        if quote and quote in " ".join(content.split()):
-            result.append(ref)
-    return result
-
-
-def evidence_fingerprint(db: Session, note: Note, ref_ids: list[str] | None = None) -> str:
-    """Include source content and parse identity without changing protected note revisions."""
-    rows = [
-        [ref.id, ref.quote, ref.page_block_id, ref.parser_version,
-         ref.page_block.content, ref.page_block.page.id, ref.page_block.page.stable_location_key]
-        for ref in active_note_sources(db, note)
-        if ref_ids is None or ref.id in ref_ids
-    ]
-    return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode()).hexdigest()
-
-
-def relation_fingerprint(db: Session, source: Note, target: Note,
-                         source_ids: list[str], target_ids: list[str]) -> str:
-    return hashlib.sha256((evidence_fingerprint(db, source, source_ids)
-                           + evidence_fingerprint(db, target, target_ids)).encode()).hexdigest()
-
-
 def list_forest_courses(db: Session) -> list[dict]:
     courses = list(
         db.scalars(
             select(Course).where(Course.deleted_at.is_(None)).order_by(Course.created_at, Course.id)
         ).all()
     )
-    material_counts = dict(
+    notebook_counts = dict(
         db.execute(
-            select(Material.course_id, func.count())
-            .where(Material.deleted_at.is_(None))
-            .group_by(Material.course_id)
+            select(Notebook.course_id, func.count())
+            .where(Notebook.deleted_at.is_(None), Notebook.course_id.is_not(None))
+            .group_by(Notebook.course_id)
         ).all()
     )
-    note_counts = dict(
+    section_counts = dict(
         db.execute(
-            select(Note.course_id, func.count())
-            .where(visible_note_predicate())
-            .group_by(Note.course_id)
+            select(Notebook.course_id, func.count(NotebookSection.id))
+            .join(Notebook, Notebook.id == NotebookSection.notebook_id)
+            .where(Notebook.course_id.is_not(None), Notebook.deleted_at.is_(None))
+            .group_by(Notebook.course_id)
+        ).all()
+    )
+    material_counts = dict(
+        db.execute(
+            select(Notebook.course_id, func.count(Material.id))
+            .join(Material, Material.notebook_id == Notebook.id)
+            .where(Notebook.deleted_at.is_(None), Material.deleted_at.is_(None))
+            .group_by(Notebook.course_id)
         ).all()
     )
     rows = []
@@ -201,8 +122,10 @@ def list_forest_courses(db: Session) -> list[dict]:
                 "learning_state": profile.learning_state,
                 "position": profile.position,
                 "revision": profile.revision,
-                "note_count": note_counts.get(course.id, 0),
-                "material_count": material_counts.get(course.id, 0),
+                "note_count": int(section_counts.get(course.id, 0)),
+                "section_count": int(section_counts.get(course.id, 0)),
+                "notebook_count": int(notebook_counts.get(course.id, 0)),
+                "material_count": int(material_counts.get(course.id, 0)),
                 "prerequisites": _json_strings(profile.prerequisites_json),
             }
         )
@@ -257,58 +180,65 @@ def prepare_course_restore(db: Session, course: Course) -> None:
     )
 
 
-def relation_display(db: Session, relation: CrossCourseRelation) -> dict | None:
-    source, target = db.get(Note, relation.source_note_id), db.get(Note, relation.target_note_id)
-    if (
-        source is None
-        or target is None
-        or not note_is_visible(db, source)
-        or not note_is_visible(db, target)
-    ):
+def notebook_relation_display(db: Session, relation: NotebookRelation) -> dict | None:
+    source = db.get(Notebook, relation.source_notebook_id)
+    target = db.get(Notebook, relation.target_notebook_id)
+    if source is None or target is None or source.deleted_at or target.deleted_at:
         return None
-    source_course, target_course = (
-        db.get(Course, source.course_id),
-        db.get(Course, target.course_id),
-    )
-    source_ids, target_ids = (
-        _json_strings(relation.source_ref_ids_json),
-        _json_strings(relation.target_ref_ids_json),
-    )
-    current_source_ids = {ref.id for ref in active_note_sources(db, source)}
-    current_target_ids = {ref.id for ref in active_note_sources(db, target)}
-    stale = (
-        source.course_id != relation.source_course_id
-        or target.course_id != relation.target_course_id
-        or source.course_id == target.course_id
-        or source.revision_number != relation.source_revision
-        or target.revision_number != relation.target_revision
-        or not source_ids
-        or not target_ids
-        or not set(source_ids).issubset(current_source_ids)
-        or not set(target_ids).issubset(current_target_ids)
-        or (relation.evidence_fingerprint is not None and relation.evidence_fingerprint
-            != relation_fingerprint(db, source, target, source_ids, target_ids))
-    )
+    if source.course_id is None or target.course_id is None or source.course_id == target.course_id:
+        return None
+    source_course = db.get(Course, source.course_id)
+    target_course = db.get(Course, target.course_id)
+    if source_course is None or target_course is None or source_course.deleted_at or target_course.deleted_at:
+        return None
     return {
         "id": relation.id,
         "source_course_id": source.course_id,
         "target_course_id": target.course_id,
-        "source_note_id": source.id,
-        "target_note_id": target.id,
+        "source_notebook_id": source.id,
+        "target_notebook_id": target.id,
         "source_title": source.title,
         "target_title": target.title,
         "source_course_name": source_course.name,
         "target_course_name": target_course.name,
         "relation_type": relation.relation_type,
-        "reason": relation.reason,
-        "status": relation.status,
+        "reason": relation.description or "",
+        "created_at": relation.created_at,
         "origin": relation.origin,
-        "activation_mode": relation.activation_mode or (
-            "manual" if relation.status == "confirmed" else None),
-        "evidence_fingerprint": relation.evidence_fingerprint,
-        "source_revision": relation.source_revision,
-        "target_revision": relation.target_revision,
-        "stale": stale,
-        "source_ref_ids": source_ids,
-        "target_ref_ids": target_ids,
+        "source_fingerprint": relation.source_fingerprint,
+        "target_fingerprint": relation.target_fingerprint,
+        "source_block_id": relation.source_block_id,
+        "target_block_id": relation.target_block_id,
+        "stale": any(
+            block_id is not None and (
+                (current := relation_anchor_fingerprint(book, block_id)) is None
+                or current != saved
+            )
+            for book, block_id, saved in (
+                (source, relation.source_block_id, relation.source_fingerprint),
+                (target, relation.target_block_id, relation.target_fingerprint),
+            )
+        ),
     }
+
+
+def relation_anchor_fingerprint(notebook: Notebook, block_id: str | None) -> str | None:
+    if block_id is None:
+        return None
+    from app.notes.document import load_document
+    from app.notes.index import build_sections
+
+    stored = load_document(notebook.document_json)
+    if stored.warning:
+        return None
+    section = next((row for row in build_sections(stored.content) if row.block_id == block_id), None)
+    if section is None:
+        return None
+    return section_relation_fingerprint(section.heading, section.text)
+
+
+def section_relation_fingerprint(heading: str, text: str) -> str:
+    return hashlib.sha256(json.dumps(
+        {"heading": heading, "text": text},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()

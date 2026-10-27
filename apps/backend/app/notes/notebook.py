@@ -1,12 +1,32 @@
-from sqlalchemy import select, update
+from __future__ import annotations
+
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import Course, Material, Note, Notebook, default_notebook_id
-from app.schemas.notebook import ChapterRead, NotebookRead, SectionRead
+from app.db.models import (
+    AssetProcessingJob,
+    Course,
+    Material,
+    Notebook,
+    NotebookAsset,
+    NotebookGenerationInput,
+    NotebookGenerationJob,
+    NotebookSection,
+    ProcessingJob,
+    default_notebook_id,
+)
+from app.schemas.notebook import (
+    ChapterRead,
+    NotebookRead,
+    SectionRead,
+)
 
 
 def default_notebook(db: Session, course: Course, *, create: bool = True) -> Notebook | None:
-    book = db.scalar(select(Notebook).where(Notebook.course_id == course.id, Notebook.is_default.is_(True), Notebook.deleted_at.is_(None)))
+    book = db.scalar(select(Notebook).where(
+        Notebook.course_id == course.id, Notebook.is_default.is_(True),
+        Notebook.deleted_at.is_(None),
+    ))
     if book is None and create:
         # This helper is reserved for course-scoped navigation compatibility;
         # uploads and Note/Notebook creation require an explicit notebook_id.
@@ -15,8 +35,9 @@ def default_notebook(db: Session, course: Course, *, create: bool = True) -> Not
 
 
 def list_course_notebooks(db: Session, course_id: str) -> list[Notebook]:
-    return list(db.scalars(select(Notebook).where(Notebook.course_id == course_id, Notebook.deleted_at.is_(None))
-                           .order_by(Notebook.display_order, Notebook.created_at, Notebook.id)).all())
+    return list(db.scalars(select(Notebook).where(
+        Notebook.course_id == course_id, Notebook.deleted_at.is_(None),
+    ).order_by(Notebook.display_order, Notebook.created_at, Notebook.id)).all())
 
 
 def bump_order_revision(db: Session, course_id: str | None, notebook_id: str | None = None) -> None:
@@ -42,20 +63,116 @@ def bump_order_revision(db: Session, course_id: str | None, notebook_id: str | N
             notebook_order_revision=Course.notebook_order_revision + 1))
 
 
+def _section_read(book: Notebook, row: NotebookSection) -> SectionRead:
+    # Keep the historical SectionRead field names so existing tree components
+    # work, but every value now comes from the Notebook body, not from Note.
+    return SectionRead(
+        id=row.block_id,
+        notebook_id=book.id,
+        tree_slot=row.order,
+        knowledge_node_id="",
+        material_id=None,
+        section_key=row.block_id,
+        section_order=row.order,
+        title=row.heading or f"第 {row.order + 1} 节",
+        revision_number=row.revision,
+        user_locked=False,
+        updated_at=book.updated_at,
+    )
+
+
+def notebook_processing(db: Session, notebook_id: str) -> bool:
+    """Tasks are independent of the body outline, including an empty body."""
+
+    material_task = select(ProcessingJob.id).join(
+        Material, Material.id == ProcessingJob.material_id,
+    ).where(
+        Material.notebook_id == notebook_id, Material.deleted_at.is_(None),
+        ProcessingJob.status.in_(("pending", "processing")),
+    ).exists()
+    image_task = select(AssetProcessingJob.id).join(
+        NotebookAsset, NotebookAsset.id == AssetProcessingJob.owner_link_id,
+    ).where(
+        AssetProcessingJob.notebook_id == notebook_id,
+        AssetProcessingJob.status.in_(("pending", "processing")),
+        NotebookAsset.detached_at.is_(None), NotebookAsset.role == "source_material",
+    ).exists()
+    generation_task = select(NotebookGenerationJob.id).where(
+        NotebookGenerationJob.notebook_id == notebook_id,
+        NotebookGenerationJob.status.in_(("pending", "processing", "cancel_requested")),
+    ).exists()
+    generation_input = select(NotebookGenerationInput.id).where(
+        NotebookGenerationInput.notebook_id == notebook_id,
+        NotebookGenerationInput.status.in_(("waiting_parse", "parsing", "ready", "generating")),
+    ).exists()
+    return bool(db.scalar(select(or_(material_task, image_task, generation_task, generation_input))))
+
+
 def notebook_outline(db: Session, course: Course, book: Notebook | None = None) -> NotebookRead:
     book = book or default_notebook(db, course)
-    materials = db.scalars(select(Material).where(Material.notebook_id == book.id)
-                           .order_by(Material.chapter_order, Material.created_at, Material.id)).all()
-    notes = db.scalars(select(Note).where(Note.course_id == course.id, Note.notebook_id == book.id)
-                       .order_by(Note.section_order, Note.created_at, Note.id)).all()
-    groups: dict[str | None, list[SectionRead]] = {}
-    for note in notes:
-        groups.setdefault(note.material_id, []).append(SectionRead.model_validate(note))
-    chapters = [ChapterRead(id=m.id, title=m.lecture_title, chapter_order=m.chapter_order,
-                            status=m.status, deleted_at=m.deleted_at, sections=groups.get(m.id, []))
-                for m in materials]
-    return NotebookRead(id=book.id, course_id=course.id, title=book.title, tree_slot=book.tree_slot,
-                        order_revision=book.order_revision,
-                        chapters=[c for c in chapters if c.deleted_at is None],
-                        removed_chapters=[c for c in chapters if c.deleted_at is not None],
-                        historical_sections=groups.get(None, []))
+    if book is None:
+        return NotebookRead(
+            id="", course_id=course.id, title="", tree_slot=0, order_revision=0,
+            chapters=[], historical_sections=[], removed_chapters=[],
+        )
+    rows = list(db.scalars(select(NotebookSection).where(
+        NotebookSection.notebook_id == book.id,
+    ).order_by(NotebookSection.order)).all())
+    if not rows and book.document_json not in ("", "[]", None):
+        # A document can exist before its derived index is rebuilt (e.g. an old
+        # database upgraded without backfill); render the tree in memory rather
+        # than showing an empty outline.
+        from app.notes.document import load_document
+        from app.notes.index import build_sections
+
+        stored = load_document(book.document_json)
+        drafts = build_sections(stored.content)
+        rows = [
+            NotebookSection(
+                notebook_id=book.id, course_id=book.course_id, block_id=draft.block_id,
+                order=draft.order, level=draft.level, heading=draft.heading,
+                text=draft.text, revision=book.document_revision,
+            )
+            for draft in drafts
+        ]
+
+    chapters: list[ChapterRead] = []
+    current: ChapterRead | None = None
+    for row in rows:
+        section = _section_read(book, row)
+        if row.level <= 1:
+            current = ChapterRead(
+                id=section.id, title=section.title, chapter_order=len(chapters),
+                status="parsed", deleted_at=None, sections=[],
+            )
+            chapters.append(current)
+            # A level-1 heading is both the chapter title and its first section
+            # so searching/navigating to it still yields a target.
+            current.sections.append(section)
+        elif current is None:
+            current = ChapterRead(
+                id=section.id, title="笔记正文", chapter_order=len(chapters),
+                status="parsed", deleted_at=None, sections=[],
+            )
+            chapters.append(current)
+            current.sections.append(section)
+        else:
+            current.sections.append(section)
+    return NotebookRead(
+        id=book.id,
+        course_id=book.course_id or course.id,
+        title=book.title,
+        tree_slot=book.tree_slot,
+        order_revision=book.order_revision,
+        processing=notebook_processing(db, book.id),
+        chapters=chapters,
+        historical_sections=[],
+        removed_chapters=[],
+    )
+
+
+def material_chapters(db: Session, notebook_id: str) -> list[Material]:
+    """Source materials of a notebook, ordered; used by the resources sidebar."""
+    return list(db.scalars(select(Material).where(
+        Material.notebook_id == notebook_id, Material.deleted_at.is_(None),
+    ).order_by(Material.chapter_order, Material.created_at, Material.id)).all())

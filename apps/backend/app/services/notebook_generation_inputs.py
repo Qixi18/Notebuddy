@@ -13,10 +13,8 @@ from sqlalchemy.orm import Session
 from app.db.model_utils import new_id
 from app.db.models import (
     Asset,
-    AssetParseResult,
     AssetProcessingJob,
     Material,
-    MaterialPage,
     NotebookAsset,
     NotebookGenerationInput,
     NotebookGenerationJob,
@@ -25,6 +23,20 @@ from app.db.models import (
 )
 
 BATCH_IDLE_CLOSE = timedelta(minutes=2)
+
+
+def cancel_generation_inputs(db: Session, job_id: str) -> None:
+    """Keep upload status and the cancelled generation task in agreement."""
+
+    db.query(NotebookGenerationInput).filter(
+        NotebookGenerationInput.generation_job_id == job_id,
+        NotebookGenerationInput.status == "generating",
+    ).update({
+        NotebookGenerationInput.status: "generation_failed",
+        NotebookGenerationInput.error_code: "cancelled",
+        NotebookGenerationInput.error_message: "生成已取消；已有正文保持不变，可重新尝试",
+        NotebookGenerationInput.updated_at: datetime.now(UTC),
+    }, synchronize_session=False)
 
 
 def ensure_upload_batch(
@@ -126,32 +138,33 @@ def batch_status(db: Session, batch: NotebookUploadBatch) -> dict:
     }
 
 
-def _fingerprint_material(db: Session, material: Material) -> str | None:
-    pages = db.scalars(select(MaterialPage).where(
-        MaterialPage.material_id == material.id,
-        MaterialPage.is_active.is_(True),
-    ).order_by(MaterialPage.page_number, MaterialPage.id)).all()
-    if not pages or not any(page.raw_text.strip() for page in pages):
-        return None
-    payload = {
-        "content_hash": material.content_hash,
-        "parser_version": material.parser_version,
-        "pages": [(page.id, page.page_number, hashlib.sha256(page.raw_text.encode()).hexdigest())
-                  for page in pages],
-    }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+def _parse_state(db: Session, asset_id: str) -> tuple[str | None, str | None, str | None]:
+    """Return (fingerprint, error_code, error_message) from the Document IR.
 
+    Generation readiness is never inferred from ``Material.course_id`` or from
+    leftover page rows; the current ParseRun quality is authoritative.
+    """
 
-def _fingerprint_image(result: AssetParseResult) -> str | None:
+    from app.document_processing.ir import QualityReport
+    from app.document_processing.service import current_run, latest_run
+
+    run = current_run(db, asset_id)
+    if run is None:
+        latest = latest_run(db, asset_id)
+        if latest is not None and latest.status == "failed":
+            return None, (latest.error_code or "parse_failed"), (latest.error_message or "资料解析失败")
+        return None, "parse_incomplete", "解析尚未完成"
+    if run.status != "completed":
+        return None, (run.error_code or "parse_failed"), (run.error_message or "资料解析失败")
     try:
-        data = json.loads(result.result_json or "{}")
-        text = str(data.get("text") or "").strip()
+        quality = QualityReport.from_dict(json.loads(run.quality_json or "{}"))
     except (TypeError, ValueError):
-        return None
-    if not text:
-        return None
-    payload = f"{result.parser_version}:{result.id}:{hashlib.sha256(text.encode()).hexdigest()}"
-    return hashlib.sha256(payload.encode()).hexdigest()
+        quality = QualityReport()
+    if not quality.generation_allowed:
+        return None, "parse_quality_insufficient", (
+            quality.generation_block_reason or "解析质量不足，未生成正文"
+        )
+    return run.fingerprint, None, None
 
 
 def _reconcile_missing_inputs(db: Session) -> None:
@@ -216,18 +229,18 @@ def coordinate_generation_inputs(db: Session) -> int:
                 if latest is not None and (job is None or latest.created_at >= job.created_at):
                     job = latest
                     row.parse_job_id = latest.id
-            if job is None or job.status in {"pending", "processing"}:
-                row.status = "waiting_parse" if job is None or job.status == "pending" else "parsing"
-            elif job.status == "completed" and material is not None and material.status == "completed":
-                fingerprint = _fingerprint_material(db, material)
-                row.parse_result_fingerprint = fingerprint
-                row.status = "ready" if fingerprint else "parse_failed"
-                row.error_code = None if fingerprint else "empty_parse_result"
-                row.error_message = None if fingerprint else "解析未得到可用于生成的正文"
-            else:
+            if job is not None and job.status in {"pending", "processing"}:
+                row.status = "waiting_parse" if job.status == "pending" else "parsing"
+            elif job is not None and job.status == "failed":
                 row.status = "parse_failed"
                 row.error_code = job.error_code or "parse_failed"
                 row.error_message = job.error_message or "资料解析失败"
+            else:
+                fingerprint, code, message = _parse_state(db, row.asset_id)
+                row.parse_result_fingerprint = fingerprint
+                row.status = "ready" if fingerprint else "parse_failed"
+                row.error_code = code
+                row.error_message = message
         else:
             job = db.get(AssetProcessingJob, row.parse_job_id) if row.parse_job_id else None
             latest = db.scalar(select(AssetProcessingJob).where(
@@ -236,21 +249,18 @@ def coordinate_generation_inputs(db: Session) -> int:
             if latest is not None and (job is None or latest.created_at >= job.created_at):
                 job = latest
                 row.parse_job_id = latest.id
-            if job is None or job.status in {"pending", "processing"}:
-                row.status = "waiting_parse" if job is None or job.status == "pending" else "parsing"
-            elif job.status in {"completed", "completed_with_warnings"}:
-                result = db.scalar(select(AssetParseResult).where(
-                    AssetParseResult.job_id == job.id,
-                ).order_by(AssetParseResult.created_at.desc()).limit(1))
-                fingerprint = _fingerprint_image(result) if result else None
-                row.parse_result_fingerprint = fingerprint
-                row.status = "ready" if fingerprint else "parse_failed"
-                row.error_code = None if fingerprint else "empty_parse_result"
-                row.error_message = None if fingerprint else "OCR 未识别到可用于生成的文字"
-            else:
+            if job is not None and job.status in {"pending", "processing"}:
+                row.status = "waiting_parse" if job.status == "pending" else "parsing"
+            elif job is not None and job.status == "failed":
                 row.status = "parse_failed"
                 row.error_code = job.error_code or "parse_failed"
                 row.error_message = job.error_message or "图片解析失败"
+            else:
+                fingerprint, code, message = _parse_state(db, row.asset_id)
+                row.parse_result_fingerprint = fingerprint
+                row.status = "ready" if fingerprint else "parse_failed"
+                row.error_code = code
+                row.error_message = message
         row.updated_at = now
 
     db.flush()
@@ -293,10 +303,15 @@ def coordinate_generation_inputs(db: Session) -> int:
             task_id = response["id"]
             task = db.get(NotebookGenerationJob, task_id)
             for row in ready:
-                row.status = "generating" if task and task.status not in {"completed", "applied"} else "completed"
+                if task and task.status in {"failed", "conflict", "cancelled", "cancel_requested"}:
+                    row.status = "generation_failed"
+                    row.error_code = task.error_code or task.status
+                    row.error_message = task.error_message or "生成任务未完成，请重试"
+                else:
+                    row.status = "completed" if task and task.status == "completed" else "generating"
+                    row.error_code = row.error_message = None
                 row.generation_job_id = task_id
                 row.retry_count += 1
-                row.error_code = row.error_message = None
                 row.updated_at = now
                 if row.status == "completed":
                     row.finished_at = now

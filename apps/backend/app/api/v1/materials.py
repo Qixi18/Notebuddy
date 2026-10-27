@@ -5,8 +5,9 @@ from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.api.v1.shared import ensure_course, ensure_material
@@ -16,11 +17,15 @@ from app.db.models import (
     Asset,
     AssetParseResult,
     AssetProcessingJob,
+    DocumentBlock,
+    DocumentPage,
+    DocumentParseRun,
     Material,
     MaterialPage,
     Notebook,
     NotebookAsset,
     NotebookAttachment,
+    NotebookBlockSource,
     NotebookGenerationInput,
     NotebookUploadBatch,
     PageBlock,
@@ -28,7 +33,23 @@ from app.db.models import (
     SourceRef,
     WebSource,
 )
-from app.notes.assets import AssetUnavailable, assert_notebook_asset, remove_notebook_asset
+from app.document_processing.ir import QualityReport
+from app.document_processing.service import (
+    current_run as current_parse_run,
+)
+from app.document_processing.service import (
+    latest_run as latest_parse_run,
+)
+from app.document_processing.service import (
+    load_ir,
+    page_render,
+)
+from app.notes.assets import (
+    AssetUnavailable,
+    assert_notebook_asset,
+    remove_notebook_asset,
+    storage_path,
+)
 from app.notes.notebook import bump_order_revision
 from app.parsers.ocr import status as ocr_status
 from app.schemas.api import (
@@ -43,6 +64,12 @@ from app.schemas.api import (
     WebSourceRead,
 )
 from app.schemas.assets import AssetProcessingJobRead, AssetRead, AssetUploadRead
+from app.schemas.document import (
+    DocumentBlockRead,
+    DocumentIRRead,
+    DocumentRunRead,
+)
+from app.services.course_scope import material_course_id, materials_for_course
 from app.services.coverage import material_coverage
 from app.services.deletion import (
     DeletionConflict,
@@ -242,6 +269,183 @@ def list_asset_parse_results(asset_id: str, db: Session = Depends(get_db)):
     ).order_by(AssetParseResult.created_at.desc())).all())
 
 
+@router.get("/assets/{asset_id}/parse-runs", response_model=list[DocumentRunRead])
+def list_asset_parse_runs(asset_id: str, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id)
+    runs = db.scalars(select(DocumentParseRun).where(
+        DocumentParseRun.asset_id == asset_id,
+    ).order_by(DocumentParseRun.created_at.desc())).all()
+    return [_run_payload(run) for run in runs]
+
+
+@router.get("/assets/{asset_id}/document", response_model=DocumentIRRead)
+def get_asset_document(asset_id: str, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id)
+    run = current_parse_run(db, asset_id)
+    if run is None:
+        latest = latest_parse_run(db, asset_id)
+        if latest is not None and latest.status == "failed":
+            raise HTTPException(409, {
+                "code": latest.error_code or "parse_failed",
+                "message": latest.error_message or "解析失败",
+                "run_id": latest.id,
+            })
+        raise HTTPException(404, "该资料还没有完成的解析版本")
+    return _document_payload(db, run)
+
+
+@router.get("/assets/{asset_id}/document/runs/{run_id}", response_model=DocumentIRRead)
+def get_asset_document_run(asset_id: str, run_id: str, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id)
+    run = db.get(DocumentParseRun, run_id)
+    if run is None or run.asset_id != asset_id:
+        raise HTTPException(404, "解析版本不存在")
+    if run.status != "completed":
+        raise HTTPException(409, {
+            "code": run.error_code or "parse_incomplete",
+            "message": run.error_message or "解析尚未完成",
+            "run_id": run.id,
+        })
+    return _document_payload(db, run)
+
+
+@router.get("/assets/{asset_id}/document/pages/{page_number}/evidence",
+            response_model=list[DocumentBlockRead])
+def get_document_page_evidence(asset_id: str, page_number: int, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id)
+    run = current_parse_run(db, asset_id)
+    if run is None:
+        raise HTTPException(404, "该资料还没有完成的解析版本")
+    document = load_ir(db, run)
+    page = next((item for item in document.pages if item.page_number == page_number), None)
+    if page is None:
+        raise HTTPException(404, "页面不存在")
+    return [_block_payload(block) for block in page.blocks]
+
+
+@router.get("/assets/{asset_id}/document/pages/{page_number}/render")
+def get_document_page_render(asset_id: str, page_number: int, db: Session = Depends(get_db)):
+    asset = _ensure_asset(db, asset_id)
+    run = current_parse_run(db, asset_id)
+    if run is None:
+        raise HTTPException(404, "该资料还没有完成的解析版本")
+    if (asset.extension or "").lower() != ".pdf":
+        try:
+            path = storage_path(asset)
+        except AssetUnavailable as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return FileResponse(path, media_type=asset.mime_type,
+                            headers={"Cache-Control": "private, max-age=86400",
+                                     "Content-Disposition": "inline"})
+    path = page_render(db, run, page_number)
+    if path is None or not path.is_file():
+        raise HTTPException(404, "该页无法渲染")
+    db.commit()
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/assets/{asset_id}/document/coverage")
+def get_document_coverage(asset_id: str, db: Session = Depends(get_db)):
+    asset = _ensure_asset(db, asset_id)
+    run = current_parse_run(db, asset_id)
+    if run is None:
+        raise HTTPException(404, "该资料还没有完成的解析版本")
+    rows = db.execute(
+        select(DocumentBlock.block_id, DocumentPage.page_number, DocumentBlock.text)
+        .join(DocumentPage, DocumentPage.id == DocumentBlock.page_id)
+        .where(DocumentBlock.parse_run_id == run.id, DocumentBlock.text != "")
+    ).all()
+    links = db.execute(
+        select(NotebookBlockSource, Notebook)
+        .join(Notebook, Notebook.id == NotebookBlockSource.notebook_id)
+        .where(NotebookBlockSource.parse_run_id == run.id)
+    ).all()
+    cited: dict[str, list[dict]] = {}
+    for link, notebook in links:
+        cited.setdefault(link.block_id, []).append({
+            "notebook_id": notebook.id, "notebook_title": notebook.title,
+            "block_id": link.block_id, "page_number": link.page_number,
+        })
+    blocks = []
+    for block_id, page_number, text in rows:
+        blocks.append({
+            "block_id": block_id, "page_number": page_number, "quote": text[:300],
+            "citations": cited.get(block_id, []),
+        })
+    total = len(blocks)
+    cited_total = sum(1 for block in blocks if block["citations"])
+    pages: dict[int, dict[str, int]] = {}
+    for block in blocks:
+        bucket = pages.setdefault(block["page_number"], {"total": 0, "cited": 0})
+        bucket["total"] += 1
+        if block["citations"]:
+            bucket["cited"] += 1
+    return {
+        "asset_id": asset.id, "asset_name": asset.original_name,
+        "parse_run_id": run.id, "total_blocks": total, "cited_blocks": cited_total,
+        "pages": [{"page_number": number, **counts} for number, counts in sorted(pages.items())],
+        "blocks": blocks,
+    }
+
+
+def _ensure_asset(db: Session, asset_id: str) -> Asset:
+    asset = db.get(Asset, asset_id)
+    if asset is None:
+        raise HTTPException(404, "资源不存在")
+    return asset
+
+
+def _run_payload(run: DocumentParseRun) -> dict:
+    import json
+
+    return {
+        "id": run.id, "asset_id": run.asset_id, "doc_type": run.doc_type,
+        "status": run.status, "parser_name": run.parser_name,
+        "parser_version": run.parser_version, "config_version": run.config_version,
+        "is_current": run.is_current, "fingerprint": run.fingerprint,
+        "page_count": run.page_count, "text_chars": run.text_chars,
+        "quality_status": run.quality_status,
+        "quality": QualityReport.from_dict(
+            json.loads(run.quality_json or "{}")).to_dict(),
+        "created_at": run.created_at, "started_at": run.started_at,
+        "finished_at": run.finished_at, "error_code": run.error_code,
+        "error_message": run.error_message,
+    }
+
+
+def _document_payload(db: Session, run: DocumentParseRun) -> dict:
+    document = load_ir(db, run)
+    pages = [{
+        "page_number": page.page_number, "status": page.status,
+        "extraction": page.extraction, "width": page.width, "height": page.height,
+        "rotation": page.rotation, "confidence": page.confidence,
+        "warnings": page.warnings, "text_chars": len(page.text.strip()),
+        "render_url": (
+            f"/api/v1/assets/{run.asset_id}/document/pages/{page.page_number}/render"
+            if page.render_key or run.doc_type != "pdf" else None
+        ),
+    } for page in document.pages]
+    sections = [{
+        "section_id": section.section_id, "title": section.title, "level": section.level,
+        "page_start": section.page_start, "page_end": section.page_end,
+        "block_ids": section.block_ids,
+    } for section in document.sections]
+    return {"run": _run_payload(run), "pages": pages, "sections": sections}
+
+
+def _block_payload(block) -> dict:
+    return {
+        "block_id": block.block_id, "page_number": block.page_number,
+        "type": block.type, "level": block.level, "text": block.text,
+        "latex": block.latex,
+        "table": block.table.to_dict() if block.table else None,
+        "figure": block.figure.to_dict() if block.figure else None,
+        "bbox": block.bbox, "extraction": block.extraction,
+        "confidence": block.confidence, "warnings": block.warnings,
+    }
+
+
 @router.get("/notebooks/{notebook_id}/assets/{asset_id}/processing-jobs",
             response_model=list[AssetProcessingJobRead])
 def list_notebook_asset_jobs(notebook_id: str, asset_id: str, db: Session = Depends(get_db)):
@@ -317,19 +521,8 @@ class CourseNotebookFilesRead(BaseModel):
 @router.get("/courses/{course_id}/materials", response_model=list[MaterialRead])
 def list_materials(course_id: str, db: Session = Depends(get_db)) -> list[Material]:
     ensure_course(db, course_id)
-    notebook_ids = select(Notebook.id).where(
-        Notebook.course_id == course_id, Notebook.deleted_at.is_(None)
-    )
-    return list(
-        db.scalars(
-            select(Material).outerjoin(Notebook, Notebook.id == Material.notebook_id)
-            .where(or_(
-                Material.course_id == course_id,
-                and_(Material.notebook_id.in_(notebook_ids), Notebook.deleted_at.is_(None)),
-            ), Material.deleted_at.is_(None))
-            .order_by(Material.created_at.desc())
-        ).all()
-    )
+    return sorted(materials_for_course(db, course_id), key=lambda item: item.created_at,
+                  reverse=True)
 
 
 @router.get("/courses/{course_id}/notebook-files", response_model=CourseNotebookFilesRead)
@@ -341,15 +534,8 @@ def list_course_notebook_files(course_id: str, db: Session = Depends(get_db)) ->
     )).all()
     titles = {book.id: book.title for book in notebooks}
     files: list[dict] = []
-    materials = db.scalars(select(Material).outerjoin(
-        Notebook, Notebook.id == Material.notebook_id,
-    ).where(
-        Material.deleted_at.is_(None),
-        or_(
-            Material.course_id == course_id,
-            and_(Notebook.course_id == course_id, Notebook.deleted_at.is_(None)),
-        ),
-    )).all()
+    materials = sorted(materials_for_course(db, course_id), key=lambda item: item.created_at,
+                       reverse=True)
     for item in materials:
         notebook_title = titles.get(item.notebook_id) if item.notebook_id else None
         files.append({
@@ -401,18 +587,18 @@ def list_course_notebook_files(course_id: str, db: Session = Depends(get_db)) ->
 @router.get("/courses/{course_id}/deleted-materials", response_model=list[MaterialRead])
 def list_deleted_materials(course_id: str, db: Session = Depends(get_db)) -> list[Material]:
     ensure_course(db, course_id)
-    return list(db.scalars(select(Material).outerjoin(Notebook, Notebook.id == Material.notebook_id).where(
-        or_(Material.course_id == course_id,
-            and_(Notebook.course_id == course_id, Notebook.deleted_at.is_(None))),
-        Material.deleted_at.is_not(None)
-    ).order_by(Material.deleted_at.desc())).all())
+    rows = materials_for_course(db, course_id, include_deleted=True)
+    return sorted(
+        [item for item in rows if item.deleted_at is not None],
+        key=lambda item: item.deleted_at, reverse=True,
+    )
 
 
 
 @router.get("/materials/{material_id}/deletion-preview", response_model=DeletionPreview)
 def preview_material_deletion(material_id: str, db: Session = Depends(get_db)) -> dict:
     material = ensure_material(db, material_id)
-    return impact_preview(db, course_id=material.course_id, material_id=material.id)
+    return impact_preview(db, course_id=material_course_id(db, material), material_id=material.id)
 
 
 
@@ -431,10 +617,11 @@ def restore_material(material_id: str, db: Session = Depends(get_db)) -> Materia
     material = db.get(Material, material_id)
     if material is None or material.deleted_at is None:
         raise HTTPException(status_code=404, detail="待恢复资料不存在")
-    if material.course_id is not None:
-        ensure_course(db, material.course_id)
+    course_id = material_course_id(db, material)
+    if course_id is not None:
+        ensure_course(db, course_id)
     material.deleted_at = None
-    bump_order_revision(db, material.course_id, material.notebook_id)
+    bump_order_revision(db, course_id, material.notebook_id)
     db.commit()
     db.refresh(material)
     return material
@@ -625,15 +812,13 @@ def request_material_ocr(material_id: str, db: Session = Depends(get_db)) -> Pro
 
 
 @router.get("/materials/{material_id}/pages", response_model=list[PageRead])
-def list_material_pages(material_id: str, db: Session = Depends(get_db)) -> list[MaterialPage]:
-    ensure_material(db, material_id)
-    return list(
-        db.scalars(
-            select(MaterialPage)
-            .where(MaterialPage.material_id == material_id, MaterialPage.is_active.is_(True))
-            .order_by(MaterialPage.page_number)
-        ).all()
-    )
+def list_material_pages(material_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    """Legacy projection of the current Document IR for the materials page."""
+
+    document, _run = _material_document(db, material_id)
+    if document is None:
+        return []
+    return [_page_payload(page, material_id) for page in document.pages]
 
 
 @router.get(
@@ -642,69 +827,100 @@ def list_material_pages(material_id: str, db: Session = Depends(get_db)) -> list
 )
 def get_page_evidence(
     material_id: str, page_number: int, db: Session = Depends(get_db)
-) -> PageEvidenceRead:
-    ensure_material(db, material_id)
-    page = db.scalar(
-        select(MaterialPage)
-        .where(
-            MaterialPage.material_id == material_id,
-            MaterialPage.page_number == page_number,
-            MaterialPage.is_active.is_(True),
-        )
-        .options(
-            selectinload(MaterialPage.blocks)
-            .selectinload(PageBlock.source_refs)
-            .selectinload(SourceRef.notes)
-        )
-    )
+) -> dict:
+    document, run = _material_document(db, material_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="资料还没有完成的解析版本")
+    page = next((item for item in document.pages if item.page_number == page_number), None)
     if page is None:
         raise HTTPException(status_code=404, detail="资料位置不存在")
 
-    all_note_ids: set[str] = set()
-    all_note_titles: dict[str, str] = {}
-    blocks: list[BlockRead] = []
-    for block in sorted(page.blocks, key=lambda item: item.position):
-        block_note_titles: dict[str, str] = {}
-        for source_ref in block.source_refs:
-            if source_ref.status != "active":
-                continue
-            for note in source_ref.notes:
-                block_note_titles[note.id] = note.title
-        all_note_ids.update(block_note_titles)
-        all_note_titles.update(block_note_titles)
-        blocks.append(BlockRead(
-            id=block.id,
-            page_id=block.page_id,
-            block_type=block.block_type,
-            content=block.content,
-            position=block.position,
-            font_size=block.font_size,
-            is_bold=block.is_bold,
-            object_id=block.object_id,
-            location_label=block.location_label,
-            extraction_method=block.extraction_method,
-            confidence=block.confidence,
-            warning=block.warning,
-            note_ids=sorted(block_note_titles),
-            note_titles=[block_note_titles[key] for key in sorted(block_note_titles)],
-        ))
-    return PageEvidenceRead(
-        id=page.id,
-        material_id=page.material_id,
-        page_number=page.page_number,
-        title=page.title,
-        raw_text=page.raw_text,
-        parse_status=page.parse_status,
-        warning=page.warning,
-        location_type=page.location_type,
-        location_label=page.location_label,
-        stable_location_key=page.stable_location_key,
-        extraction_method=page.extraction_method,
-        confidence=page.confidence,
-        blocks=blocks,
-        note_ids=sorted(all_note_ids),
-        note_titles=[all_note_titles[key] for key in sorted(all_note_titles)],
+    rows = list(db.scalars(select(DocumentBlock).where(
+        DocumentBlock.parse_run_id == run.id,
+    )).all())
+    db_id_by_block = {row.block_id: row.id for row in rows}
+    citations: dict[str, list[tuple[str, str]]] = {}
+    links = db.execute(
+        select(NotebookBlockSource.document_block_id, NotebookBlockSource.block_id,
+               Notebook.id, Notebook.title, NotebookSection.heading)
+        .join(Notebook, Notebook.id == NotebookBlockSource.notebook_id)
+        .outerjoin(NotebookSection, (NotebookSection.notebook_id == NotebookBlockSource.notebook_id)
+                   & (NotebookSection.block_id == NotebookBlockSource.block_id))
+        .where(NotebookBlockSource.parse_run_id == run.id)
+    ).all()
+    for document_block_id, _body_block_id, notebook_id, title, heading in links:
+        citations.setdefault(document_block_id, []).append(
+            (notebook_id, heading or title),
+        )
+    blocks: list[dict] = []
+    note_ids: list[str] = []
+    note_titles: list[str] = []
+    for block in sorted(page.blocks, key=lambda item: (item.order, item.global_order)):
+        linked = citations.get(db_id_by_block.get(block.block_id, ""), [])
+        block_note_ids = list(dict.fromkeys(item[0] for item in linked))
+        block_note_titles = list(dict.fromkeys(item[1] for item in linked))
+        for notebook_id in block_note_ids:
+            if notebook_id not in note_ids:
+                note_ids.append(notebook_id)
+        for title in block_note_titles:
+            if title not in note_titles:
+                note_titles.append(title)
+        blocks.append({
+            "id": block.block_id,
+            "page_id": page.page_id,
+            "block_type": block.type,
+            "content": block.text,
+            "position": block.order,
+            "font_size": None,
+            "is_bold": False,
+            "object_id": None,
+            "location_label": block.source.location_label if block.source else None,
+            "extraction_method": block.extraction,
+            "confidence": block.confidence,
+            "warning": "；".join(block.warnings) or None,
+            "note_ids": block_note_ids,
+            "note_titles": block_note_titles,
+        })
+    payload = _page_payload(page, material_id)
+    payload.update({
+        "blocks": blocks, "note_ids": note_ids, "note_titles": note_titles,
+    })
+    return payload
+
+
+def _material_document(db: Session, material_id: str):
+    material = ensure_material(db, material_id)
+    asset = db.get(Asset, material.asset_id) if material.asset_id else db.get(Asset, material.id)
+    run = current_parse_run(db, asset.id) if asset is not None else None
+    if run is None:
+        return None, None
+    return load_ir(db, run), run
+
+
+def _page_payload(page, material_id: str = "") -> dict:
+    heading = next(
+        (block.text for block in sorted(page.blocks, key=lambda item: item.order)
+         if block.type == "heading" and block.text.strip()), None,
     )
+    status = "parsed"
+    if page.status == "needs_ocr":
+        status = "ocr_candidate"
+    elif page.status in {"failed", "empty"}:
+        status = page.status
+    return {
+        "id": page.page_id,
+        "material_id": material_id,
+        "page_number": page.page_number,
+        "title": heading,
+        "raw_text": page.text,
+        "parse_status": status,
+        "warning": "；".join(page.warnings) or None,
+        "location_type": "page",
+        "location_label": f"第 {page.page_number} 页",
+        "stable_location_key": f"page:{page.page_number}",
+        "extraction_method": page.extraction,
+        "confidence": page.confidence,
+    }
 
 
 @router.get("/materials/{material_id}/coverage", response_model=CoverageRead)

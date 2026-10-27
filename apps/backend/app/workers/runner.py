@@ -86,12 +86,13 @@ def mark_interrupted_jobs(*, force: bool = False) -> int:
             job.finished_at = datetime.now(UTC)
             job.updated_at = job.finished_at
         generation_jobs = db.scalars(select(NotebookGenerationJob).where(
-            NotebookGenerationJob.status == "processing",
+            NotebookGenerationJob.status.in_(("processing", "cancel_requested")),
         )).all()
         for job in generation_jobs:
-            job.status = "failed"
-            job.error_code = "interrupted"
-            job.error_message = "生成进程中断；可使用相同输入重新尝试"
+            cancelled = job.status == "cancel_requested"
+            job.status = "cancelled" if cancelled else "failed"
+            job.error_code = "cancelled" if cancelled else "interrupted"
+            job.error_message = "生成已取消" if cancelled else "生成进程中断；可使用相同输入重新尝试"
             job.finished_at = datetime.now(UTC)
             job.updated_at = job.finished_at
             db.query(NotebookGenerationInput).filter(
@@ -99,8 +100,8 @@ def mark_interrupted_jobs(*, force: bool = False) -> int:
                 NotebookGenerationInput.status == "generating",
             ).update({
                 NotebookGenerationInput.status: "generation_failed",
-                NotebookGenerationInput.error_code: "interrupted",
-                NotebookGenerationInput.error_message: "生成进程中断；可安全重试",
+                NotebookGenerationInput.error_code: job.error_code,
+                NotebookGenerationInput.error_message: job.error_message,
                 NotebookGenerationInput.updated_at: job.finished_at,
             }, synchronize_session=False)
         db.commit()

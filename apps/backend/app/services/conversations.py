@@ -95,6 +95,24 @@ def persist_assistant_message(
             if not isinstance(chunk_index, int) or not 0 <= chunk_index < len(chunks):
                 continue
             chunk = chunks[chunk_index]
+            if getattr(chunk, "kind", "legacy") in {"document", "notebook"}:
+                db.add(MessageEvidence(
+                    message_id=assistant.id,
+                    notebook_id=chunk.notebook_id,
+                    document_block_id=chunk.document_block_id,
+                    parse_run_id=chunk.parse_run_id,
+                    body_block_id=chunk.block_id,
+                    source_title=chunk.lecture_title,
+                    location_label=chunk.location_label,
+                    snippet=chunk.text[:600],
+                    claim_key=claim_key,
+                    evidence_type=str(claim.get("evidence_type") or (
+                        "course_direct" if chunk.direct_support else "course_related"
+                    )),
+                    support_level="direct" if chunk.direct_support else "related",
+                ))
+                linked_source = True
+                continue
             source_ref = None
             for criterion in (
                 (SourceRef.id == chunk.source_ref_id) if chunk.source_ref_id else None,

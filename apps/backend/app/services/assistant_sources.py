@@ -9,8 +9,8 @@ from app.retrieval.service import RetrievedChunk
 
 
 def source_payload(chunk: RetrievedChunk) -> dict:
-    return {
-        "source_type": "course_material",
+    payload = {
+        "source_type": "notebook" if chunk.kind == "notebook" else "course_material",
         "material_id": chunk.material_id,
         "source_ref_id": chunk.source_ref_id,
         "lecture_title": chunk.lecture_title,
@@ -19,7 +19,13 @@ def source_payload(chunk: RetrievedChunk) -> dict:
         "snippet": chunk.text[:240],
         "support_level": "direct" if chunk.direct_support else "related",
         "score_source": chunk.score_source,
+        "notebook_id": chunk.notebook_id,
+        "block_id": chunk.block_id,
+        "document_block_id": chunk.document_block_id,
+        "parse_run_id": chunk.parse_run_id,
+        "notebook_revision": chunk.notebook_revision,
     }
+    return payload
 
 
 def sources_from_results(chunks: list[RetrievedChunk], web_results: list[dict]) -> list[dict]:
@@ -46,6 +52,23 @@ def sources_from_evidence(db: Session, message: ConversationMessage) -> list[dic
     sources: list[dict] = []
     seen: set[str] = set()
     for item in message.evidence:
+        if item.document_block_id or item.notebook_id:
+            key = f"new:{item.notebook_id}:{item.body_block_id}:{item.document_block_id}"
+            if key in seen:
+                continue
+            seen.add(key)
+            sources.append({
+                "source_type": "notebook" if not item.document_block_id else "course_material",
+                "notebook_id": item.notebook_id,
+                "block_id": item.body_block_id,
+                "document_block_id": item.document_block_id,
+                "parse_run_id": item.parse_run_id,
+                "location_label": item.location_label,
+                "lecture_title": item.source_title,
+                "snippet": item.snippet,
+                "support_level": item.support_level,
+            })
+            continue
         ref = item.source_ref
         if ref is not None and ref.page_block is not None:
             key = f"ref:{ref.id}"

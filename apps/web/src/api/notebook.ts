@@ -1,6 +1,6 @@
 import type {
   DocNode, Note, Notebook, NotebookAttachment, NotebookDocumentResponse, NotebookRead,
-  NotebookRevision, NotebookRevisionSummary, NotebookSummary,
+  NotebookEditSuggestion, NotebookRevision, NotebookRevisionSummary, NotebookSummary,
   NotebookGenerationJob,
   NotebookUploadBatch,
 } from '../types'
@@ -11,6 +11,17 @@ export type UnboundNotebookSummary = {
 }
 
 export const notebookApi = {
+  listNotebookEditSuggestions: (notebookId: string) => request<NotebookEditSuggestion[]>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}/edit-suggestions`),
+  reviewNotebookEditSuggestion: (notebookId: string, suggestionId: string, decision: 'accept' | 'reject', expectedRevision: number, selectedOperationIndices?: number[]) => request<NotebookDocumentResponse>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}/edit-suggestions/${encodeURIComponent(suggestionId)}/review`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ decision, expected_revision: expectedRevision, ...(selectedOperationIndices ? { selected_operation_indices: selectedOperationIndices } : {}) }),
+  }),
+  getNotebookBlockSources: (notebookId: string, blockId: string) => request<Array<{
+    asset_name: string; quote: string; page_number: number; parse_run_id: string; status: string
+  }>>(`/api/v1/notebooks/${encodeURIComponent(notebookId)}/blocks/${encodeURIComponent(blockId)}/sources`),
+  getNotebookSections: (courseId: string, notebookId: string) => request<Array<{
+    block_id: string; heading: string; level: number; order: number; revision: number; excerpt: string
+  }>>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/sections`),
   listUnboundNotebooks: () => request<UnboundNotebookSummary[]>('/api/v1/notebooks/unbound'),
   createUnboundNotebook: (title: string) => request<UnboundNotebookSummary>('/api/v1/notebooks/unbound', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
@@ -85,6 +96,7 @@ export const notebookApi = {
     body: JSON.stringify({ asset_ids: assetIds }),
   }),
   getNotebookGenerationJob: (notebookId: string, jobId: string) => request<NotebookGenerationJob>(`/api/v1/notebooks/${notebookId}/generation-jobs/${jobId}`),
+  listNotebookGenerationJobs: (notebookId: string) => request<NotebookGenerationJob[]>(`/api/v1/notebooks/${notebookId}/generation-jobs`),
   listNotebookUploadBatches: (notebookId: string) => request<NotebookUploadBatch[]>(`/api/v1/notebooks/${notebookId}/upload-batches`),
   getNotebookUploadBatch: (notebookId: string, batchId: string) => request<NotebookUploadBatch>(`/api/v1/notebooks/${notebookId}/upload-batches/${batchId}`),
   closeNotebookUploadBatch: (notebookId: string, batchId: string) => request<NotebookUploadBatch>(`/api/v1/notebooks/${notebookId}/upload-batches/${batchId}/complete`, { method: 'POST' }),

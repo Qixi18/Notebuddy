@@ -1,251 +1,461 @@
-"""Generate and atomically append incremental Notebook document fragments."""
+"""Generate a Notebook fragment from Document IR and merge it safely.
+
+Pipeline: persisted plan -> batched composition -> schema/source validation ->
+append-only merge with revision CAS -> source relations -> derived index.
+"""
 
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
+from sqlalchemy.orm import aliased
 
-from app.ai.deepseek import DeepSeekClient, DeepSeekError
+from app.core.config import settings
 from app.db.database import SessionLocal
-from app.db.models import Notebook, NotebookGenerationInput, NotebookGenerationJob
+from app.db.models import (
+    DocumentBlock,
+    DocumentPage,
+    Notebook,
+    NotebookBlockSource,
+    NotebookGenerationInput,
+    NotebookGenerationJob,
+)
+from app.generation.composer import CompositionError, compose
+from app.generation.context import GenerationInputError, current_outline
+from app.generation.planner import build_plan
 from app.notes.document import (
     DocumentValidationError,
-    dump_document,
+    load_document,
     normalize_document,
     validate_document,
 )
-from app.notes.history import record_snapshot
+from app.notes.store import DocumentConflict, body_fingerprint, write_document
+from app.services.notebook_generation_inputs import cancel_generation_inputs
 
-PROMPT_VERSION = "notebook-fragment-v2"
+PROMPT_VERSION = "notebook-generation-v3"
 
 
 def claim_next_generation_job() -> str | None:
     with SessionLocal() as db:
         # A notebook is a serial write stream. Do not claim its next job while
         # another generation for it is pending or processing.
+        busy = aliased(NotebookGenerationJob)
+        available = ~select(busy.id).where(
+            busy.notebook_id == NotebookGenerationJob.notebook_id,
+            busy.status.in_(("processing", "cancel_requested")),
+        ).exists()
         job_id = db.scalar(select(NotebookGenerationJob.id).where(
             NotebookGenerationJob.status == "pending",
-            ~NotebookGenerationJob.notebook_id.in_(select(NotebookGenerationJob.notebook_id).where(
-                NotebookGenerationJob.status == "processing",
-            )),
+            available,
         ).order_by(NotebookGenerationJob.created_at, NotebookGenerationJob.id).limit(1))
         if job_id is None:
             return None
         result = db.execute(update(NotebookGenerationJob).where(
             NotebookGenerationJob.id == job_id,
             NotebookGenerationJob.status == "pending",
+            # Recheck in the write statement: another runner may have claimed
+            # a different job for the same Notebook after our SELECT.
+            available,
         ).values(status="processing", attempt_count=NotebookGenerationJob.attempt_count + 1,
                  updated_at=datetime.now(UTC)))
         db.commit()
         return job_id if result.rowcount == 1 else None
 
 
-def _generate_fragment(snapshot: dict) -> dict:
-    result = DeepSeekClient().complete_json([
-        {"role": "system", "content": (
-            "你为学习笔记生成增量补充内容，返回 {\"type\":\"doc\",\"content\":[...]}。"
-            "只生成可直接追加的新增 Tiptap JSON v2 节点，绝不重写或复制已有正文。"
-            "结合已有正文概览避免重复；只依据新增资料陈述事实。仅使用项目支持的结构化节点；"
-            "不要输出 image、URL、HTML 或 SVG。"
-        )},
-        {"role": "user", "content": json.dumps(snapshot, ensure_ascii=False)},
-    ], max_tokens=6000)
-    fragment = normalize_document(result.get("document", result))
-    validate_document(fragment)
-    return fragment
-
-
 def process_generation_job(job_id: str) -> None:
     with SessionLocal() as db:
         job = db.get(NotebookGenerationJob, job_id)
-        if job is None or job.status != "processing":
+        if job is None:
             return
-        snapshot_json = job.input_snapshot_json
-    input_asset_ids: list[str] = []
-    try:
-        snapshot = json.loads(snapshot_json)
-        input_asset_ids = [
-            source["asset_id"] for source in snapshot.get("sources", [])
-            if isinstance(source, dict) and isinstance(source.get("asset_id"), str)
-        ]
-        fragment = _generate_fragment(snapshot)
-        if not fragment.get("content"):
-            raise DocumentValidationError("AI 未生成可追加的文档节点")
-        stack = list(fragment["content"])
-        while stack:
-            node = stack.pop()
-            if node.get("type") == "image":
-                raise DocumentValidationError("AI 生成的补充内容不能新增图片资源")
-            stack.extend(node.get("content") or [])
-        error = None
-    except (DeepSeekError, DocumentValidationError, ValueError, TypeError) as exc:
-        fragment = None
-        error = ("generation_failed", str(exc)[:1000])
-    except Exception as exc:
-        fragment = None
-        error = ("generation_internal_error", f"生成任务失败：{type(exc).__name__}")
-
-    with SessionLocal() as db:
-        job = db.get(NotebookGenerationJob, job_id)
-        if job is None or job.status != "processing":
+        attempt = job.attempt_count
+        if not _checkpoint(db, job, attempt):
             return
-        now = datetime.now(UTC)
-        if error:
-            job.status = "failed"
-            job.error_code, job.error_message = error
-            job.finished_at = job.updated_at = now
-            if input_asset_ids:
-                db.query(NotebookGenerationInput).filter(
-                    NotebookGenerationInput.notebook_id == job.notebook_id,
-                    NotebookGenerationInput.asset_id.in_(input_asset_ids),
-                    NotebookGenerationInput.status != "completed",
-                ).update({
-                    NotebookGenerationInput.status: "generation_failed",
-                    NotebookGenerationInput.generation_job_id: job.id,
-                    NotebookGenerationInput.error_code: job.error_code,
-                    NotebookGenerationInput.error_message: job.error_message,
-                    NotebookGenerationInput.updated_at: now,
-                }, synchronize_session=False)
+        snapshot = _parse_json(job.input_snapshot_json) or {}
+        plan = _parse_json(job.knowledge_plan_json) if job.knowledge_plan_json else None
+        if plan is None:
+            if not _guard_processing(db, job.id, attempt):
+                db.rollback()
+                _checkpoint(db, job, attempt)
+                return
+            notebook = db.get(Notebook, job.notebook_id, populate_existing=True)
+            if notebook is None or notebook.deleted_at is not None:
+                _fail_inputs(db, job, "notebook_unavailable", "笔记已删除或不可用", attempt)
+                return
+            stored = load_document(notebook.document_json)
+            if stored.warning:
+                _fail_inputs(db, job, "document_validation_failed", stored.warning, attempt)
+                return
+            # Queued jobs may start after another append or history restore.
+            # Preserve source versions, but plan against the current body and
+            # retain the enqueue revision for audit.
+            snapshot.setdefault("initial_base_document_revision", job.base_document_revision)
+            snapshot["base_document_revision"] = notebook.document_revision
+            snapshot["current_document"] = stored.content
+            snapshot["current_outline"] = current_outline(stored.content)
+            snapshot["consumed_parse_run_ids"] = _consumed_parse_runs(db, job.notebook_id)
+            job.input_snapshot_json = json.dumps(snapshot, ensure_ascii=False)
+            job.base_document_revision = notebook.document_revision
+            try:
+                plan = build_plan(snapshot)
+            except Exception as exc:
+                _fail_inputs(db, job, "plan_failed", f"生成计划构建失败：{exc}", attempt)
+                return
+            job.knowledge_plan_json = json.dumps(plan, ensure_ascii=False)
             db.commit()
+        generator = job.generator or settings.notebook_generator
+        try:
+            compositions = []
+            for batch in plan.get("batches") or []:
+                if not _checkpoint(db, job, attempt):
+                    return
+                # Do not hold a read transaction across a network/model call.
+                db.commit()
+                compositions.append(compose(snapshot, plan, batch, generator=generator))
+                if not _checkpoint(db, job, attempt):
+                    return
+        except (CompositionError, GenerationInputError) as exc:
+            _fail_inputs(db, job, getattr(exc, "code", "generation_failed"), str(exc), attempt)
+            return
+        except Exception as exc:  # provider boundary; keep the job retryable
+            _fail_inputs(db, job, "generation_internal_error",
+                         f"生成任务失败：{type(exc).__name__}", attempt)
             return
 
-        # Reload the latest document at commit time. The model sees a possibly
-        # older outline, but its fragment is appended to the current root array.
+        nodes: list[dict[str, Any]] = []
+        source_map: dict[str, list[str]] = {}
+        for composition in compositions:
+            nodes.extend(composition.nodes)
+            for block_id, ids in composition.source_map.items():
+                source_map[block_id] = list(dict.fromkeys(source_map.get(block_id, []) + ids))
+        if not nodes:
+            if plan.get("units") and all(
+                unit.get("intent") == "skip" for unit in plan["units"]
+            ):
+                _complete_without_append(db, job, attempt)
+                return
+            _fail_inputs(db, job, "empty_generation", "没有可追加的正文内容（资料可能已全部覆盖）", attempt)
+            return
+        try:
+            fragment = validate_document(normalize_document({"type": "doc", "content": nodes}))
+            _reject_images(fragment)
+            _validate_source_map(fragment, source_map)
+        except DocumentValidationError as exc:
+            _fail_inputs(db, job, "document_validation_failed", str(exc)[:1000], attempt)
+            return
+
+        allowed_runs = {
+            source["parse_run_id"] for source in snapshot.get("sources") or []
+            if isinstance(source, dict) and isinstance(source.get("parse_run_id"), str)
+        }
+        source_rows = _resolve_source_rows(db, allowed_runs, source_map)
+        if source_rows is None:
+            _fail_inputs(db, job, "invalid_sources", "生成内容引用了本次输入之外的原文块", attempt)
+            return
+
+        merged = _merge_with_retry(db, job, fragment, source_map, attempt)
+        if merged is None:
+            _fail_inputs(
+                db, job, "revision_conflict",
+                "正文连续并发更新，自动重试次数已用尽；请手动重试生成",
+                attempt,
+            )
+            return
+        notebook, next_revision = merged
+        _write_sources(db, notebook, job, source_rows, source_map)
+        job.status = "completed"
+        job.generator = generator
+        job.source_map_json = json.dumps(source_map, ensure_ascii=False)
+        job.error_code = job.error_message = None
+        job.finished_at = job.updated_at = datetime.now(UTC)
+        _complete_inputs(db, job, next_revision)
+        if notebook.course_id is not None:
+            from app.forest.notebook_relations import enqueue_notebook_relations
+
+            enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id)
+        db.commit()
+
+
+def _merge_with_retry(
+    db, job: NotebookGenerationJob, fragment: dict[str, Any], source_map: dict[str, list[str]],
+    attempt: int,
+) -> tuple[Notebook, int] | None:
+    attempts = 3
+    for _ in range(attempts):
+        # This write locks the task until body, sources, input statuses and
+        # completion commit together. A late cancellation or a second delivery
+        # cannot append the same result again.
+        if not _guard_processing(db, job.id, attempt):
+            db.rollback()
+            _checkpoint(db, job, attempt)
+            return None
         notebook = db.scalar(select(Notebook).where(
             Notebook.id == job.notebook_id, Notebook.deleted_at.is_(None),
-        ))
+        ).execution_options(populate_existing=True))
         if notebook is None:
-            job.status = "failed"
-            job.error_code = "notebook_unavailable"
-            job.error_message = "笔记已删除或不可用"
-            job.finished_at = job.updated_at = now
-            if input_asset_ids:
-                db.query(NotebookGenerationInput).filter(
-                    NotebookGenerationInput.notebook_id == job.notebook_id,
-                    NotebookGenerationInput.asset_id.in_(input_asset_ids),
-                    NotebookGenerationInput.status != "completed",
-                ).update({
-                    NotebookGenerationInput.status: "generation_failed",
-                    NotebookGenerationInput.generation_job_id: job.id,
-                    NotebookGenerationInput.error_code: job.error_code,
-                    NotebookGenerationInput.error_message: job.error_message,
-                    NotebookGenerationInput.updated_at: now,
-                }, synchronize_session=False)
-            db.commit()
-            return
-        from app.notes.document import load_document
+            _fail_inputs(db, job, "notebook_unavailable", "笔记已删除或不可用", attempt)
+            return None
         current = load_document(notebook.document_json)
-        try:
-            if current.warning:
-                raise DocumentValidationError(current.warning)
-            current_content = validate_document(current.content)
-            if not isinstance(current_content.get("content"), list):
-                raise DocumentValidationError("当前正文不是可安全追加的文档结构")
-            used_ids: set[str] = set()
-            def collect_ids(nodes):
-                for node in nodes:
-                    block_id = (node.get("attrs") or {}).get("blockId")
-                    if isinstance(block_id, str):
-                        used_ids.add(block_id)
-            collect_ids(current_content.get("content") or [])
-            for node in fragment["content"]:
-                attrs = node.get("attrs") or {}
-                block_id = attrs.get("blockId")
-                if block_id in used_ids:
-                    attrs["blockId"] = f"ai-{uuid.uuid4().hex[:20]}"
-                    node["attrs"] = attrs
-                if isinstance(attrs.get("blockId"), str):
-                    used_ids.add(attrs["blockId"])
-            # No AI images are accepted. Resource ownership is therefore not
-            # inferred from model output; existing references remain untouched.
-            appended = {"type": "doc", "content": [*current_content["content"], *fragment["content"]]}
-            appended = validate_document(appended)
-        except (DocumentValidationError, KeyError, TypeError) as exc:
-            job.status = "failed"
-            job.error_code = "document_validation_failed"
-            job.error_message = str(exc)[:1000]
-            job.finished_at = job.updated_at = now
-            if input_asset_ids:
-                db.query(NotebookGenerationInput).filter(
-                    NotebookGenerationInput.notebook_id == job.notebook_id,
-                    NotebookGenerationInput.asset_id.in_(input_asset_ids),
-                    NotebookGenerationInput.status != "completed",
-                ).update({
-                    NotebookGenerationInput.status: "generation_failed",
-                    NotebookGenerationInput.generation_job_id: job.id,
-                    NotebookGenerationInput.error_code: job.error_code,
-                    NotebookGenerationInput.error_message: job.error_message,
-                    NotebookGenerationInput.updated_at: now,
-                }, synchronize_session=False)
-            db.commit()
-            return
+        if current.warning:
+            _fail_inputs(db, job, "document_validation_failed", current.warning, attempt)
+            return None
+        content = validate_document(current.content)
+        used: set[str] = set()
 
-        base_revision = notebook.document_revision
-        next_revision = base_revision + 1
-        changed = db.execute(update(Notebook).where(
-            Notebook.id == notebook.id,
-            Notebook.document_revision == base_revision,
-            Notebook.deleted_at.is_(None),
-        ).values(document_json=dump_document(appended), document_revision=next_revision, updated_at=now))
-        if changed.rowcount != 1:
+        def collect(nodes, used=used) -> None:
+            for node in nodes or []:
+                block_id = (node.get("attrs") or {}).get("blockId")
+                if isinstance(block_id, str):
+                    used.add(block_id)
+                collect(node.get("content"))
+
+        collect(content.get("content"))
+        # Move source-map keys with any regenerated block id.
+        for node in fragment["content"]:
+            attrs = node.get("attrs") or {}
+            block_id = attrs.get("blockId")
+            if isinstance(block_id, str) and block_id in used:
+                new_id = f"ai-{uuid.uuid4().hex[:20]}"
+                if block_id in source_map:
+                    source_map[new_id] = source_map.pop(block_id)
+                attrs["blockId"] = new_id
+                node["attrs"] = attrs
+                block_id = new_id
+            if isinstance(block_id, str):
+                used.add(block_id)
+        merged_document = validate_document({
+            "type": "doc", "content": [*content["content"], *fragment["content"]],
+        })
+        try:
+            next_revision, _content = write_document(
+                db, notebook, merged_document,
+                expected_revision=notebook.document_revision, origin="ai_append",
+            )
+            db.flush()
+            return notebook, next_revision
+        except DocumentConflict:
             db.rollback()
-            # Keep the generated fragment as durable job input for retry; the
-            # retry re-reads and appends to the newest正文.
-            with SessionLocal() as retry_db:
-                retry_job = retry_db.get(NotebookGenerationJob, job_id)
-                if retry_job and retry_job.status == "processing":
-                    retry_job.status = "failed" if retry_job.attempt_count >= 3 else "pending"
-                    retry_job.error_code = "revision_conflict"
-                    retry_job.error_message = (
-                        "正文连续并发更新，自动重试次数已用尽；请手动重试生成"
-                        if retry_job.status == "failed" else "正文并发更新，已排队重试追加"
-                    )
-                    if retry_job.status == "failed":
-                        retry_job.finished_at = now
-                    else:
-                        latest_notebook = retry_db.get(Notebook, retry_job.notebook_id)
-                        if latest_notebook is not None and latest_notebook.deleted_at is None:
-                            latest_document = load_document(latest_notebook.document_json)
-                            latest_snapshot = json.loads(retry_job.input_snapshot_json)
-                            latest_snapshot["base_document_revision"] = latest_notebook.document_revision
-                            latest_snapshot["current_document"] = latest_document.content
-                            retry_job.base_document_revision = latest_notebook.document_revision
-                            retry_job.input_snapshot_json = json.dumps(
-                                latest_snapshot, ensure_ascii=False,
-                            )
-                    retry_job.updated_at = now
-                    if retry_job.status == "failed" and input_asset_ids:
-                        retry_db.query(NotebookGenerationInput).filter(
-                            NotebookGenerationInput.notebook_id == retry_job.notebook_id,
-                            NotebookGenerationInput.asset_id.in_(input_asset_ids),
-                            NotebookGenerationInput.status == "generating",
-                        ).update({
-                            NotebookGenerationInput.status: "generation_failed",
-                            NotebookGenerationInput.error_code: retry_job.error_code,
-                            NotebookGenerationInput.error_message: retry_job.error_message,
-                            NotebookGenerationInput.updated_at: now,
-                        }, synchronize_session=False)
-                    retry_db.commit()
-            return
-        record_snapshot(db, notebook.id, next_revision, appended, origin="ai_append")
-        if input_asset_ids:
-            db.query(NotebookGenerationInput).filter(
-                NotebookGenerationInput.notebook_id == job.notebook_id,
-                NotebookGenerationInput.asset_id.in_(input_asset_ids),
-                NotebookGenerationInput.status != "completed",
-            ).update({
-                NotebookGenerationInput.status: "completed",
-                NotebookGenerationInput.generation_job_id: job.id,
-                NotebookGenerationInput.error_code: None,
-                NotebookGenerationInput.error_message: None,
-                NotebookGenerationInput.updated_at: now,
-                NotebookGenerationInput.finished_at: now,
-            }, synchronize_session=False)
-        job.status = "completed"
-        job.base_document_revision = base_revision
-        job.error_code = job.error_message = None
-        job.finished_at = job.updated_at = now
+            # Reload and retry: append-only merge never overwrites user edits.
+            db.expire_all()
+            continue
+    return None
+
+
+def _reject_images(document: dict[str, Any]) -> None:
+    stack = list(document.get("content") or [])
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") == "image":
+            raise DocumentValidationError("AI 生成的补充内容不能新增图片资源")
+        stack.extend(node.get("content") or [])
+
+
+def _validate_source_map(document: dict[str, Any], source_map: dict[str, list[str]]) -> None:
+    """Validate after normalization, which may assign missing block IDs."""
+
+    ids = [(node.get("attrs") or {}).get("blockId") for node in document["content"]]
+    if any(not isinstance(block_id, str) or not block_id for block_id in ids):
+        raise DocumentValidationError("生成的正文节点缺少可追溯的块 ID")
+    if len(ids) != len(set(ids)):
+        raise DocumentValidationError("生成的正文块 ID 重复")
+    if set(source_map) != set(ids) or any(
+        not isinstance(refs, list) or not refs
+        or any(not isinstance(ref, str) or not ref for ref in refs)
+        for refs in source_map.values()
+    ):
+        raise DocumentValidationError("每个生成正文块必须有完整且有效的来源映射")
+
+
+def _guard_processing(db, job_id: str, attempt: int) -> bool:
+    result = db.execute(update(NotebookGenerationJob).where(
+        NotebookGenerationJob.id == job_id,
+        NotebookGenerationJob.status == "processing",
+        NotebookGenerationJob.attempt_count == attempt,
+    ).values(updated_at=datetime.now(UTC)).execution_options(synchronize_session=False))
+    return result.rowcount == 1
+
+
+def _consumed_parse_runs(db, notebook_id: str) -> list[str]:
+    consumed: set[str] = set()
+    for raw in db.scalars(select(NotebookGenerationJob.parse_run_ids_json).where(
+        NotebookGenerationJob.notebook_id == notebook_id,
+        NotebookGenerationJob.status == "completed",
+    )):
+        try:
+            run_ids = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(run_ids, list):
+            consumed.update(run_id for run_id in run_ids if isinstance(run_id, str))
+    return sorted(consumed)
+
+
+def _complete_without_append(db, job: NotebookGenerationJob, attempt: int) -> None:
+    if not _guard_processing(db, job.id, attempt):
+        db.rollback()
+        _checkpoint(db, job, attempt)
+        return
+    notebook = db.get(Notebook, job.notebook_id, populate_existing=True)
+    if notebook is None or notebook.deleted_at is not None:
+        _fail_inputs(db, job, "notebook_unavailable", "笔记已删除或不可用", attempt)
+        return
+    job.status = "completed"
+    job.source_map_json = "{}"
+    job.error_code = job.error_message = None
+    job.finished_at = job.updated_at = datetime.now(UTC)
+    _complete_inputs(db, job, notebook.document_revision)
+    db.commit()
+
+
+def _checkpoint(db, job: NotebookGenerationJob, attempt: int) -> bool:
+    db.refresh(job)
+    if job.attempt_count != attempt:
+        return False
+    if job.status == "cancel_requested":
+        cancelled = db.execute(update(NotebookGenerationJob).where(
+            NotebookGenerationJob.id == job.id,
+            NotebookGenerationJob.status == "cancel_requested",
+            NotebookGenerationJob.attempt_count == attempt,
+        ).values(status="cancelled", finished_at=datetime.now(UTC), updated_at=datetime.now(UTC))
+          .execution_options(synchronize_session=False))
+        if cancelled.rowcount:
+            cancel_generation_inputs(db, job.id)
         db.commit()
+        return False
+    return job.status == "processing"
+
+
+def _resolve_source_rows(
+    db, allowed_runs: set[str], source_map: dict[str, list[str]],
+) -> dict[tuple[str, str], tuple[DocumentBlock, int]] | None:
+    wanted = {block_id for ids in source_map.values() for block_id in ids}
+    if not wanted:
+        return None
+    rows = db.execute(
+        select(DocumentBlock, DocumentPage.page_number)
+        .join(DocumentPage, DocumentPage.id == DocumentBlock.page_id)
+        .where(
+            DocumentBlock.block_id.in_(wanted),
+            DocumentBlock.parse_run_id.in_(list(allowed_runs)),
+        )
+    ).all()
+    resolved = {(row.parse_run_id, row.block_id): (row, page) for row, page in rows}
+    if set(wanted) - {block_id for _, block_id in resolved}:
+        # Block ids are run-prefixed; a missing id means the snapshot no longer
+        # matches the stored evidence.
+        return None
+    return resolved
+
+
+def _write_sources(
+    db, notebook: Notebook, job: NotebookGenerationJob,
+    rows: dict[tuple[str, str], tuple[DocumentBlock, int]],
+    source_map: dict[str, list[str]],
+) -> None:
+    fingerprints = {
+        (node.get("attrs") or {}).get("blockId"): body_fingerprint(node)
+        for node in load_document(notebook.document_json).content.get("content") or []
+    }
+    existing = {
+        (row.block_id, row.document_block_id)
+        for row in db.scalars(select(NotebookBlockSource).where(
+            NotebookBlockSource.notebook_id == notebook.id,
+        )).all()
+    }
+    for body_block_id, ir_ids in source_map.items():
+        for ir_id in ir_ids:
+            match = next(
+                (value for (run_id, block_id), value in rows.items() if block_id == ir_id), None,
+            )
+            if match is None:
+                continue
+            block, page_number = match
+            key = (body_block_id, block.id)
+            if key in existing:
+                continue
+            existing.add(key)
+            db.add(NotebookBlockSource(
+                notebook_id=notebook.id,
+                block_id=body_block_id[:64],
+                generation_job_id=job.id,
+                parse_run_id=block.parse_run_id,
+                document_block_id=block.id,
+                page_number=page_number,
+                confidence=block.confidence,
+                body_fingerprint=fingerprints.get(body_block_id),
+                status="active",
+                created_at=datetime.now(UTC),
+            ))
+    db.flush()
+
+
+def _complete_inputs(db, job: NotebookGenerationJob, revision: int) -> None:
+    input_ids = _input_asset_ids(job)
+    if not input_ids:
+        return
+    now = datetime.now(UTC)
+    db.query(NotebookGenerationInput).filter(
+        NotebookGenerationInput.notebook_id == job.notebook_id,
+        NotebookGenerationInput.asset_id.in_(input_ids),
+        NotebookGenerationInput.status != "completed",
+        or_(NotebookGenerationInput.generation_job_id == job.id,
+            NotebookGenerationInput.generation_job_id.is_(None)),
+    ).update({
+        NotebookGenerationInput.status: "completed",
+        NotebookGenerationInput.generation_job_id: job.id,
+        NotebookGenerationInput.error_code: None,
+        NotebookGenerationInput.error_message: None,
+        NotebookGenerationInput.updated_at: now,
+        NotebookGenerationInput.finished_at: now,
+    }, synchronize_session=False)
+
+
+def _fail_inputs(db, job: NotebookGenerationJob, code: str, message: str, attempt: int) -> None:
+    if not _guard_processing(db, job.id, attempt):
+        db.rollback()
+        _checkpoint(db, job, attempt)
+        return
+    now = datetime.now(UTC)
+    job.status = "failed"
+    job.error_code = code[:60]
+    job.error_message = message[:2000]
+    job.finished_at = job.updated_at = now
+    input_ids = _input_asset_ids(job)
+    if input_ids:
+        db.query(NotebookGenerationInput).filter(
+            NotebookGenerationInput.notebook_id == job.notebook_id,
+            NotebookGenerationInput.asset_id.in_(input_ids),
+            NotebookGenerationInput.status != "completed",
+            or_(NotebookGenerationInput.generation_job_id == job.id,
+                NotebookGenerationInput.generation_job_id.is_(None)),
+        ).update({
+            NotebookGenerationInput.status: "generation_failed",
+            NotebookGenerationInput.generation_job_id: job.id,
+            NotebookGenerationInput.error_code: code[:60],
+            NotebookGenerationInput.error_message: message[:2000],
+            NotebookGenerationInput.updated_at: now,
+        }, synchronize_session=False)
+    db.commit()
+
+
+def _input_asset_ids(job: NotebookGenerationJob) -> list[str]:
+    snapshot = _parse_json(job.input_snapshot_json) or {}
+    return [
+        source["asset_id"] for source in snapshot.get("sources") or []
+        if isinstance(source, dict) and isinstance(source.get("asset_id"), str)
+    ]
+
+
+def _parse_json(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
