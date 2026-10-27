@@ -150,6 +150,8 @@
 .nb-prosemirror hr { margin: 1.6em 0; border: 0; border-top: 1px solid #e0e8e0; }
 .nb-prosemirror img { max-width: 100%; height: auto; margin: .6em 0; border-radius: 9px; }
 .nb-prosemirror img.ProseMirror-selectednode { outline: 2px solid #6f9d7b; outline-offset: 3px; }
+.nb-prosemirror { overflow-x: auto; }
+.nb-image-size { min-width: 38px; color: #617568; text-align: center; font-size: 11px; }
 .nb-prosemirror .tableWrapper { overflow-x: auto; margin: .8em 0; }
 .nb-prosemirror table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .94em; }
 .nb-prosemirror th, .nb-prosemirror td { min-width: 72px; padding: 7px 9px; border: 1px solid #d9e4da; vertical-align: top; text-align: left; }

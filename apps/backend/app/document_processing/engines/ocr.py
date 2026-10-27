@@ -1,8 +1,9 @@
 """Optional OCR engines with explicit capability reporting.
 
 Supported, in order of preference:
-1. RapidOCR (``rapidocr_onnxruntime``) - offline ONNX engine, no system deps.
-2. Tesseract via ``pytesseract`` - requires the tesseract binary.
+1. PaddleOCR PP-OCRv6 (optional PaddleX/PaddlePaddle installation).
+2. RapidOCR (``rapidocr_onnxruntime``) - offline ONNX engine, no system deps.
+3. Tesseract via ``pytesseract`` - requires the tesseract binary.
 
 When neither is importable the adapter must mark pages as ``needs_ocr`` rather
 than pretending the page was parsed.
@@ -11,6 +12,8 @@ than pretending the page was parsed.
 from __future__ import annotations
 
 import logging
+import os
+import threading
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +22,9 @@ from typing import Any
 from app.document_processing.engines.pdf_text import EngineInfo
 
 logger = logging.getLogger(__name__)
+_PADDLEOCR_CLASS: Any = None
+_PADDLEOCR_ENGINE: Any = None
+_PADDLEOCR_LOCK = threading.Lock()
 
 
 class OcrUnavailable(RuntimeError):
@@ -69,9 +75,55 @@ def _pytesseract():
         return None
 
 
+def _paddleocr_class():
+    global _PADDLEOCR_CLASS
+    if _PADDLEOCR_CLASS is not None:
+        return _PADDLEOCR_CLASS
+    try:
+        import paddle  # type: ignore # noqa: F401
+        from paddleocr import PaddleOCR  # type: ignore
+
+        _PADDLEOCR_CLASS = PaddleOCR
+        return PaddleOCR
+    except Exception:
+        return None
+
+
+def _selected_engine() -> str:
+    requested = os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower()
+    if requested in {"paddleocr", "rapidocr", "tesseract", "none"}:
+        return requested
+    if requested != "auto":
+        logger.warning("Unknown NOTEBOOK_OCR_ENGINE=%r; using automatic selection", requested)
+    if _paddleocr_class() is not None:
+        return "paddleocr"
+    if _rapidocr() is not None:
+        return "rapidocr"
+    if _pytesseract() is not None:
+        return "tesseract"
+    return "none"
+
+
 def availability() -> EngineInfo:
-    rapid = _rapidocr()
-    if rapid is not None:
+    selected = _selected_engine()
+    if selected == "paddleocr":
+        PaddleOCR = _paddleocr_class()
+        if PaddleOCR is not None:
+            try:
+                from importlib.metadata import version
+
+                paddle_version = version("paddleocr")
+            except Exception:
+                paddle_version = "?"
+            return EngineInfo(name="paddleocr", version=paddle_version, available=True,
+                              capabilities=("text", "bbox", "confidence", "layout", "offline"))
+        return EngineInfo(name="paddleocr", version="0", available=False,
+                          reason="未安装 PaddleOCR 及其运行依赖")
+    if selected == "rapidocr":
+        rapid = _rapidocr()
+        if rapid is None:
+            return EngineInfo(name="rapidocr", version="0", available=False,
+                              reason="未安装 rapidocr_onnxruntime")
         try:
             import rapidocr_onnxruntime as module  # type: ignore
 
@@ -80,29 +132,112 @@ def availability() -> EngineInfo:
             version = "?"
         return EngineInfo(name="rapidocr", version=version, available=True,
                           capabilities=("text", "bbox", "confidence", "offline"))
-    tess = _pytesseract()
-    if tess is not None:
+    if selected == "tesseract":
+        tess = _pytesseract()
+        if tess is None:
+            return EngineInfo(name="tesseract", version="0", available=False,
+                              reason="未安装 pytesseract")
         try:
             version = str(tess.get_tesseract_version())
-        except Exception as exc:  # binary missing
+        except Exception as exc:
             return EngineInfo(name="tesseract", version="0", available=False,
                               reason=f"tesseract binary unavailable: {exc}")
         return EngineInfo(name="tesseract", version=version, available=True,
                           capabilities=("text", "bbox", "confidence"))
-    return EngineInfo(
-        name="none", version="0", available=False,
-        reason="未安装 OCR 引擎（rapidocr_onnxruntime 或 pytesseract+tesseract）",
-    )
+    if selected == "none":
+        return EngineInfo(name="none", version="0", available=False,
+                          reason="OCR 已通过 NOTEBOOK_OCR_ENGINE=none 关闭")
 
+    return EngineInfo(name="none", version="0", available=False,
+                      reason="未安装 PaddleOCR、RapidOCR 或 Tesseract OCR 引擎")
 
 def recognize(image: bytes | Path, *, language: str = "chi_sim+eng",
               timeout_seconds: float = 60.0) -> OcrResult:
     info = availability()
     if not info.available:
         raise OcrUnavailable(info.reason or "OCR 引擎不可用")
+    if info.name == "paddleocr":
+        return _recognize_paddleocr(image)
     if info.name == "rapidocr":
         return _recognize_rapidocr(image)
     return _recognize_tesseract(image, language=language, timeout_seconds=timeout_seconds)
+
+
+def _recognize_paddleocr(image: bytes | Path) -> OcrResult:
+    global _PADDLEOCR_ENGINE
+    PaddleOCR = _paddleocr_class()
+    if PaddleOCR is None:  # pragma: no cover - guarded by availability()
+        raise OcrUnavailable("PaddleOCR 未安装")
+    if _PADDLEOCR_ENGINE is None:
+        with _PADDLEOCR_LOCK:
+            if _PADDLEOCR_ENGINE is None:
+                lang = os.getenv("NOTEBOOK_PADDLEOCR_LANG", "ch").strip() or "ch"
+                _PADDLEOCR_ENGINE = PaddleOCR(lang=lang, ocr_version="PP-OCRv6")
+
+    temporary: Path | None = None
+    try:
+        if isinstance(image, bytes):
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+                handle.write(image)
+                temporary = Path(handle.name)
+            target = str(temporary)
+        else:
+            target = str(image)
+        results = _PADDLEOCR_ENGINE.predict(target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+    lines: list[OcrLine] = []
+    for result in results or []:
+        payload = getattr(result, "json", None)
+        if callable(payload):
+            payload = payload()
+        if not isinstance(payload, dict):
+            payload = getattr(result, "res", None)
+        if isinstance(payload, dict) and isinstance(payload.get("res"), dict):
+            payload = payload["res"]
+        if not isinstance(payload, dict):
+            continue
+        texts = payload.get("rec_texts")
+        scores = payload.get("rec_scores")
+        boxes = payload.get("rec_boxes")
+        texts = [] if texts is None else texts
+        scores = [] if scores is None else scores
+        boxes = [] if boxes is None else boxes
+        if hasattr(texts, "tolist"):
+            texts = texts.tolist()
+        if hasattr(scores, "tolist"):
+            scores = scores.tolist()
+        if hasattr(boxes, "tolist"):
+            boxes = boxes.tolist()
+        if not isinstance(texts, (list, tuple)):
+            continue
+        for index, raw_text in enumerate(texts):
+            text = str(raw_text or "").strip()
+            if not text:
+                continue
+            score = scores[index] if isinstance(scores, (list, tuple)) and index < len(scores) else None
+            box = boxes[index] if isinstance(boxes, (list, tuple)) and index < len(boxes) else None
+            try:
+                confidence = float(score) if score is not None else None
+            except (TypeError, ValueError):
+                confidence = None
+            normalized_box = None
+            if isinstance(box, (list, tuple)) and len(box) >= 4:
+                try:
+                    normalized_box = [float(value) for value in box[:4]]
+                except (TypeError, ValueError):
+                    normalized_box = None
+            lines.append(OcrLine(text=text, bbox=normalized_box, confidence=confidence))
+
+    try:
+        from importlib.metadata import version
+
+        engine_version = version("paddleocr")
+    except Exception:
+        engine_version = "?"
+    return OcrResult(lines=lines, engine="paddleocr", version=engine_version)
 
 
 def _bbox_from_points(points: Any) -> list[float] | None:

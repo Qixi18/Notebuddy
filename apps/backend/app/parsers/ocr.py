@@ -42,23 +42,26 @@ def status() -> dict[str, object]:
     if not settings.enabled:
         state = "disabled"
         available = False
+        provider = os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower()
     else:
         try:
             import fitz  # noqa: F401
-            import pytesseract
-            from PIL import Image  # noqa: F401
-
-            pytesseract.get_tesseract_version()
-            state = "ready"
-            available = True
         except Exception:
             state = "missing_dependency"
             available = False
+            provider = os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower()
+        else:
+            from app.document_processing.engines.ocr import availability
+
+            engine = availability()
+            provider = f"{engine.name}+PyMuPDF"
+            available = engine.available
+            state = "ready" if available else "missing_dependency"
     return {
         "enabled": settings.enabled,
         "available": available,
         "status": state,
-        "provider": "tesseract+PyMuPDF",
+        "provider": provider,
         "max_pages": settings.max_pages,
         "language": settings.language,
         "timeout_seconds": settings.timeout_seconds,
@@ -71,18 +74,16 @@ def ocr_image(path: Path, *, page_number: int) -> tuple[str, str, float]:
         raise OCRUnavailable("OCR 未启用；请配置 NOTEBOOK_OCR_ENABLED=true 后按需重试")
     if page_number > settings.max_pages:
         raise OCRUnavailable(f"OCR 页数超过限制（最多 {settings.max_pages} 页）")
+    from app.document_processing.engines import ocr as document_ocr
     try:
-        import pytesseract
-        from PIL import Image
-    except ImportError as exc:
-        raise OCRUnavailable("OCR 依赖未安装；当前只保留 OCR 候选告警") from exc
-    try:
-        text = pytesseract.image_to_string(
-            Image.open(path), lang=settings.language, timeout=settings.timeout_seconds
-        ).strip()
+        result = document_ocr.recognize(
+            path, language=settings.language, timeout_seconds=settings.timeout_seconds,
+        )
     except Exception as exc:
-        raise OCRUnavailable(f"OCR 执行失败：{exc}") from exc
-    return text, "ocr_tesseract", 0.7 if text else 0.0
+        if isinstance(exc, document_ocr.OcrUnavailable):
+            raise OCRUnavailable(f"OCR 执行失败：{exc}") from exc
+        raise OCRUnavailable(f"OCR 执行失败：{type(exc).__name__}") from exc
+    return result.text, f"ocr_{result.engine}", result.mean_confidence or (0.7 if result.text else 0.0)
 
 
 def ocr_pdf_page(path: Path, *, page_number: int) -> tuple[str, str, float]:

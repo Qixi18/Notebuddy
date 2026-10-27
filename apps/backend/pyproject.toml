@@ -16,6 +16,10 @@ dependencies = [
     "python-docx>=1.2.0",
 ]
 
+[project.optional-dependencies]
+paddleocr = ["paddleocr>=3.7,<4"]
+mineru = ["mineru>=4.0,<5"]
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.0",

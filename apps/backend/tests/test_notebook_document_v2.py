@@ -338,7 +338,7 @@ def test_attachment_cleanup_removes_deleted_notebook_files(setup, monkeypatch, t
         files={"file": ("figure.png", png, "image/png")},
     )
     assert response.status_code == 201
-    directory = tmp_path / "notebook-attachments" / book["id"]
+    directory = tmp_path / "notebooks" / book["id"] / "images"
     image = next(directory.iterdir())
     stale = (utc_now() - timedelta(days=2)).timestamp()
     os.utime(image, (stale, stale))
@@ -352,7 +352,7 @@ def test_attachment_cleanup_removes_interrupted_upload_file(setup, monkeypatch, 
     client, db, course = setup
     monkeypatch.setattr("app.core.config.settings.data_dir", tmp_path)
     book = make_book(client, course)
-    directory = tmp_path / "notebook-attachments" / book["id"]
+    directory = tmp_path / "notebooks" / book["id"] / "images"
     directory.mkdir(parents=True)
     stray = directory / ("a" * 32 + ".png")
     stray.write_bytes(PNG_1PX)

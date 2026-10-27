@@ -11,6 +11,8 @@ data.
 from __future__ import annotations
 
 import logging
+from contextlib import closing
+from io import BytesIO
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -194,6 +196,43 @@ def extract_pdf_image(path: Path, xref: int) -> bytes | None:
     except Exception:  # pragma: no cover - optional enrichment
         logger.debug("Could not extract PDF image %s", xref, exc_info=True)
         return None
+
+
+def render_pdf_page(path: Path, page_number: int, *, dpi: int = 120) -> bytes | None:
+    """Render one source page, including in MinerU environments using PDFium."""
+    if page_number < 1:
+        return None
+    module = _pymupdf()
+    if module is not None:
+        try:
+            with module.open(str(path)) as document:
+                if page_number > len(document):
+                    return None
+                rendered = _render(document[page_number - 1], dpi)
+                if rendered:
+                    return rendered
+        except Exception:
+            logger.debug("PyMuPDF source preview unavailable", exc_info=True)
+    try:
+        import pypdfium2 as pdfium
+
+        with closing(pdfium.PdfDocument(str(path))) as document:
+            if page_number > len(document):
+                return None
+            with closing(document[page_number - 1]) as page:
+                width, height = page.get_size()
+                scale = min(
+                    max(72, min(int(dpi), MAX_RENDER_DPI)) / 72,
+                    MAX_RENDER_SIDE / max(width, height, 1),
+                )
+                with closing(page.render(scale=scale)) as bitmap:
+                    with bitmap.to_pil() as image:
+                        output = BytesIO()
+                        image.save(output, format="PNG")
+                        return output.getvalue()
+    except Exception:
+        logger.debug("PDFium source preview unavailable", exc_info=True)
+    return None
 
 
 def _extract_with_pymupdf(

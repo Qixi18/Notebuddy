@@ -26,7 +26,8 @@ from app.notes.document import attachment_ids, load_document
 
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 ORPHAN_GRACE_PERIOD = timedelta(days=1)
-STORED_IMAGE_NAME = re.compile(r"^[0-9a-f]{32}\.(?:png|jpg|webp|gif)$")
+STORED_IMAGE_NAME = re.compile(r"^[0-9a-f]{32}\.(?:png|jpg|jpeg|webp|gif)$")
+STORED_ASSET_IMAGE_NAME = re.compile(r"^[0-9a-f-]{36}\.(?:png|jpg|jpeg|webp|gif)$")
 ALLOWED_MIME = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -141,7 +142,7 @@ def image_dimensions(data: bytes, mime: str) -> tuple[int, int]:
 
 
 def attachment_directory(notebook_id: str) -> Path:
-    return settings.data_dir / "notebook-attachments" / notebook_id
+    return settings.data_dir / "notebooks" / notebook_id / "images"
 
 
 def public_url(attachment_id: str) -> str:
@@ -162,7 +163,7 @@ def store_attachment(db, *, notebook_id: str, filename: str,
     except ValueError as exc:
         raise AttachmentRejected(str(exc)) from exc
     directory = attachment_directory(notebook_id)
-    base = (settings.data_dir / "notebook-attachments").resolve()
+    base = (settings.data_dir / "notebooks").resolve()
     resolved = directory.resolve()
     if not resolved.is_relative_to(base):
         raise AttachmentRejected("附件存储路径不合法", status_code=400)
@@ -187,7 +188,7 @@ def store_attachment(db, *, notebook_id: str, filename: str,
         mime_type=mime,
         extension=extension,
         original_name=attachment.original_filename,
-        storage_key=f"notebook-attachments/{notebook_id}/{stored_name}",
+        storage_key=f"notebooks/{notebook_id}/images/{stored_name}",
         byte_size=len(data),
         sha256=hashlib.sha256(data).hexdigest(),
         state="ready",
@@ -212,10 +213,16 @@ def store_attachment(db, *, notebook_id: str, filename: str,
 
 
 def attachment_path(attachment: NotebookAttachment) -> Path:
-    base = (settings.data_dir / "notebook-attachments").resolve()
-    path = (base / attachment.notebook_id / attachment.stored_filename).resolve()
+    base = (settings.data_dir / "notebooks").resolve()
+    path = (base / attachment.notebook_id / "images" / attachment.stored_filename).resolve()
     if not path.is_relative_to(base):
         raise AttachmentRejected("附件路径不合法", status_code=400)
+    # Keep pre-migration attachments readable until they are naturally cleaned up.
+    if not path.is_file():
+        legacy_base = (settings.data_dir / "notebook-attachments").resolve()
+        legacy = (legacy_base / attachment.notebook_id / attachment.stored_filename).resolve()
+        if legacy.is_relative_to(legacy_base) and legacy.is_file():
+            return legacy
     return path
 
 
@@ -275,14 +282,12 @@ def prune_unreferenced_attachments(db: Session, *, limit: int = 100) -> int:
 
 
 def prune_deleted_notebook_directories(db: Session, *, limit: int = 20) -> int:
-    """Remove old attachment directories left after notebook/course cascade deletes."""
+    """Remove aged image folders left after notebook/course cascade deletes."""
 
     base = (settings.data_dir / "notebook-attachments").resolve()
-    if not base.is_dir():
-        return 0
     cutoff = (utc_now() - ORPHAN_GRACE_PERIOD).timestamp()
     removed = 0
-    for directory in base.iterdir():
+    for directory in base.iterdir() if base.is_dir() else ():
         if not directory.is_dir() or directory.is_symlink() or directory.resolve().parent != base:
             continue
         try:
@@ -320,6 +325,56 @@ def prune_deleted_notebook_directories(db: Session, *, limit: int = 20) -> int:
         removed += 1
         if removed >= limit:
             break
+
+    # Notebook-authored images are stored beside their notebook under
+    # notebooks/<id>/images. Sweep only stale folders for deleted notebooks.
+    notebooks_root = (settings.data_dir / "notebooks").resolve()
+    if removed < limit and notebooks_root.is_dir():
+        for notebook_dir in notebooks_root.iterdir():
+            images_dir = notebook_dir / "images"
+            if (notebook_dir.is_symlink() or not notebook_dir.is_dir()
+                    or notebook_dir.resolve().parent != notebooks_root
+                    or images_dir.is_symlink() or not images_dir.is_dir()
+                    or images_dir.resolve().parent != notebook_dir.resolve()):
+                continue
+            try:
+                uuid.UUID(notebook_dir.name)
+            except ValueError:
+                continue
+            if db.get(Notebook, notebook_dir.name) is not None:
+                continue
+            files = list(images_dir.iterdir())
+            if any(item.is_symlink() or not item.is_file()
+                   or not STORED_IMAGE_NAME.fullmatch(item.name)
+                   and not STORED_ASSET_IMAGE_NAME.fullmatch(item.name)
+                   or item.resolve().parent != images_dir.resolve()
+                   or item.stat().st_mtime >= cutoff for item in files):
+                continue
+            prefix = f"notebooks/{notebook_dir.name}/images/"
+            assets = db.scalars(select(Asset).where(Asset.storage_key.like(f"{prefix}%"))).all()
+            if any(has_live_asset_references(db, asset, notebook_dir.name) for asset in assets):
+                continue
+            for asset in assets:
+                if asset.state == "ready":
+                    asset.state = "delete_pending"
+                db.execute(delete(NotebookAsset).where(NotebookAsset.asset_id == asset.id))
+            if assets:
+                db.commit()
+            for path in files:
+                path.unlink()
+            images_dir.rmdir()
+            try:
+                notebook_dir.rmdir()
+            except OSError:
+                pass
+            for asset in assets:
+                if asset.state == "delete_pending":
+                    db.delete(asset)
+            if assets:
+                db.commit()
+            removed += 1
+            if removed >= limit:
+                break
     return removed
 
 
@@ -327,11 +382,9 @@ def prune_stray_attachment_files(db: Session, *, limit: int = 100) -> int:
     """Remove aged files without a database row, e.g. after an interrupted upload."""
 
     base = (settings.data_dir / "notebook-attachments").resolve()
-    if not base.is_dir():
-        return 0
     cutoff = (utc_now() - ORPHAN_GRACE_PERIOD).timestamp()
     removed = 0
-    for directory in base.iterdir():
+    for directory in base.iterdir() if base.is_dir() else ():
         if not directory.is_dir() or directory.is_symlink() or directory.resolve().parent != base:
             continue
         try:
@@ -352,4 +405,38 @@ def prune_stray_attachment_files(db: Session, *, limit: int = 100) -> int:
             removed += 1
             if removed >= limit:
                 return removed
+
+    notebooks_root = (settings.data_dir / "notebooks").resolve()
+    if notebooks_root.is_dir():
+        for notebook_dir in notebooks_root.iterdir():
+            images_dir = notebook_dir / "images"
+            if (notebook_dir.is_symlink() or not notebook_dir.is_dir()
+                    or notebook_dir.resolve().parent != notebooks_root
+                    or images_dir.is_symlink() or not images_dir.is_dir()
+                    or images_dir.resolve().parent != notebook_dir.resolve()):
+                continue
+            try:
+                uuid.UUID(notebook_dir.name)
+            except ValueError:
+                continue
+            if db.get(Notebook, notebook_dir.name) is None:
+                continue
+            known_attachments = set(db.scalars(select(NotebookAttachment.stored_filename).where(
+                NotebookAttachment.notebook_id == notebook_dir.name,
+            )).all())
+            for path in images_dir.iterdir():
+                if (not (STORED_ASSET_IMAGE_NAME.fullmatch(path.name)
+                         or STORED_IMAGE_NAME.fullmatch(path.name))
+                        or path.is_symlink() or not path.is_file()
+                        or path.resolve().parent != images_dir.resolve()
+                        or path.stat().st_mtime >= cutoff):
+                    continue
+                if path.name in known_attachments:
+                    continue
+                if db.get(Asset, path.stem) is not None:
+                    continue
+                path.unlink()
+                removed += 1
+                if removed >= limit:
+                    return removed
     return removed

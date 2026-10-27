@@ -316,6 +316,19 @@ export const NotebookEditor = forwardRef<NotebookEditorHandle, {
       <button type="button" className={editor.isActive('strike') ? 'is-active' : ''} onClick={() => editor.chain().focus().toggleStrike().run()} aria-label="删除线" title="删除线"><s>S</s></button>
       <button type="button" className={editor.isActive('code') ? 'is-active' : ''} onClick={() => editor.chain().focus().toggleCode().run()} aria-label="行内代码" title="行内代码">‹›</button>
       <button type="button" className={editor.isActive('link') ? 'is-active' : ''} onClick={setLink} aria-label="链接" title="链接">↗</button>
+      {editor.isActive('image') && <>
+        <span className="nb-menu-divider" aria-hidden="true" />
+        <button type="button" onClick={() => {
+          const width = Number(editor.getAttributes('image').width) || 100
+          editor.chain().focus().updateAttributes('image', { width: Math.max(25, width - 10) }).run()
+        }} aria-label="缩小图片" title="缩小图片">−</button>
+        <span className="nb-image-size" aria-live="polite">{Number(editor.getAttributes('image').width) || 100}%</span>
+        <button type="button" onClick={() => {
+          const width = Number(editor.getAttributes('image').width) || 100
+          editor.chain().focus().updateAttributes('image', { width: Math.min(150, width + 10) }).run()
+        }} aria-label="放大图片" title="放大图片">＋</button>
+        <button type="button" onClick={() => editor.chain().focus().updateAttributes('image', { width: 100 }).run()} aria-label="恢复图片原始宽度" title="恢复宽度">100%</button>
+      </>}
       <span className="nb-menu-divider" aria-hidden="true" />
       <button type="button" className={editor.isActive('heading', { level: 1 }) ? 'is-active' : ''} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} aria-label="一级标题" title="一级标题">H1</button>
       <button type="button" className={editor.isActive('heading', { level: 2 }) ? 'is-active' : ''} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} aria-label="二级标题" title="二级标题">H2</button>

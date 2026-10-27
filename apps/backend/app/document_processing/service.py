@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ from app.db.models import (
     DocumentSection,
 )
 from app.document_processing.adapters.image import parse_image
+from app.document_processing.adapters.mineru import MinerUUnavailable, parse_document as parse_with_mineru
 from app.document_processing.adapters.office import parse_office
 from app.document_processing.adapters.pdf import ParseContext, parse_pdf
 from app.document_processing.chunking import build_chunks
@@ -146,10 +148,18 @@ def execute_parse_run(
     run.status = "running"
     run.started_at = _now()
     run.error_code = run.error_message = None
-    db.flush()
+    # Model downloads/inference may take minutes. Publish the running state
+    # before that work so SQLite's write lock does not block the UI or other jobs.
+    db.commit()
 
     path = source_path or _asset_path(asset)
     extension = (asset.extension or path.suffix).lower()
+    parser_choice = (os.getenv("NOTEBOOK_DOCUMENT_PARSER", "native").strip().lower() or "native")
+    if parser_choice not in {"native", "mineru"}:
+        raise DocumentProcessingError(
+            "NOTEBOOK_DOCUMENT_PARSER 仅支持 native 或 mineru",
+            code="invalid_parser_config",
+        )
     doc_type = (
         "image" if asset.media_type == "image" or extension in IMAGE_EXTENSIONS
         else "pdf" if extension == ".pdf"
@@ -157,7 +167,9 @@ def execute_parse_run(
         else "docx" if extension == ".docx"
         else "unknown"
     )
-    if doc_type == "unknown":
+    if doc_type == "unknown" and parser_choice == "mineru":
+        doc_type = extension.lstrip(".") or "document"
+    elif doc_type == "unknown":
         raise UnsupportedDocument(
             f"暂不支持该文件格式（{extension or '无扩展名'}）；本轮完整支持 PDF 与 PNG/JPG 图片"
         )
@@ -177,7 +189,9 @@ def execute_parse_run(
         return _store_render(asset.id, run.id, page_number, png)
 
     try:
-        if doc_type == "pdf":
+        if parser_choice == "mineru":
+            document = parse_with_mineru(path, context)
+        elif doc_type == "pdf":
             document = parse_pdf(
                 path, context, render_store=render_store,
                 ocr_available=ocr_ready, vision_available=vision_ready,
@@ -193,6 +207,8 @@ def execute_parse_run(
             document = parse_office(path, context)
     except (UnsupportedDocument, DocumentProcessingError):
         raise
+    except MinerUUnavailable as exc:
+        raise DocumentProcessingError(str(exc), code="parser_unavailable") from exc
     except FileNotFoundError as exc:
         raise DocumentProcessingError("原始文件不存在，无法解析", code="asset_missing") from exc
     except Exception as exc:
@@ -514,15 +530,12 @@ def page_render(db: Session, run: DocumentParseRun, page_number: int) -> Path | 
         return None
     from app.document_processing.engines import pdf_text
 
-    raw = pdf_text.extract_pdf(
-        source, render_when=lambda page: page.page_number == page_number,
-    )
-    for page in raw.pages:
-        if page.page_number == page_number and page.render_png:
-            key = _store_render(asset.id, run.id, page_number, page.render_png)
-            row.render_key = key
-            db.flush()
-            return _safe_derived_path(key)
+    png = pdf_text.render_pdf_page(source, page_number)
+    if png:
+        key = _store_render(asset.id, run.id, page_number, png)
+        row.render_key = key
+        db.flush()
+        return _safe_derived_path(key)
     return None
 
 

@@ -18,7 +18,7 @@ declare module '@tiptap/core' {
       moveBlockDown: () => ReturnType
       setCallout: (attrs?: { tone?: string; title?: string }) => ReturnType
       setExample: (attrs?: { title?: string }) => ReturnType
-      insertImage: (attrs: { src: string; attachmentId?: string; assetId?: string; alt?: string; title?: string }) => ReturnType
+      insertImage: (attrs: { src: string; attachmentId?: string; assetId?: string; alt?: string; title?: string; width?: number | null }) => ReturnType
     }
   }
 }
@@ -209,6 +209,16 @@ export const NotebookImage = Image.extend({
         parseHTML: (element) => element.getAttribute('data-asset-id'),
         renderHTML: (attributes) => attributes.assetId ? { 'data-asset-id': attributes.assetId } : {},
       },
+      width: {
+        default: null,
+        parseHTML: (element) => {
+          const width = element.style.width
+          return width?.endsWith('%') ? Number.parseInt(width, 10) || null : null
+        },
+        renderHTML: (attributes) => attributes.width
+          ? { style: `width: ${attributes.width}%; max-width: none; height: auto` }
+          : { style: 'max-width: 100%; height: auto' },
+      },
     }
   },
   addCommands() {
@@ -216,7 +226,7 @@ export const NotebookImage = Image.extend({
       ...this.parent?.(),
       insertImage: (attrs) => ({ commands }) => commands.insertContent({
         type: 'image',
-        attrs: { src: attrs.src, attachmentId: attrs.attachmentId ?? null, assetId: attrs.assetId ?? null, alt: attrs.alt ?? '', title: attrs.title ?? null },
+        attrs: { src: attrs.src, attachmentId: attrs.attachmentId ?? null, assetId: attrs.assetId ?? null, alt: attrs.alt ?? '', title: attrs.title ?? null, width: attrs.width ?? null },
       }),
     }
   },

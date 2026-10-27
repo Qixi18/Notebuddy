@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
+import shutil
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -31,8 +32,11 @@ from app.db.models import (
     NotebookUploadBatch,
     ProcessingJob,
     WebSource,
+    utc_now,
 )
+from app.db.model_utils import new_id
 from app.document_processing.ir import QualityReport
+from app.document_processing.adapters import mineru as mineru_adapter
 from app.document_processing.service import (
     current_run as current_parse_run,
 )
@@ -176,17 +180,51 @@ def mark_asset_inline(notebook_id: str, asset_id: str, db: Session = Depends(get
         raise HTTPException(422, "只有图片资源可以插入正文")
     link = db.scalar(select(NotebookAsset).where(
         NotebookAsset.notebook_id == notebook_id,
-        NotebookAsset.asset_id == asset_id,
         NotebookAsset.role == "inline_image",
+        NotebookAsset.is_owner.is_(True),
         NotebookAsset.detached_at.is_(None),
+        NotebookAsset.asset_id == asset_id,
     ))
-    if link is None:
-        db.add(NotebookAsset(
-            notebook_id=notebook_id, asset_id=asset_id, role="inline_image",
-            is_owner=False,
-        ))
+    if link is not None:
+        return _asset_read(asset, "inline_image", notebook_id)
+
+    # Inline note images live beside the Notebook's other image files. Keep
+    # source-material assets intact and make a separately owned inline copy.
+    inline_id = new_id()
+    extension = asset.extension.lower()
+    if extension not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        extension = ".png"
+    storage_key = f"notebooks/{notebook_id}/images/{inline_id}{extension}"
+    target = (settings.data_dir / storage_key).resolve()
+    base = (settings.data_dir / "notebooks" / notebook_id / "images").resolve()
+    if not target.is_relative_to(base):
+        raise HTTPException(400, "图片存储路径不合法")
+    try:
+        source = storage_path(asset)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    except (AssetUnavailable, OSError) as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(409, "无法复制图片到笔记目录") from exc
+    now = utc_now()
+    inline_asset = Asset(
+        id=inline_id, source_type="user_upload", media_type="image",
+        mime_type=asset.mime_type, extension=extension,
+        original_name=asset.original_name, storage_key=storage_key,
+        byte_size=asset.byte_size, sha256=asset.sha256, state="ready",
+        created_at=now, verified_at=now,
+    )
+    db.add_all([inline_asset, NotebookAsset(
+        notebook_id=notebook_id, asset_id=inline_id, role="inline_image",
+        is_owner=True, created_at=now,
+    )])
+    try:
         db.commit()
-    return _asset_read(asset, "inline_image", notebook_id)
+    except Exception:
+        db.rollback()
+        target.unlink(missing_ok=True)
+        raise
+    return _asset_read(inline_asset, "inline_image", notebook_id)
 
 
 @router.delete("/notebooks/{notebook_id}/assets/{asset_id}")
@@ -483,10 +521,7 @@ def _document_payload(db: Session, run: DocumentParseRun) -> dict:
         "extraction": page.extraction, "width": page.width, "height": page.height,
         "rotation": page.rotation, "confidence": page.confidence,
         "warnings": page.warnings, "text_chars": len(page.text.strip()),
-        "render_url": (
-            f"/api/v1/assets/{run.asset_id}/document/pages/{page.page_number}/render"
-            if page.render_key or run.doc_type != "pdf" else None
-        ),
+        "render_url": f"/api/v1/assets/{run.asset_id}/document/pages/{page.page_number}/render",
     } for page in document.pages]
     sections = [{
         "section_id": section.section_id, "title": section.title, "level": section.level,
@@ -837,11 +872,17 @@ def reparse_material(material_id: str, db: Session = Depends(get_db)) -> Process
 @router.post("/materials/{material_id}/ocr", response_model=JobRead, status_code=202)
 def request_material_ocr(material_id: str, db: Session = Depends(get_db)) -> ProcessingJob:
     material = ensure_material(db, material_id)
+    if mineru_adapter.configured():
+        if not mineru_adapter.availability()["available"]:
+            raise HTTPException(501, "已选择 MinerU，但当前后端环境没有安装 MinerU")
+        # MinerU performs OCR as part of the whole-document parse. It does not
+        # require a separately installed PaddleOCR/Tesseract engine.
+        return reparse_material(material_id, db)
     capability = ocr_status()
     if capability["status"] != "ready":
         raise HTTPException(
             status_code=501,
-            detail="OCR 当前不可用：请启用 NOTEBOOK_OCR_ENABLED，并安装 Tesseract、PyMuPDF 及其语言包。",
+            detail="OCR 当前不可用：请启用 NOTEBOOK_OCR_ENABLED，并安装 PaddleOCR、RapidOCR 或 Tesseract，以及 PyMuPDF。",
         )
     active_job = db.scalar(
         select(ProcessingJob)
@@ -854,14 +895,25 @@ def request_material_ocr(material_id: str, db: Session = Depends(get_db)) -> Pro
     if active_job is not None:
         raise HTTPException(status_code=409, detail="资料已有正在处理的任务")
     candidate = db.scalar(
-        select(MaterialPage.id)
+        select(DocumentPage.id)
+        .join(DocumentParseRun, DocumentParseRun.id == DocumentPage.parse_run_id)
         .where(
-            MaterialPage.material_id == material_id,
-            MaterialPage.is_active.is_(True),
-            MaterialPage.parse_status == "ocr_candidate",
+            DocumentParseRun.asset_id == (material.asset_id or material.id),
+            DocumentParseRun.is_current.is_(True),
+            DocumentPage.status == "needs_ocr",
         )
         .limit(1)
     )
+    if candidate is None:
+        candidate = db.scalar(
+            select(MaterialPage.id)
+            .where(
+                MaterialPage.material_id == material_id,
+                MaterialPage.is_active.is_(True),
+                MaterialPage.parse_status == "ocr_candidate",
+            )
+            .limit(1)
+        )
     if candidate is None:
         raise HTTPException(status_code=409, detail="当前资料没有待 OCR 的位置")
     material.status = "pending"

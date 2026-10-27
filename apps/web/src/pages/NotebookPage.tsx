@@ -481,7 +481,10 @@ function NotebookPageBody() {
     try {
       const inline = await api.useAssetInline(notebookId, asset.id)
       editor.chain().focus().insertImage({
-        src: inline.content_url, assetId: inline.id, alt: asset.original_name,
+        // Persist the canonical stable asset URL accepted by document_json.
+        // The Notebook-scoped content_url is useful for UI/API responses, but
+        // the document contract intentionally stores /api/v1/assets/{id}/content.
+        src: `/api/v1/assets/${inline.id}/content`, assetId: inline.id, alt: asset.original_name,
       }).run()
       setNotice('图片已插入正文；保存后会纳入笔记历史版本。')
     } catch (cause) {

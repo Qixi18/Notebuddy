@@ -39,7 +39,7 @@ BLOCK_TYPES = {
     "unknown",
 }
 
-EXTRACTIONS = {"native_text", "ocr", "vision", "heuristic", "mixed", "none"}
+EXTRACTIONS = {"native_text", "ocr", "vision", "mineru", "heuristic", "mixed", "none"}
 
 PAGE_STATUSES = {
     "parsed",
