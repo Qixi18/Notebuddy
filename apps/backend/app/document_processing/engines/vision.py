@@ -26,13 +26,13 @@ from app.document_processing.engines.pdf_text import EngineInfo
 logger = logging.getLogger(__name__)
 
 PROMPT = (
-    "你是教材页面结构化识别器。只输出 JSON，不要解释。schema："
+    "你是教材局部图片结构化识别器。只输出 JSON，不要解释。schema："
     '{"description":"中文说明","latex":"公式LaTeX或null",'
     '"table":{"rows":[["单元格"]],"header_rows":1}或null,'
     '"figure":{"kind":"diagram|chart|circuit|photo|formula|table|other",'
     '"nodes":["关键节点"],"edges":["A -> B"]}或null,'
     '"uncertain":true/false}。'
-    "看不清或无法确定时 uncertain=true，禁止编造。"
+    "仅依据图片中看得见的内容；看不清或无法确定时 uncertain=true，禁止编造。"
 )
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
@@ -104,6 +104,7 @@ def describe(image: bytes, *, mime: str = "image/png") -> VisionResult:
         "model": settings["model"],
         "temperature": 0,
         "max_tokens": 2000,
+        "stream": False,
         "messages": [{
             "role": "user",
             "content": [

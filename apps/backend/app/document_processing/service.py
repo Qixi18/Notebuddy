@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -30,7 +31,8 @@ from app.db.models import (
     DocumentSection,
 )
 from app.document_processing.adapters.image import parse_image
-from app.document_processing.adapters.mineru import MinerUUnavailable, parse_document as parse_with_mineru
+from app.document_processing.adapters.mineru import MinerUUnavailable
+from app.document_processing.adapters.mineru import parse_document as parse_with_mineru
 from app.document_processing.adapters.office import parse_office
 from app.document_processing.adapters.pdf import ParseContext, parse_pdf
 from app.document_processing.chunking import build_chunks
@@ -75,8 +77,9 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def engine_state() -> EngineState:
-    return EngineState(ocr=ocr_engine.availability(), vision=vision_engine.availability())
+def engine_state(*, probe: bool = True) -> EngineState:
+    return EngineState(ocr=ocr_engine.availability(probe=probe),
+                       vision=vision_engine.availability())
 
 
 def create_parse_run(
@@ -96,7 +99,9 @@ def create_parse_run(
         # Idempotent: a successful current parse is reused unless a reparse is
         # explicitly requested (retrying a failed run still creates a new one).
         return current
-    states = engine_state()
+    # The HTTP upload path records installed capabilities without loading OCR
+    # models; the isolated worker performs the inference preflight before parse.
+    states = engine_state(probe=False)
     config = {
         "ocr": states.ocr.to_dict(),
         "vision": states.vision.to_dict(),
@@ -184,9 +189,13 @@ def execute_parse_run(
         file_sha256=asset.sha256,
         title=title or asset.original_name,
     )
+    parse_started = time.perf_counter()
 
     def render_store(page_number: int, png: bytes) -> str:
         return _store_render(asset.id, run.id, page_number, png)
+
+    def figure_store(page_number: int, image: bytes, suffix: str) -> str:
+        return _store_figure(asset.id, run.id, page_number, image, suffix)
 
     try:
         if parser_choice == "mineru":
@@ -196,6 +205,7 @@ def execute_parse_run(
                 path, context, render_store=render_store,
                 ocr_available=ocr_ready, vision_available=vision_ready,
                 ocr_recognize=ocr_recognize, vision_describe=vision_describe,
+                figure_store=figure_store,
             )
         elif doc_type == "image":
             document = parse_image(
@@ -244,6 +254,25 @@ def execute_parse_run(
     run.error_code = run.error_message = None
     _promote_current(db, run)
     db.flush()
+    try:
+        import psutil
+
+        rss_bytes = psutil.Process().memory_info().rss
+    except Exception:
+        rss_bytes = None
+    try:
+        source_bytes = path.stat().st_size
+    except OSError:
+        source_bytes = None
+    logger.info(
+        "document_parse_finished asset_id=%s parse_run_id=%s size_bytes=%s parser=%s "
+        "pages=%s pages_ok=%s pages_failed=%s blocks=%s quality=%s generation_allowed=%s "
+        "elapsed_seconds=%.3f rss_bytes=%s",
+        asset.id, run.id, source_bytes, run.parser_name, run.page_count,
+        document.quality.pages_ok, document.quality.pages_failed,
+        sum(len(page.blocks) for page in document.pages), document.quality.status,
+        document.quality.generation_allowed, time.perf_counter() - parse_started, rss_bytes,
+    )
     return ParseOutcome(run=run, ir=document)
 
 
@@ -556,6 +585,24 @@ def _store_render(asset_id: str, run_id: str, page_number: int, png: bytes) -> s
     temporary = path.with_suffix(".tmp")
     temporary.write_bytes(png)
     temporary.replace(path)
+    return key
+
+
+def _store_figure(asset_id: str, run_id: str, page_number: int, payload: bytes, suffix: str) -> str:
+    import hashlib
+
+    if suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        suffix = ".png"
+    digest = hashlib.sha256(payload).hexdigest()[:20]
+    key = f"derived/figures/{asset_id}/{run_id}/p{page_number}-{digest}{suffix.lower()}"
+    path = _safe_derived_path(key)
+    if path is None:
+        raise DocumentProcessingError("图像证据路径不合法", code="figure_path_invalid")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_bytes(payload)
+        temporary.replace(path)
     return key
 
 

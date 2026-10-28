@@ -53,3 +53,39 @@ test('loads scoped parse version, page evidence and coverage in the Notebook pre
   fireEvent.click(screen.getByRole('button', { name: '第 1 页 · 95%' }))
   await waitFor(() => expect(evidence).toHaveBeenCalledWith('asset-1', 'book-1', 1, 'run-1'))
 })
+
+test('shows partial parse warnings and generation limits to the user', async () => {
+  const run = {
+    id: 'run-partial', asset_id: 'asset-1', status: 'completed', is_current: true,
+    page_count: 2, text_chars: 24, quality_status: 'partial',
+    quality: {
+      status: 'partial', generation_allowed: true,
+      issues: [{ code: 'empty_pages', severity: 'warning', message: '第 2 页没有可用文字或结构' }],
+    },
+    created_at: '2026-10-27T00:00:00Z',
+  }
+  vi.spyOn(api, 'listAssetParseRuns').mockResolvedValue([run])
+  vi.spyOn(api, 'getAssetDocument').mockResolvedValue({
+    run,
+    pages: [
+      { page_number: 1, status: 'parsed', extraction: 'native_text', confidence: 0.95, warnings: [], text_chars: 24, render_url: null },
+      { page_number: 2, status: 'empty', extraction: 'none', confidence: null, warnings: ['本页没有可用的文字或结构化内容'], text_chars: 0, render_url: null },
+    ],
+    sections: [],
+  })
+  vi.spyOn(api, 'getAssetCoverage').mockResolvedValue({
+    asset_id: 'asset-1', asset_name: 'limits.pdf', parse_run_id: run.id, total_blocks: 0, cited_blocks: 0,
+    pages: [], blocks: [],
+  })
+  vi.spyOn(api, 'getAssetPageEvidence').mockResolvedValue([])
+  vi.spyOn(api, 'listPages').mockResolvedValue([])
+  vi.spyOn(api, 'listMaterialWebSources').mockResolvedValue([])
+
+  render(<DocumentSourcePreview assetId="asset-1" notebookId="book-1" materialId="material-1"
+    fileName="limits.pdf" mimeType="application/pdf" onClose={() => undefined} />)
+
+  expect(await screen.findByText(/生成内容仅依据已识别页面/)).toBeTruthy()
+  expect(screen.getByText('第 2 页没有可用文字或结构')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: '第 2 页' }))
+  expect(await screen.findByText('本页没有可用的文字或结构化内容')).toBeTruthy()
+})

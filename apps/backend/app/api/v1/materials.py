@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import shutil
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-import shutil
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.shared import ensure_course, ensure_material
 from app.core.config import settings
 from app.db.database import get_db
+from app.db.model_utils import new_id
 from app.db.models import (
     Asset,
     AssetParseResult,
@@ -34,9 +35,8 @@ from app.db.models import (
     WebSource,
     utc_now,
 )
-from app.db.model_utils import new_id
-from app.document_processing.ir import QualityReport
 from app.document_processing.adapters import mineru as mineru_adapter
+from app.document_processing.ir import QualityReport
 from app.document_processing.service import (
     current_run as current_parse_run,
 )
@@ -406,7 +406,15 @@ def get_document_page_evidence(asset_id: str, page_number: int, notebook_id: str
     page = next((item for item in document.pages if item.page_number == page_number), None)
     if page is None:
         raise HTTPException(404, "页面不存在")
-    return [_block_payload(block) for block in page.blocks]
+    payloads = []
+    for block in page.blocks:
+        payload = _block_payload(block)
+        if block.figure and block.figure.image_key:
+            payload["figure"]["image_key"] = _figure_image_url(
+                run.asset_id, run.id, block.figure.image_key,
+            )
+        payloads.append(payload)
+    return payloads
 
 
 @router.get("/assets/{asset_id}/document/pages/{page_number}/render")
@@ -429,6 +437,38 @@ def get_document_page_render(asset_id: str, page_number: int, notebook_id: str |
         raise HTTPException(404, "该页无法渲染")
     db.commit()
     return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+
+@router.get("/assets/{asset_id}/document/figures/{image_token}")
+def get_document_figure_image(
+    asset_id: str, image_token: str, notebook_id: str | None = None,
+    run_id: str | None = None, db: Session = Depends(get_db),
+):
+    _ensure_asset(db, asset_id, notebook_id)
+    run = _selected_completed_run(db, asset_id, run_id)
+    if run is None:
+        raise HTTPException(404, "解析版本不存在")
+    document = load_ir(db, run)
+    figure_key = next((
+        block.figure.image_key
+        for page in document.pages for block in page.blocks
+        if block.figure and block.figure.image_key
+        and Path(block.figure.image_key).name.rsplit(".", 1)[0] == image_token
+    ), None)
+    if not figure_key:
+        raise HTTPException(404, "图片证据不存在")
+    root = settings.data_dir.resolve()
+    path = (root / figure_key).resolve()
+    if not path.is_relative_to(root) or path == root:
+        raise HTTPException(404, "图片证据不可用")
+    if path is None or not path.is_file():
+        raise HTTPException(404, "图片证据不可用")
+    media_type = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(path, media_type=media_type,
                         headers={"Cache-Control": "private, max-age=86400"})
 
 
@@ -541,6 +581,11 @@ def _block_payload(block) -> dict:
         "bbox": block.bbox, "extraction": block.extraction,
         "confidence": block.confidence, "warnings": block.warnings,
     }
+
+
+def _figure_image_url(asset_id: str, run_id: str, image_key: str) -> str:
+    token = Path(image_key).name.rsplit(".", 1)[0]
+    return f"/api/v1/assets/{asset_id}/document/figures/{token}?run_id={run_id}"
 
 
 @router.get("/notebooks/{notebook_id}/assets/{asset_id}/processing-jobs",
@@ -882,7 +927,10 @@ def request_material_ocr(material_id: str, db: Session = Depends(get_db)) -> Pro
     if capability["status"] != "ready":
         raise HTTPException(
             status_code=501,
-            detail="OCR 当前不可用：请启用 NOTEBOOK_OCR_ENABLED，并安装 PaddleOCR、RapidOCR 或 Tesseract，以及 PyMuPDF。",
+            detail=(
+                "OCR 当前不可用：请启用 NOTEBOOK_OCR_ENABLED，并安装 PaddleOCR、RapidOCR "
+                "或 Tesseract；原生 PDF 渲染需要 PyMuPDF 或 pypdfium2。"
+            ),
         )
     active_job = db.scalar(
         select(ProcessingJob)

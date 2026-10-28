@@ -1,14 +1,8 @@
 """Structured parse quality assessment.
 
-The rules below are explicit and testable.  Thresholds are deliberately small
-and locked by tests; they were chosen from observed sample documents rather
-than a single arbitrary percentage:
-
-- a document with no text at all is never usable for generation;
-- a page counts as usable when it has text or a structured table;
-- fewer than ``MIN_USABLE_TEXT_CHARS`` characters is treated as insufficient;
-- missing OCR/vision capability is a capability issue, not a parser bug, and is
-  reported with an actionable retry hint.
+Content length is not a proxy for usefulness: a short exercise, formula, or
+table can be valid. Generation is admitted based on usable content and page
+state; unresolved OCR and failed pages remain blocking issues.
 """
 
 from __future__ import annotations
@@ -23,8 +17,7 @@ from app.document_processing.ir import (
     QualityReport,
 )
 
-PAGE_MIN_TEXT_CHARS = 8
-MIN_USABLE_TEXT_CHARS = 200
+_PLACEHOLDER_TEXT = {"原始图片（未识别文字）", "图像内容未解析"}
 
 
 @dataclass
@@ -38,7 +31,33 @@ def _page_blocks(document: DocumentIR) -> list[tuple[int, list[BlockIR], str]]:
 
 
 def _has_structure(blocks: list[BlockIR]) -> bool:
-    return any(block.type == "table" and block.table for block in blocks)
+    return any(
+        (block.type == "table" and block.table and any(any(cell.strip() for cell in row)
+                                                        for row in block.table.rows))
+        or (block.type == "equation" and (block.latex or block.text).strip())
+        or (block.type == "figure" and block.figure and (
+            block.figure.description or block.figure.latex or block.figure.nodes
+        ))
+        for block in blocks
+    )
+
+
+def _page_content(page) -> str:
+    if page.text.strip() not in _PLACEHOLDER_TEXT and page.text.strip():
+        return page.text.strip()
+    parts: list[str] = []
+    for block in page.blocks:
+        if block.type == "image":
+            continue
+        if block.type == "table" and block.table:
+            parts.extend(cell for row in block.table.rows for cell in row if cell.strip())
+        elif block.type == "figure" and block.figure:
+            parts.extend([block.figure.description or "", block.figure.latex or ""])
+            parts.extend(block.figure.nodes)
+            parts.extend(block.figure.edges)
+        else:
+            parts.extend([block.text, block.latex or ""])
+    return "\n".join(part.strip() for part in parts if part.strip())
 
 
 def assess(
@@ -65,19 +84,17 @@ def assess(
     unexplained_figures: list[int] = []
 
     for page in document.pages:
-        page_text = page.text.strip()
+        page_text = _page_content(page)
         blocks = page.blocks
-        page_chars = len(page_text) or sum(len(block.text.strip()) for block in blocks)
+        page_chars = len(page_text)
         text_chars += page_chars
-        usable = page_chars >= PAGE_MIN_TEXT_CHARS or _has_structure(blocks) or any(
-            block.figure and (block.figure.description or block.figure.nodes) for block in blocks
-        )
-        if usable:
-            pages_ok += 1
-        elif page.status == "failed":
+        usable = bool(page_text) or _has_structure(blocks)
+        if page.status == "failed":
             pages_failed += 1
             failed_pages.append(page.page_number)
-        else:
+        if usable:
+            pages_ok += 1
+        elif page.status != "failed":
             pages_empty += 1
             empty_pages.append(page.page_number)
         if page.status == "needs_ocr":
@@ -101,7 +118,7 @@ def assess(
     if needs_ocr_pages:
         issues.append(QualityIssue(
             code="ocr_required",
-            severity="blocking" if not engines.ocr.available else "warning",
+            severity="blocking",
             message=(
                 f"第 {_ranges(needs_ocr_pages)} 页没有可提取文字，需要 OCR"
                 + ("；当前环境没有可用 OCR 引擎" if not engines.ocr.available else "")
@@ -179,7 +196,7 @@ def assess(
             generation_block_reason="文档没有可解析页面",
         )
 
-    if text_chars == 0:
+    if pages_ok == 0:
         status = "needs_ocr" if needs_ocr_pages else "needs_vision" if needs_vision_pages else "failed"
         reason = (
             "解析未得到任何可用文字。"
@@ -190,7 +207,7 @@ def assess(
         return QualityReport(
             status=status, score=0.0, pages_total=pages_total, pages_ok=0,
             pages_empty=pages_total - pages_failed, pages_failed=pages_failed,
-            text_chars=0, text_chars_per_page=0.0, issues=issues,
+            text_chars=text_chars, text_chars_per_page=text_chars / pages_total, issues=issues,
             usable_page_ranges=[],
             generation_allowed=False, generation_block_reason=reason,
         )
@@ -198,9 +215,6 @@ def assess(
     blocking = [issue for issue in issues if issue.severity == "blocking"]
     warnings = [issue for issue in issues if issue.severity == "warning"]
     status = "partial" if (blocking or warnings) else "complete"
-    if text_chars < MIN_USABLE_TEXT_CHARS:
-        status = "failed"
-
     coverage = pages_ok / pages_total
     structure = 0.0
     if any(block.type == "heading" for block in document.all_blocks()):
@@ -215,20 +229,10 @@ def assess(
     score = 0.45 * coverage + 0.25 * structure + 0.20 * confidence + 0.10 * (0.0 if blocking else 1.0)
 
     ranges = _usable_ranges(document)
-    generation_allowed = (
-        text_chars >= MIN_USABLE_TEXT_CHARS
-        and bool(ranges)
-        and status in {"complete", "partial"}
-    )
+    generation_allowed = bool(ranges) and not blocking and status in {"complete", "partial"}
     reason = None
     if not generation_allowed:
-        if text_chars < MIN_USABLE_TEXT_CHARS:
-            reason = (
-                f"可用文字仅 {text_chars} 字，低于自动生成下限 {MIN_USABLE_TEXT_CHARS} 字；"
-                "请补充可读资料或先修正解析。"
-            )
-        else:
-            reason = "解析结果不可用于生成正式正文，请检查失败页面与解析质量"
+        reason = "解析结果不可用于生成正式正文，请检查失败页面与解析质量"
 
     return QualityReport(
         status=status,
@@ -249,7 +253,7 @@ def assess(
 def _usable_ranges(document: DocumentIR) -> list[list[int]]:
     usable: list[int] = []
     for page in document.pages:
-        if (page.text.strip() or _has_structure(page.blocks)):
+        if page.status != "failed" and (_page_content(page) or _has_structure(page.blocks)):
             usable.append(page.page_number)
     ranges: list[list[int]] = []
     for number in usable:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from app.core.config import settings
 from app.db.models import (
@@ -46,6 +48,20 @@ def _write_pdf(path: Path) -> None:
     document.close()
 
 
+def _write_illustrated_pdf(path: Path) -> None:
+    image = Image.new("RGB", (160, 120), "white")
+    image_buffer = io.BytesIO()
+    image.save(image_buffer, format="PNG")
+    document = pymupdf.open()
+    page = document.new_page(width=595, height=842)
+    page.insert_text((72, 90), "Chapter 1 Limits", fontsize=22)
+    page.insert_text((72, 130), "Limits are a foundation of calculus and analysis.", fontsize=12)
+    page.insert_text((72, 160), "A function approaches a value near a chosen point.", fontsize=12)
+    page.insert_image(pymupdf.Rect(72, 210, 232, 330), stream=image_buffer.getvalue())
+    document.save(str(path))
+    document.close()
+
+
 def test_execute_parse_run_persists_evidence_and_views(session, monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     (tmp_path / "originals").mkdir()
@@ -71,6 +87,40 @@ def test_execute_parse_run_persists_evidence_and_views(session, monkeypatch, tmp
 
     rendered = page_render(session, run, 1)
     assert rendered is not None and rendered.is_file()
+
+
+def test_execute_parse_run_persists_embedded_figure_without_vision(
+    session, monkeypatch, tmp_path,
+):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setenv("NOTEBOOK_DOCUMENT_PARSER", "native")
+    (tmp_path / "originals").mkdir()
+    course = make_course(session)
+    book = make_notebook(session, course)
+    asset = make_asset(session, book, name="illustrated.pdf")
+    path = tmp_path / "originals" / "illustrated.pdf"
+    _write_illustrated_pdf(path)
+
+    run = create_parse_run(session, asset=asset)
+    outcome = execute_parse_run(
+        session, run.id, source_path=path, ocr_available=False, vision_available=False,
+    )
+    session.commit()
+
+    figure_blocks = [
+        block for page in outcome.ir.pages for block in page.blocks if block.figure
+    ]
+    assert len(figure_blocks) == 1
+    image_key = figure_blocks[0].figure.image_key
+    assert image_key and image_key.startswith(f"derived/figures/{asset.id}/{run.id}/")
+    assert (tmp_path / image_key).is_file()
+    restored = load_ir(session, run.id)
+    restored_block = next(
+        block for page in restored.pages for block in page.blocks
+        if block.block_id == figure_blocks[0].block_id
+    )
+    restored_figure = restored_block.figure
+    assert restored_figure and restored_figure.image_key == image_key
 
 
 def test_reparse_creates_new_version_and_keeps_old(session, monkeypatch, tmp_path):

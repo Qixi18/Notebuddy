@@ -150,6 +150,7 @@ class FigureData:
     edges: list[str] = field(default_factory=list)
     latex: str | None = None
     uncertain: bool = False
+    image_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -159,6 +160,7 @@ class FigureData:
             "edges": [_clean(edge, 300) for edge in self.edges[:400]],
             "latex": _clean(self.latex, 5_000) if self.latex else None,
             "uncertain": bool(self.uncertain),
+            "image_key": _clean(self.image_key, 500) if self.image_key else None,
         }
 
     @classmethod
@@ -173,6 +175,7 @@ class FigureData:
             edges=[str(item) for item in data.get("edges") or [] if isinstance(item, (str, int, float))],
             latex=data.get("latex") if isinstance(data.get("latex"), str) else None,
             uncertain=bool(data.get("uncertain")),
+            image_key=data.get("image_key") if isinstance(data.get("image_key"), str) else None,
         )
 
 

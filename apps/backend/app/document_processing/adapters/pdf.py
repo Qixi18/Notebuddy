@@ -67,6 +67,7 @@ def parse_pdf(
     vision_available: bool | None = None,
     ocr_recognize: Callable[..., object] | None = None,
     vision_describe: Callable[..., object] | None = None,
+    figure_store: Callable[[int, bytes, str], str] | None = None,
 ) -> DocumentIR:
     ocr_available = ocr_engine.availability().available if ocr_available is None else ocr_available
     vision_available = vision_engine.availability().available if vision_available is None else vision_available
@@ -103,9 +104,9 @@ def parse_pdf(
             text=raw_page.text,
             confidence=1.0 if raw_page.has_text_layer else None,
         )
-        scanned = (
-            not raw_page.has_text_layer
-            and _largest_image_area_ratio(raw_page) >= SCAN_IMAGE_AREA_RATIO
+        scanned = not raw_page.has_text_layer and (
+            raw_page.render_png is not None or raw_page.render_error is not None
+            or _largest_image_area_ratio(raw_page) >= SCAN_IMAGE_AREA_RATIO
         )
 
         drafts: list[TextBlockDraft] = []
@@ -123,7 +124,10 @@ def parse_pdf(
                         page.render_key = render_key
                     except Exception:  # pragma: no cover
                         render_key = None
-            if png is None and ocr_available:
+            if raw_page.render_error:
+                page.status = "failed"
+                page.warnings.append(raw_page.render_error)
+            elif png is None and ocr_available:
                 page.status = "needs_ocr"
                 page.warnings.append("扫描页无法渲染，OCR 未执行")
             elif ocr_available and png:
@@ -133,12 +137,17 @@ def parse_pdf(
                     drafts = ocr_drafts
                     page.extraction = "ocr"
                     page.confidence = confidence
-                    page.status = "partial" if warnings or page.rotation else "parsed"
+                    page.status = (
+                        "needs_ocr" if not ocr_drafts else
+                        "partial" if warnings or page.rotation else "parsed"
+                    )
                     page.warnings.extend(warnings)
+                    if not ocr_drafts:
+                        page.warnings.append("OCR 未识别到可用文字；本页未被视为解析成功")
                     page.text = "\n".join(draft.text for draft in drafts)
                 except Exception as exc:
                     page.status = "needs_ocr"
-                    page.warnings.append(f"OCR 失败：{type(exc).__name__}")
+                    page.warnings.append(f"OCR 失败：{type(exc).__name__}: {exc}")
             elif vision_available and png:
                 page.status = "partial"
                 page.warnings.append("本页没有文字层，改由视觉引擎识别")
@@ -146,7 +155,7 @@ def parse_pdf(
                 page.status = "needs_ocr"
                 page.warnings.append("本页没有文字层，需要 OCR；当前环境没有可用 OCR 引擎")
 
-            if not drafts and vision_available and png:
+            if not drafts and vision_available and png and not raw_page.render_error:
                 vision_blocks = _describe_page_image(
                     png, page, context, render_key=render_key,
                     start_global=global_order, describe=describe,
@@ -195,12 +204,12 @@ def parse_pdf(
                 figure = _build_figure(
                     path, raw_page, image, context,
                     vision_available=vision_available, describe=describe,
-                    vision_budget=vision_budget,
+                    vision_budget=vision_budget, figure_store=figure_store,
                 )
                 if figure is not None:
                     vision_budget = figure[1]
                     blocks.append(_figure_block(
-                        figure[0], block_id=f"{run_prefix}-p{raw_page.page_number}-f{len(blocks) + 1}",
+                        figure, block_id=f"{run_prefix}-p{raw_page.page_number}-f{len(blocks) + 1}",
                         page_number=raw_page.page_number, order=len(blocks),
                         global_order=global_order, asset_id=context.asset_id,
                         bbox=image.bbox, render_key=render_key,
@@ -324,6 +333,7 @@ def _build_figure(
     vision_available: bool,
     describe: Callable[..., object],
     vision_budget: int,
+    figure_store: Callable[[int, bytes, str], str] | None = None,
 ) -> tuple[FigureData, int, list[str]] | None:
     if image.bbox is None:
         return None
@@ -334,28 +344,47 @@ def _build_figure(
     edges: list[str] = []
     uncertain = True
     warnings: list[str] = []
-    if vision_available and image.xref is not None and vision_budget > 0:
+    image_key = None
+    suffix = ".png"
+    if image.xref is not None:
         data = pdf_text.extract_pdf_image(path, image.xref)
         if data:
-            vision_budget -= 1
-            try:
-                result = describe(data)
-                description = getattr(result, "description", None)
-                latex = getattr(result, "latex", None)
-                figure = getattr(result, "figure", None) or {}
-                if isinstance(figure, dict):
-                    kind = str(figure.get("kind") or "other")
-                    nodes = [str(item) for item in figure.get("nodes") or []][:40]
-                    edges = [str(item) for item in figure.get("edges") or []][:60]
-                uncertain = bool(getattr(result, "uncertain", True))
-                warnings = list(getattr(result, "warnings", []) or [])
-            except Exception as exc:  # pragma: no cover - optional enrichment
-                warnings.append(f"视觉识别失败：{type(exc).__name__}")
+            if figure_store:
+                module = pdf_text._pymupdf()
+                if module is not None:
+                    try:
+                        with module.open(str(path)) as document:
+                            extracted = document.extract_image(image.xref)
+                            suffix = "." + str(extracted.get("ext") or "png")
+                    except Exception:
+                        logger.debug("Could not determine embedded image format", exc_info=True)
+                try:
+                    image_key = figure_store(page.page_number, data, suffix)
+                except Exception:
+                    logger.warning("Could not store extracted figure image", exc_info=True)
+            if vision_available and vision_budget > 0:
+                vision_budget -= 1
+                try:
+                    result = describe(data, mime={
+                        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                        ".webp": "image/webp",
+                    }.get(suffix, "image/png"))
+                    description = getattr(result, "description", None)
+                    latex = getattr(result, "latex", None)
+                    figure = getattr(result, "figure", None) or {}
+                    if isinstance(figure, dict):
+                        kind = str(figure.get("kind") or "other")
+                        nodes = [str(item) for item in figure.get("nodes") or []][:40]
+                        edges = [str(item) for item in figure.get("edges") or []][:60]
+                    uncertain = bool(getattr(result, "uncertain", True))
+                    warnings = list(getattr(result, "warnings", []) or [])
+                except Exception as exc:  # pragma: no cover - optional enrichment
+                    warnings.append(f"视觉识别失败：{type(exc).__name__}")
     if description is None and latex is None:
         warnings.append("图像内容未解释（视觉引擎不可用或未启用）")
     return (
         FigureData(kind=kind if kind else "other", description=description, latex=latex,
-                   nodes=nodes, edges=edges, uncertain=uncertain),
+                   nodes=nodes, edges=edges, uncertain=uncertain, image_key=image_key),
         vision_budget,
         warnings,
     )

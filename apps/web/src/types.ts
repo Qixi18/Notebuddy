@@ -188,7 +188,13 @@ export type AssetResource = {
 export type DocumentParseRunSummary = {
   id: string; asset_id: string; status: string; is_current: boolean
   page_count: number; text_chars: number; quality_status: string
-  quality: { status: string; warnings?: string[]; [key: string]: unknown }
+  quality: {
+    status: string
+    issues?: Array<{ code: string; severity: string; message: string; page_numbers?: number[] }>
+    generation_allowed?: boolean
+    generation_block_reason?: string | null
+    [key: string]: unknown
+  }
   created_at: string; error_code?: string | null; error_message?: string | null
 }
 export type DocumentPage = {
@@ -198,6 +204,8 @@ export type DocumentPage = {
 export type DocumentBlock = {
   block_id: string; page_number: number; type: string; level: number; text: string
   latex: string | null; confidence: number | null; extraction: string; warnings: string[]
+  figure?: { kind: string; description: string | null; nodes: string[]; edges: string[];
+    latex?: string | null; uncertain: boolean; image_key?: string | null } | null
 }
 export type AssetDocument = {
   run: DocumentParseRunSummary; pages: DocumentPage[]

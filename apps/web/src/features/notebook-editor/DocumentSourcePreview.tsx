@@ -107,9 +107,16 @@ export function DocumentSourcePreview({ assetId, notebookId, materialId, initial
           </option>)}
         </select>
       </label>}
-      {run && <p className="document-source-quality">解析质量：{run.quality_status} · {run.page_count} 页 · {run.text_chars.toLocaleString('zh-CN')} 字
-        {Array.isArray(run.quality?.warnings) && run.quality.warnings.length > 0 ? ` · ${run.quality.warnings.join('；')}` : ''}
-      </p>}
+      {run && <div className="document-source-quality">
+        <p>解析质量：{run.quality_status} · {run.page_count} 页 · {run.text_chars.toLocaleString('zh-CN')} 字</p>
+        {run.quality_status === 'partial' && run.quality?.generation_allowed &&
+          <p role="status">部分页面未能完整解析；生成内容仅依据已识别页面，请先检查下方页码状态与提示。</p>}
+        {run.quality_status === 'partial' && !run.quality?.generation_allowed &&
+          <p role="alert">解析不完整，当前已阻止生成；请先检查失败页面或重新运行 OCR。</p>}
+        {run.quality?.generation_block_reason && <p role="alert">{run.quality.generation_block_reason}</p>}
+        {run.quality?.issues?.filter((issue) => issue.severity === 'blocking' || issue.severity === 'warning')
+          .map((issue) => <p key={issue.code}>{issue.message}</p>)}
+      </div>}
       {loading && <p role="status">正在读取解析内容…</p>}
       {document && <div className="document-source-body">
         <nav className="document-source-pages" aria-label="资料页码">
@@ -147,6 +154,8 @@ export function DocumentSourcePreview({ assetId, notebookId, materialId, initial
               return <article key={block.block_id}>
                 <small>{block.type}{block.confidence !== null ? ` · 置信度 ${Math.round(block.confidence * 100)}%` : ''}</small>
                 <p>{block.text || block.latex || '该块没有可展示文本。'}</p>
+                {block.figure?.image_key && <img className="document-source-render"
+                  src={block.figure.image_key} alt={block.figure.description || '解析出的图像区域'} />}
                 {block.warnings.length > 0 && <small className="document-source-warning">{block.warnings.join('；')}</small>}
                 {citations.length > 0 && <small>关联 Notebook：{citations.map((citation) => citation.notebook_title).join('、')}</small>}
               </article>

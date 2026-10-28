@@ -8,11 +8,13 @@ document is explicitly blocked from automatic generation.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 from collections.abc import Callable
 from pathlib import Path
 
+from app.core.config import settings
 from app.document_processing.adapters.common import (
     TextBlockDraft,
     heading_level,
@@ -32,6 +34,24 @@ from app.document_processing.ir import (
 from app.document_processing.normalization.sections import build_sections
 
 logger = logging.getLogger(__name__)
+
+
+def _store_image_evidence(context: object, data: bytes, mime: str) -> str | None:
+    extension = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(mime)
+    if extension is None:
+        return None
+    digest = hashlib.sha256(data).hexdigest()[:20]
+    root = settings.data_dir.resolve()
+    key = f"derived/figures/{context.asset_id}/{context.parse_run_id}/original-{digest}{extension}"
+    target = (root / key).resolve()
+    if not target.is_relative_to(root) or target == root:
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        temporary.write_bytes(data)
+        temporary.replace(target)
+    return key
 
 
 def parse_image(
@@ -56,12 +76,19 @@ def parse_image(
     width = height = None
     rotation = 0
     ocr_bytes = data
-    mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    mime = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower(), "image/jpeg")
+    source_mime = mime
     try:
         from PIL import Image, ImageOps
 
         with Image.open(io.BytesIO(data)) as image:
             width, height = image.width, image.height
+            source_mime = {
+                "PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp",
+            }.get(str(image.format or "").upper(), source_mime)
             try:
                 rotation = int((image.getexif() or {}).get(274, 1) or 1)
             except Exception:
@@ -75,6 +102,8 @@ def parse_image(
                     width, height = upright.width, upright.height
     except Exception:  # pragma: no cover - malformed image is a parse failure
         logger.warning("Could not read image dimensions", exc_info=True)
+
+    image_key = _store_image_evidence(context, data, source_mime)
 
     page = PageIR(
         page_id=f"{context.parse_run_id}-p1",
@@ -109,7 +138,7 @@ def parse_image(
                 page.warnings.append("OCR 未识别到文字")
         except Exception as exc:
             page.status = "needs_ocr"
-            page.warnings.append(f"OCR 失败：{type(exc).__name__}")
+            page.warnings.append(f"OCR 失败：{type(exc).__name__}: {exc}")
     else:
         page.status = "needs_ocr"
         page.warnings.append("图片需要 OCR/视觉识别；当前环境没有可用 OCR 引擎")
@@ -118,7 +147,9 @@ def parse_image(
     if vision_available:
         try:
             result = describe(ocr_bytes, mime=mime)
-            vision_applied = _apply_vision(result, page, blocks, context, index_base=len(blocks))
+            vision_applied = _apply_vision(
+                result, page, blocks, context, index_base=len(blocks), image_key=image_key,
+            )
             if vision_applied:
                 page.extraction = "vision" if page.extraction == "none" else "mixed"
                 if page.status == "needs_ocr":
@@ -131,9 +162,11 @@ def parse_image(
     if not blocks:
         # Preserve the image itself as evidence even when no text was recognized.
         figure = FigureData(kind="other", description=None, uncertain=True)
+        figure.image_key = image_key
         blocks.append(BlockIR(
             block_id=f"{run_prefix}-p1-img1", page_number=1, order=0, global_order=0, type="image",
             text="原始图片（未识别文字）", figure=figure,
+            bbox=None,
             source=SourceSpan(asset_id=context.asset_id, page_number=1),
             extraction="none", confidence=None,
             warnings=list(page.warnings),
@@ -225,6 +258,7 @@ def _image_ocr_drafts(result: object) -> list[TextBlockDraft]:
 
 def _apply_vision(
     result: object, page: PageIR, blocks: list[BlockIR], context: object, *, index_base: int,
+    image_key: str | None = None,
 ) -> bool:
     description = getattr(result, "description", None)
     latex = getattr(result, "latex", None)
@@ -243,7 +277,8 @@ def _apply_vision(
                 block_id=f"{run_prefix}-p1-t{index_base + 1}", page_number=1, order=0, global_order=0,
                 type="table", text="\n".join(" | ".join(row) for row in rows),
                 table=TableData(rows=rows, header_rows=max(1, header)),
-                source=SourceSpan(asset_id=context.asset_id, page_number=1),
+                source=SourceSpan(asset_id=context.asset_id, page_number=1,
+                                  location_label="视觉模型识别的原始图片"),
                 extraction="vision", confidence=None if uncertain else 0.75,
                 warnings=warnings,
             ))
@@ -253,7 +288,8 @@ def _apply_vision(
         blocks.append(BlockIR(
             block_id=f"{run_prefix}-p1-eq{index_base + 1}", page_number=1, order=0, global_order=0,
             type="equation", text=str(latex), latex=str(latex),
-            source=SourceSpan(asset_id=context.asset_id, page_number=1),
+            source=SourceSpan(asset_id=context.asset_id, page_number=1,
+                              location_label="视觉模型识别的原始图片"),
             extraction="vision", confidence=None if uncertain else 0.8,
             warnings=warnings + (["公式识别结果不确定"] if uncertain else []),
         ))
@@ -267,8 +303,9 @@ def _apply_vision(
             block_id=f"{run_prefix}-p1-f{index_base + 1}", page_number=1, order=0, global_order=0,
             type="figure", text=description or "；".join(nodes) or "图像结构",
             figure=FigureData(kind=kind, description=description, nodes=nodes, edges=edges,
-                              uncertain=uncertain),
-            source=SourceSpan(asset_id=context.asset_id, page_number=1),
+                              uncertain=uncertain, image_key=image_key),
+            source=SourceSpan(asset_id=context.asset_id, page_number=1,
+                              location_label="视觉模型识别的原始图片"),
             extraction="vision", confidence=None if uncertain else 0.8,
             warnings=warnings + (["图形识别结果不确定"] if uncertain else []),
         ))

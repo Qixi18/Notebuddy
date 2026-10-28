@@ -11,10 +11,10 @@ data.
 from __future__ import annotations
 
 import logging
-from contextlib import closing
-from io import BytesIO
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +97,7 @@ class RawPage:
     tables: list[RawTable] = field(default_factory=list)
     text: str = ""
     render_png: bytes | None = None
+    render_error: str | None = None
 
     @property
     def has_text_layer(self) -> bool:
@@ -128,9 +129,17 @@ def availability() -> EngineInfo:
         )
     try:
         import pypdf  # type: ignore
+        capabilities = ["text_only"]
+        version = str(getattr(pypdf, "__version__", "?"))
+        try:
+            import pypdfium2  # type: ignore
 
-        return EngineInfo(name="pypdf", version=str(getattr(pypdf, "__version__", "?")),
-                          available=True, capabilities=("text_only",))
+            version = str(getattr(pypdfium2, "__version__", version))
+            capabilities.append("render")
+        except Exception:
+            version = "?"
+        return EngineInfo(name="pypdf+pdfium" if "render" in capabilities else "pypdf",
+                          version=version, available=True, capabilities=tuple(capabilities))
     except Exception as exc:  # pragma: no cover - dependency error
         return EngineInfo(name="none", version="0", available=False, reason=str(exc))
 
@@ -173,14 +182,15 @@ def extract_pdf(
     """Extract every page as raw geometry using the best available engine.
 
     ``render_when`` decides per page whether a PNG rendering is produced (used
-    for OCR and for pages kept as visual evidence).  Text-only fallbacks never
-    render.
+    for OCR and for pages kept as visual evidence). PDFium supplies rendering
+    when PyMuPDF is not installed, so text-only extraction never silently
+    disables native OCR.
     """
 
     module = _pymupdf()
     if module is not None:
         return _extract_with_pymupdf(module, path, render_when=render_when, render_dpi=render_dpi)
-    return _extract_with_pypdf(path)
+    return _extract_with_pypdf(path, render_when=render_when, render_dpi=render_dpi)
 
 
 def extract_pdf_image(path: Path, xref: int) -> bytes | None:
@@ -225,11 +235,10 @@ def render_pdf_page(path: Path, page_number: int, *, dpi: int = 120) -> bytes | 
                     max(72, min(int(dpi), MAX_RENDER_DPI)) / 72,
                     MAX_RENDER_SIDE / max(width, height, 1),
                 )
-                with closing(page.render(scale=scale)) as bitmap:
-                    with bitmap.to_pil() as image:
-                        output = BytesIO()
-                        image.save(output, format="PNG")
-                        return output.getvalue()
+                with closing(page.render(scale=scale)) as bitmap, bitmap.to_pil() as image:
+                    output = BytesIO()
+                    image.save(output, format="PNG")
+                    return output.getvalue()
     except Exception:
         logger.debug("PDFium source preview unavailable", exc_info=True)
     return None
@@ -283,6 +292,7 @@ def _extract_with_pymupdf(
                         height=int(block["height"]) if isinstance(block.get("height"), (int, float)) else None,
                         xref=int(block["xref"]) if isinstance(block.get("xref"), int) else None,
                     ))
+            _attach_image_xrefs(page, raw_page)
             try:
                 table_finder = getattr(page, "find_tables", None)
                 if callable(table_finder):
@@ -304,35 +314,113 @@ def _extract_with_pymupdf(
             raw_page.text = "\n".join(block.text for block in raw_page.text_blocks if block.text).strip()
             if render_when is not None and render_when(raw_page):
                 raw_page.render_png = _render(page, render_dpi)
+                if raw_page.render_png is None:
+                    raw_page.render_error = f"第 {index} 页 PyMuPDF 渲染失败"
             pages.append(raw_page)
     info = availability()
     return RawDocument(page_count=len(pages), pages=pages, engine=info)
 
 
-def _extract_with_pypdf(path: Path) -> RawDocument:
+def _attach_image_xrefs(page: Any, raw_page: RawPage) -> None:
+    """Recover image xrefs when the text-dict API omits them."""
+    try:
+        image_refs = page.get_images(full=True)
+    except Exception:  # pragma: no cover - optional API differs by PyMuPDF version
+        return
+    for image_ref in image_refs or []:
+        try:
+            xref = int(image_ref[0])
+            rects = page.get_image_rects(xref)
+        except (TypeError, ValueError, IndexError, AttributeError):
+            continue
+        for rect in rects or []:
+            rect_bbox = _bbox(rect)
+            if rect_bbox is None:
+                continue
+            matched = next((
+                image for image in raw_page.image_blocks
+                if image.xref is None and image.bbox is not None
+                and all(abs(left - right) <= 1.0 for left, right in zip(image.bbox, rect_bbox))
+            ), None)
+            if matched is not None:
+                matched.xref = xref
+            elif not any(
+                image.xref == xref and image.bbox is not None
+                and all(abs(left - right) <= 1.0 for left, right in zip(image.bbox, rect_bbox))
+                for image in raw_page.image_blocks
+            ):
+                raw_page.image_blocks.append(RawImageBlock(bbox=rect_bbox, xref=xref))
+
+
+def _extract_with_pypdf(
+    path: Path,
+    *,
+    render_when: Callable[[RawPage], bool] | None = None,
+    render_dpi: int = 120,
+) -> RawDocument:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
     pages: list[RawPage] = []
-    for index, page in enumerate(reader.pages, start=1):
+    pdfium_document = None
+    render_error = None
+    if render_when is not None:
         try:
-            text = (page.extract_text() or "").strip()
-        except Exception:  # pragma: no cover
-            text = ""
-        raw_page = RawPage(page_number=index, text=text)
-        try:
-            box = page.mediabox
-            raw_page.width = float(box.width)
-            raw_page.height = float(box.height)
-        except Exception:  # pragma: no cover
-            logger.debug("pypdf page has no usable mediabox", exc_info=True)
-        for paragraph in [part.strip() for part in text.split("\n\n") if part.strip()]:
-            lines = [RawLine(spans=[RawSpan(text=line)]) for line in paragraph.splitlines() if line.strip()]
-            if lines:
-                raw_page.text_blocks.append(RawTextBlock(lines=lines))
-        pages.append(raw_page)
+            import pypdfium2 as pdfium
+
+            pdfium_document = pdfium.PdfDocument(str(path))
+        except Exception as exc:
+            render_error = f"PDFium 无法打开 PDF：{type(exc).__name__}: {exc}"
+            logger.warning("PDFium could not open PDF for page rendering", exc_info=True)
+    try:
+        for index, page in enumerate(reader.pages, start=1):
+            try:
+                text = (page.extract_text() or "").strip()
+            except Exception as exc:  # pragma: no cover
+                text = ""
+                page_error = f"第 {index} 页文字层读取失败：{type(exc).__name__}"
+            else:
+                page_error = None
+            raw_page = RawPage(page_number=index, text=text)
+            try:
+                box = page.mediabox
+                raw_page.width = float(box.width)
+                raw_page.height = float(box.height)
+            except Exception:  # pragma: no cover
+                logger.debug("pypdf page has no usable mediabox", exc_info=True)
+            for paragraph in [part.strip() for part in text.split("\n\n") if part.strip()]:
+                lines = [RawLine(spans=[RawSpan(text=line)]) for line in paragraph.splitlines() if line.strip()]
+                if lines:
+                    raw_page.text_blocks.append(RawTextBlock(lines=lines))
+            if page_error:
+                raw_page.render_error = page_error
+            elif render_when is not None and render_when(raw_page):
+                if pdfium_document is None:
+                    raw_page.render_error = render_error or "PDFium 不可用，无法渲染扫描页"
+                elif index > len(pdfium_document):
+                    raw_page.render_error = f"PDFium 缺少第 {index} 页，无法渲染"
+                else:
+                    try:
+                        with closing(pdfium_document[index - 1]) as pdfium_page:
+                            width, height = pdfium_page.get_size()
+                            scale = min(
+                                max(72, min(int(render_dpi), MAX_RENDER_DPI)) / 72,
+                                MAX_RENDER_SIDE / max(width, height, 1),
+                            )
+                            with closing(pdfium_page.render(scale=scale)) as bitmap, bitmap.to_pil() as image:
+                                output = BytesIO()
+                                image.save(output, format="PNG")
+                                raw_page.render_png = output.getvalue()
+                    except Exception as exc:
+                        raw_page.render_error = (
+                            f"第 {index} 页 PDFium 渲染失败：{type(exc).__name__}: {exc}"
+                        )
+            pages.append(raw_page)
+    finally:
+        if pdfium_document is not None:
+            pdfium_document.close()
     return RawDocument(
         page_count=len(pages), pages=pages,
         engine=EngineInfo(name="pypdf", version="text-only", available=True,
-                          capabilities=("text_only",)),
+                          capabilities=("text_only", "render") if render_when else ("text_only",)),
     )

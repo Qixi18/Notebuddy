@@ -13,11 +13,13 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "alembic>=1.20.0",
     "pypdf>=6.19.0",
+    "pypdfium2>=5.14,<6",
     "python-docx>=1.2.0",
 ]
 
 [project.optional-dependencies]
 paddleocr = ["paddleocr>=3.7,<4"]
+rapidocr = ["rapidocr-onnxruntime>=1.4,<2"]
 mineru = ["mineru>=4.0,<5"]
 
 [dependency-groups]

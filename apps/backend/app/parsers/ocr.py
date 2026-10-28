@@ -44,9 +44,10 @@ def status() -> dict[str, object]:
         available = False
         provider = os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower()
     else:
-        try:
-            import fitz  # noqa: F401
-        except Exception:
+        from app.document_processing.engines import pdf_text
+
+        renderer = pdf_text.availability()
+        if "render" not in renderer.capabilities:
             state = "missing_dependency"
             available = False
             provider = os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower()
@@ -54,7 +55,7 @@ def status() -> dict[str, object]:
             from app.document_processing.engines.ocr import availability
 
             engine = availability()
-            provider = f"{engine.name}+PyMuPDF"
+            provider = f"{engine.name}+{renderer.name}"
             available = engine.available
             state = "ready" if available else "missing_dependency"
     return {

@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import logging
 import os
-import threading
 import tempfile
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,13 @@ from app.document_processing.engines.pdf_text import EngineInfo
 logger = logging.getLogger(__name__)
 _PADDLEOCR_CLASS: Any = None
 _PADDLEOCR_ENGINE: Any = None
+_PADDLEOCR_ERROR: str | None = None
+_PADDLEOCR_PROBED = False
+_RAPIDOCR_ENGINE: Any = None
+_RAPIDOCR_ERROR: str | None = None
+_RAPIDOCR_PROBED = False
 _PADDLEOCR_LOCK = threading.Lock()
+_RAPIDOCR_LOCK = threading.Lock()
 
 
 class OcrUnavailable(RuntimeError):
@@ -95,28 +102,46 @@ def _selected_engine() -> str:
         return requested
     if requested != "auto":
         logger.warning("Unknown NOTEBOOK_OCR_ENGINE=%r; using automatic selection", requested)
-    if _paddleocr_class() is not None:
+    if _PADDLEOCR_ERROR is None and _paddleocr_class() is not None:
         return "paddleocr"
-    if _rapidocr() is not None:
+    if _RAPIDOCR_ERROR is None and _rapidocr() is not None:
         return "rapidocr"
     if _pytesseract() is not None:
         return "tesseract"
     return "none"
 
 
-def availability() -> EngineInfo:
+def availability(*, probe: bool = True) -> EngineInfo:
+    global _PADDLEOCR_ERROR, _RAPIDOCR_ERROR
     selected = _selected_engine()
     if selected == "paddleocr":
         PaddleOCR = _paddleocr_class()
         if PaddleOCR is not None:
+            if _PADDLEOCR_ERROR:
+                return EngineInfo(name="paddleocr", version="0", available=False,
+                                  reason=_PADDLEOCR_ERROR)
+            if probe:
+                try:
+                    _initialize_paddleocr(probe=True)
+                except Exception as exc:
+                    _PADDLEOCR_ERROR = f"PaddleOCR 初始化或预检推理失败：{type(exc).__name__}: {exc}"
+                    if os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower() == "auto":
+                        fallback = _selected_engine()
+                        if fallback not in {"none", "paddleocr"}:
+                            return availability(probe=probe)
+                    return EngineInfo(name="paddleocr", version="0", available=False,
+                                      reason=_PADDLEOCR_ERROR)
             try:
                 from importlib.metadata import version
 
                 paddle_version = version("paddleocr")
             except Exception:
                 paddle_version = "?"
+            capabilities = ("text", "bbox", "confidence", "layout", "offline")
+            if not probe and _PADDLEOCR_ENGINE is None:
+                capabilities += ("inference_not_probed",)
             return EngineInfo(name="paddleocr", version=paddle_version, available=True,
-                              capabilities=("text", "bbox", "confidence", "layout", "offline"))
+                              capabilities=capabilities)
         return EngineInfo(name="paddleocr", version="0", available=False,
                           reason="未安装 PaddleOCR 及其运行依赖")
     if selected == "rapidocr":
@@ -124,6 +149,20 @@ def availability() -> EngineInfo:
         if rapid is None:
             return EngineInfo(name="rapidocr", version="0", available=False,
                               reason="未安装 rapidocr_onnxruntime")
+        if _RAPIDOCR_ERROR:
+            return EngineInfo(name="rapidocr", version="0", available=False,
+                              reason=_RAPIDOCR_ERROR)
+        if probe:
+            try:
+                _initialize_rapidocr(probe=True)
+            except Exception as exc:
+                _RAPIDOCR_ERROR = f"RapidOCR 初始化或预检推理失败：{type(exc).__name__}: {exc}"
+                if os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower() == "auto":
+                    fallback = _selected_engine()
+                    if fallback not in {"none", "rapidocr"}:
+                        return availability(probe=probe)
+                return EngineInfo(name="rapidocr", version="0", available=False,
+                                  reason=_RAPIDOCR_ERROR)
         try:
             import rapidocr_onnxruntime as module  # type: ignore
 
@@ -148,31 +187,105 @@ def availability() -> EngineInfo:
         return EngineInfo(name="none", version="0", available=False,
                           reason="OCR 已通过 NOTEBOOK_OCR_ENGINE=none 关闭")
 
+    reasons = [reason for reason in (_PADDLEOCR_ERROR, _RAPIDOCR_ERROR) if reason]
     return EngineInfo(name="none", version="0", available=False,
-                      reason="未安装 PaddleOCR、RapidOCR 或 Tesseract OCR 引擎")
+                      reason="；".join(reasons) or
+                      "未安装 PaddleOCR、RapidOCR 或 Tesseract OCR 引擎")
 
 def recognize(image: bytes | Path, *, language: str = "chi_sim+eng",
               timeout_seconds: float = 60.0) -> OcrResult:
-    info = availability()
-    if not info.available:
-        raise OcrUnavailable(info.reason or "OCR 引擎不可用")
-    if info.name == "paddleocr":
-        return _recognize_paddleocr(image)
-    if info.name == "rapidocr":
-        return _recognize_rapidocr(image)
-    return _recognize_tesseract(image, language=language, timeout_seconds=timeout_seconds)
+    last_error: Exception | None = None
+    for _attempt in range(3):
+        info = availability()
+        if not info.available:
+            if last_error:
+                raise OcrUnavailable(f"自动选择的 OCR 引擎均不可用：{last_error}; {info.reason}")
+            raise OcrUnavailable(info.reason or "OCR 引擎不可用")
+        try:
+            if info.name == "paddleocr":
+                return _recognize_paddleocr(image)
+            if info.name == "rapidocr":
+                return _recognize_rapidocr(image)
+            return _recognize_tesseract(image, language=language, timeout_seconds=timeout_seconds)
+        except Exception as exc:
+            last_error = exc
+            if info.name == "paddleocr":
+                global _PADDLEOCR_ENGINE, _PADDLEOCR_ERROR
+                _PADDLEOCR_ENGINE = None
+                _PADDLEOCR_ERROR = f"PaddleOCR 推理失败：{type(exc).__name__}: {exc}"
+            elif info.name == "rapidocr":
+                global _RAPIDOCR_ENGINE, _RAPIDOCR_ERROR
+                _RAPIDOCR_ENGINE = None
+                _RAPIDOCR_ERROR = f"RapidOCR 推理失败：{type(exc).__name__}: {exc}"
+            if os.getenv("NOTEBOOK_OCR_ENGINE", "auto").strip().lower() != "auto":
+                raise OcrUnavailable(str(last_error)) from exc
+    raise OcrUnavailable(str(last_error or "OCR 推理失败"))
 
 
-def _recognize_paddleocr(image: bytes | Path) -> OcrResult:
-    global _PADDLEOCR_ENGINE
+def _probe_image() -> Path:
+    from PIL import Image
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+        path = Path(handle.name)
+    Image.new("RGB", (32, 32), "white").save(path, format="PNG")
+    return path
+
+
+def _initialize_paddleocr(*, probe: bool) -> Any:
+    global _PADDLEOCR_ENGINE, _PADDLEOCR_PROBED
+    started = time.perf_counter()
+    was_initialized = _PADDLEOCR_ENGINE is not None and _PADDLEOCR_PROBED
     PaddleOCR = _paddleocr_class()
-    if PaddleOCR is None:  # pragma: no cover - guarded by availability()
-        raise OcrUnavailable("PaddleOCR 未安装")
+    if PaddleOCR is None:
+        raise OcrUnavailable("未安装 PaddleOCR 或 PaddlePaddle 运行时")
     if _PADDLEOCR_ENGINE is None:
         with _PADDLEOCR_LOCK:
             if _PADDLEOCR_ENGINE is None:
                 lang = os.getenv("NOTEBOOK_PADDLEOCR_LANG", "ch").strip() or "ch"
                 _PADDLEOCR_ENGINE = PaddleOCR(lang=lang, ocr_version="PP-OCRv6")
+    if probe and not _PADDLEOCR_PROBED:
+        with _PADDLEOCR_LOCK:
+            if not _PADDLEOCR_PROBED:
+                image = _probe_image()
+                try:
+                    _PADDLEOCR_ENGINE.predict(str(image))
+                    _PADDLEOCR_PROBED = True
+                finally:
+                    image.unlink(missing_ok=True)
+    if probe and not was_initialized:
+        logger.info("ocr_engine_ready engine=paddleocr init_and_probe_seconds=%.3f",
+                    time.perf_counter() - started)
+    return _PADDLEOCR_ENGINE
+
+
+def _initialize_rapidocr(*, probe: bool) -> Any:
+    global _RAPIDOCR_ENGINE, _RAPIDOCR_PROBED
+    started = time.perf_counter()
+    was_initialized = _RAPIDOCR_ENGINE is not None and _RAPIDOCR_PROBED
+    RapidOCR = _rapidocr()
+    if RapidOCR is None:
+        raise OcrUnavailable("rapidocr_onnxruntime 未安装")
+    if _RAPIDOCR_ENGINE is None:
+        with _RAPIDOCR_LOCK:
+            if _RAPIDOCR_ENGINE is None:
+                _RAPIDOCR_ENGINE = RapidOCR()
+    if probe and not _RAPIDOCR_PROBED:
+        with _RAPIDOCR_LOCK:
+            if not _RAPIDOCR_PROBED:
+                image = _probe_image()
+                try:
+                    _RAPIDOCR_ENGINE(str(image))
+                    _RAPIDOCR_PROBED = True
+                finally:
+                    image.unlink(missing_ok=True)
+    if probe and not was_initialized:
+        logger.info("ocr_engine_ready engine=rapidocr init_and_probe_seconds=%.3f",
+                    time.perf_counter() - started)
+    return _RAPIDOCR_ENGINE
+
+
+def _recognize_paddleocr(image: bytes | Path) -> OcrResult:
+    engine = _initialize_paddleocr(probe=False)
 
     temporary: Path | None = None
     try:
@@ -183,7 +296,10 @@ def _recognize_paddleocr(image: bytes | Path) -> OcrResult:
             target = str(temporary)
         else:
             target = str(image)
-        results = _PADDLEOCR_ENGINE.predict(target)
+        started = time.perf_counter()
+        results = engine.predict(target)
+        logger.info("ocr_inference_finished engine=paddleocr elapsed_seconds=%.3f",
+                    time.perf_counter() - started)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
@@ -250,10 +366,7 @@ def _bbox_from_points(points: Any) -> list[float] | None:
 
 
 def _recognize_rapidocr(image: bytes | Path) -> OcrResult:
-    RapidOCR = _rapidocr()
-    if RapidOCR is None:  # pragma: no cover - guarded by availability()
-        raise OcrUnavailable("rapidocr 未安装")
-    engine = RapidOCR()
+    engine = _initialize_rapidocr(probe=False)
     temporary: Path | None = None
     try:
         target: Any = image
@@ -262,7 +375,10 @@ def _recognize_rapidocr(image: bytes | Path) -> OcrResult:
                 handle.write(image)
                 temporary = Path(handle.name)
             target = str(temporary)
+        started = time.perf_counter()
         result, _elapsed = engine(str(target) if isinstance(target, Path) else target)
+        logger.info("ocr_inference_finished engine=rapidocr elapsed_seconds=%.3f",
+                    time.perf_counter() - started)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

@@ -189,12 +189,12 @@ def test_quality_marks_office_documents_as_limited():
     assert quality.status == "partial"
 
 
-def test_quality_fails_below_minimum_text():
+def test_quality_allows_short_meaningful_text():
     page = PageIR(
         page_id="p1", page_number=1, status="parsed", extraction="native_text",
-        text="太短", blocks=[BlockIR(
+        text="x=1", blocks=[BlockIR(
             block_id="p1-b1", page_number=1, order=0, global_order=0,
-            type="paragraph", text="太短",
+            type="equation", text="x=1", latex="x=1",
             source=SourceSpan(asset_id="a", page_number=1),
         )],
     )
@@ -203,5 +203,6 @@ def test_quality_fails_below_minimum_text():
         page_count=1, pages=[page],
     )
     quality = assess(document, engines=_engines(), doc_type="pdf")
-    assert quality.status == "failed"
-    assert quality.generation_allowed is False
+    assert quality.status == "complete"
+    assert quality.text_chars == 3
+    assert quality.generation_allowed is True
