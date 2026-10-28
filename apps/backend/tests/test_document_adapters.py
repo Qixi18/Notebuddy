@@ -9,11 +9,34 @@ import pytest
 from PIL import Image
 
 from app.core.config import settings
+from app.document_processing.adapters.common import is_equation
 from app.document_processing.adapters.image import parse_image
 from app.document_processing.adapters.pdf import ParseContext, parse_pdf
 from app.document_processing.engines.ocr import OcrLine, OcrResult
 
 pymupdf = pytest.importorskip("pymupdf")
+
+
+@pytest.mark.parametrize("text", ["(716,445)", "(664,314)", "(vii)", "(xii)", "(b)"])
+def test_equation_heuristic_rejects_coordinates_and_legal_list_markers(text):
+    assert not is_equation(text)
+
+
+@pytest.mark.parametrize("text", [
+    "x+y", "E=mc^2", "f(x)=x/2", "∫_0^1 x dx = 1/2",
+    "Cout = AB + ACin + BCin", "S = A xor B xor Cin",
+    r"\mathrm{Cout} = \mathrm{AB} + \mathrm{ACin} + \mathrm{BCin}",
+])
+def test_equation_heuristic_keeps_common_formula_shapes(text):
+    assert is_equation(text)
+
+
+@pytest.mark.parametrize("text", [
+    "The limit of f(x) as x approaches a is L.",
+    "This value is x = 2 when the input is provided.",
+])
+def test_equation_heuristic_does_not_promote_prose(text):
+    assert not is_equation(text)
 
 
 def _text_pdf(path: Path) -> None:
@@ -85,6 +108,32 @@ class _FakeVision:
 def _context(asset_id: str = "asset-1") -> ParseContext:
     return ParseContext(asset_id=asset_id, parse_run_id="run-12345678", doc_type="pdf",
                         title="资料")
+
+
+def test_image_ocr_also_retains_original_visual_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    path = tmp_path / "source.png"
+    Image.new("RGB", (200, 100), "white").save(path)
+    document = parse_image(path, _context("image"), ocr_available=True,
+                           vision_available=False, ocr_recognize=_fake_ocr)
+    assert any(block.text and "Limits" in block.text for block in document.pages[0].blocks)
+    original = next(block for block in document.pages[0].blocks if block.type == "image")
+    assert original.figure and original.figure.image_key
+    assert (tmp_path / original.figure.image_key).read_bytes() == path.read_bytes()
+    assert any(original.block_id in section.block_ids for section in document.sections)
+
+
+def test_blank_pdf_page_is_not_reported_as_failed_ocr(tmp_path):
+    path = tmp_path / "blank.pdf"
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 90), "Readable first page", fontsize=18)
+    doc.new_page()
+    doc.save(path)
+    doc.close()
+    parsed = parse_pdf(path, _context(), render_store=_store(tmp_path),
+                       ocr_available=True, vision_available=False, ocr_recognize=_fake_ocr)
+    assert parsed.pages[1].status == "empty"
+    assert not parsed.pages[1].blocks
 
 
 def _store(tmp_path: Path):

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+from app.document_processing.adapters.common import is_equation
 from app.document_processing.adapters.pdf import ParseContext
 from app.document_processing.engines import pdf_text
 from app.document_processing.ir import (
@@ -79,6 +80,22 @@ def configured() -> bool:
     return (os.getenv("NOTEBOOK_DOCUMENT_PARSER", "native").strip().lower() == "mineru")
 
 
+def _is_blank_page_model_output(items: Any) -> bool:
+    """Recognize the VLM's explicit empty-page explanation as metadata, not source text."""
+    if not isinstance(items, list) or len(items) != 1:
+        return False
+    if not isinstance(items[0], dict) or items[0].get("type") != "paragraph":
+        return False
+    content = items[0].get("content")
+    text = _span_text(content.get("paragraph_content")) if isinstance(content, dict) else ""
+    normalized = re.sub(r"\s+", " ", text).casefold()
+    return (
+        "image contains no text or content to process" in normalized
+        and "blank white background" in normalized
+        and "empty string" in normalized
+    )
+
+
 def parse_document(path: Path, context: ParseContext) -> DocumentIR:
     """Parse one local file with MinerU and translate its page blocks to NoteBuddy IR."""
     try:
@@ -106,8 +123,16 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
     )
     pages_content = render(parsed.middle_json, RenderFormat.CONTENT_LIST_V2)
     page_infos = list(getattr(parsed.middle_json, "pages", []) or [])
-    source_document = pdf_text.extract_pdf(path)
-    source_pages = {page.page_number: page for page in source_document.pages}
+    if context.doc_type == "image":
+        from PIL import Image, ImageOps
+
+        with Image.open(path) as source:
+            image = ImageOps.exif_transpose(source)
+            source_pages = {1: pdf_text.RawPage(page_number=1, width=image.width,
+                                                height=image.height)}
+    else:
+        source_document = pdf_text.extract_pdf(path)
+        source_pages = {page.page_number: page for page in source_document.pages}
     version = availability()["version"]
     run_prefix = context.parse_run_id[:8]
     pages: list[PageIR] = []
@@ -117,27 +142,31 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
         info = page_infos[index] if index < len(page_infos) else None
         page_idx = int(getattr(info, "page_idx", index)) if info is not None else index
         page_number = page_idx + 1
+        source_page = source_pages.get(page_number)
         page = PageIR(
             page_id=f"{context.parse_run_id}-p{page_number}",
             page_number=page_number,
+            width=source_page.width if source_page else None,
+            height=source_page.height if source_page else None,
+            rotation=source_page.rotation if source_page else 0,
             extraction="mineru",
             status="parsed",
         )
-        visual_index = 0
+        if _is_blank_page_model_output(items):
+            page.status = "empty"
+            page.warnings.append("MinerU 视觉模型报告空白页，已忽略其描述文本")
+            items = []
+        visual_indices: dict[str, int] = {}
         for item in items:
             if not isinstance(item, dict):
                 continue
             is_visual = item.get("type") in {"image", "chart", "table", "equation_interline"}
-            raw_block = (
-                _find_raw_block(parsed.middle_json, page_idx, visual_index, item)
-                if is_visual else None
-            )
-            if is_visual and raw_block is None:
-                raw_block = _find_raw_block(
-                    parsed.middle_json, page_idx, visual_index - 1, item,
-                )
+            kind = item.get("type")
+            raw_block = _find_raw_block(
+                parsed.middle_json, page_idx, visual_indices.get(kind, 0), item,
+            ) if is_visual else None
             if is_visual:
-                visual_index += 1
+                visual_indices[kind] = visual_indices.get(kind, 0) + 1
             mapped = _map_item(
                 item,
                 block_id=f"{run_prefix}-p{page_number}-b{len(page.blocks) + 1}",
@@ -155,14 +184,58 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
                 ),
             )
             for block in mapped:
+                if is_visual and raw_block is None:
+                    block.warnings.append("MinerU 原始视觉块未匹配，图片使用页面坐标回退")
                 page.blocks.append(block)
                 global_order += 1
         page.text = "\n".join(
             block.searchable_text() for block in page.blocks if block.searchable_text()
         )
         if not page.blocks:
-            page.status = "empty"
+            page.status = "needs_ocr" if context.doc_type == "image" else "empty"
             page.warnings.append("MinerU 未识别到可用内容")
+        if context.doc_type == "pdf":
+            # MinerU may read text inside an embedded figure as ordinary paragraphs.
+            # Preserve the original PDF image when no visual block was recognized.
+            source_page = source_pages.get(page_number)
+            if source_page is not None:
+                from app.document_processing.adapters.pdf import _image_area_ratio
+                from app.notes.attachments import sniff_image_mime
+
+                for embedded in source_page.image_blocks:
+                    if embedded.xref is None or _image_area_ratio(source_page, embedded) < 0.01:
+                        continue
+                    if not source_page.rotation and _embedded_image_covered(
+                        embedded.bbox, source_page.width, source_page.height, page.blocks,
+                    ):
+                        continue
+                    payload = pdf_text.extract_pdf_image(path, embedded.xref)
+                    mime = sniff_image_mime(payload or b"")
+                    suffix = {"image/png": ".png", "image/jpeg": ".jpg",
+                              "image/webp": ".webp"}.get(mime)
+                    if not payload or not suffix:
+                        continue
+                    key = _store_image(context.asset_id, context.parse_run_id, payload, suffix)
+                    page.blocks.append(BlockIR(
+                        block_id=f"{run_prefix}-p{page_number}-embedded-{len(page.blocks) + 1}",
+                        page_number=page_number, order=len(page.blocks), global_order=global_order,
+                        type="image", text="", figure=FigureData(image_key=key, uncertain=True),
+                        source=SourceSpan(asset_id=context.asset_id, page_number=page_number,
+                                          bbox=embedded.bbox), bbox=embedded.bbox,
+                        extraction="native_text", warnings=["保留原 PDF 内嵌图片，图中内容需核对"],
+                    ))
+                    global_order += 1
+        if context.doc_type == "image" and page_number == 1:
+            key = _store_image(context.asset_id, context.parse_run_id, path.read_bytes(),
+                               path.suffix.lower())
+            page.blocks.append(BlockIR(
+                block_id=f"{run_prefix}-p{page_number}-original", page_number=page_number,
+                order=len(page.blocks), global_order=global_order, type="image", text="",
+                figure=FigureData(image_key=key, uncertain=True),
+                source=SourceSpan(asset_id=context.asset_id, page_number=page_number),
+                extraction="mineru", warnings=["原始图片保留为来源证据，图中内容需核对"],
+            ))
+            global_order += 1
         pages.append(page)
 
     document = DocumentIR(
@@ -180,6 +253,28 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
     document.sections = build_sections(document, document_title=context.title)
     document.page_count = len(pages)
     return document
+
+
+def _embedded_image_covered(
+    bbox: list[float] | None, width: float | None, height: float | None, blocks: list[BlockIR],
+) -> bool:
+    """Only suppress an embedded image when a MinerU visual covers most of it."""
+    if not bbox or not width or not height:
+        return False
+    x0, y0, x1, y1 = bbox
+    area = max(0, x1 - x0) * max(0, y1 - y0)
+    if not area:
+        return False
+    for block in blocks:
+        if not block.figure or not block.figure.image_key or not block.bbox:
+            continue
+        a, b, c, d = block.bbox
+        a, c = a * width / 1000, c * width / 1000
+        b, d = b * height / 1000, d * height / 1000
+        intersection = max(0, min(x1, c) - max(x0, a)) * max(0, min(y1, d) - max(y0, b))
+        if intersection / area >= 0.9:
+            return True
+    return False
 
 
 def _map_item(
@@ -206,6 +301,11 @@ def _map_item(
 
     if kind == "paragraph":
         text = _span_text(content.get("paragraph_content"))
+        if text and is_equation(text):
+            block = _block(block_id, page_number, order, global_order, "equation", text,
+                            source, latex=text)
+            block.warnings.append("从独立数学表达式段落提取；请核对公式语义及上下标")
+            return [block]
         return [_block(block_id, page_number, order, global_order, "paragraph", text, source)] if text else []
 
     if kind in {"list", "index"}:
@@ -255,8 +355,6 @@ def _map_item(
         if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
             try:
                 normalized_bbox = [float(value) for value in bbox]
-                if all(0 <= value <= 1 for value in normalized_bbox):
-                    normalized_bbox = [value * 1000 for value in normalized_bbox]
             except (TypeError, ValueError):
                 normalized_bbox = None
         figure = FigureData(kind=figure_kind, description=description or None, uncertain=not bool(description))
@@ -406,53 +504,6 @@ def _bounded_int(value: Any, minimum: int, maximum: int, default: int) -> int:
         return default
 
 
-def _find_raw_block(
-    materialized: dict[str, Any], page_idx: int, index: int, rendered_item: dict[str, Any],
-) -> dict[str, Any] | None:
-    """Find matching typed MinerU block payload without relying on temp paths."""
-    pages = getattr(materialized, "pages", None)
-    if not isinstance(pages, list) or page_idx < 0:
-        return None
-    page = next((p for p in pages if getattr(p, "page_idx", None) == page_idx), None)
-    raw_blocks = getattr(page, "blocks", None) if page is not None else None
-    if not isinstance(raw_blocks, list):
-        return None
-    target_type = rendered_item.get("type")
-    candidates = []
-
-    def collect(blocks: list[Any]) -> None:
-        for block in blocks:
-            kind = getattr(getattr(block, "type", None), "value", getattr(block, "type", None))
-            if kind == target_type:
-                candidates.append(block)
-            children = getattr(block, "content", None)
-            if isinstance(children, list):
-                collect(children)
-
-    collect(raw_blocks)
-    return candidates[index] if index < len(candidates) else None
-
-
-def _materialize_block_image(raw_block: dict[str, Any] | None, image_store: Any) -> str | None:
-    if not raw_block or not callable(image_store):
-        return None
-    encoded = getattr(raw_block, "image_base64", None)
-    if isinstance(encoded, str) and encoded:
-        match = re.fullmatch(r"data:image/(png|jpeg|jpg|webp);base64,(.*)", encoded, re.DOTALL)
-        if match:
-            suffix = ".jpg" if match.group(1) in {"jpeg", "jpg"} else f".{match.group(1)}"
-            try:
-                return image_store(base64.b64decode(match.group(2), validate=True), suffix)
-            except (ValueError, binascii.Error):
-                return None
-    path = getattr(raw_block, "image_path", None)
-    if isinstance(path, str) and Path(path).is_file():
-        suffix = Path(path).suffix.lower()
-        if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-            return image_store(Path(path).read_bytes(), suffix)
-    return None
-
-
 def _store_image(asset_id: str, run_id: str, payload: bytes, suffix: str) -> str:
     if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
         raise ValueError("unsupported MinerU image format")
@@ -475,6 +526,26 @@ def _render_figure_crop(
 ) -> str | None:
     if source_page is None or not bbox or len(bbox) != 4:
         return None
+    # MinerU 4 Content List V2 always supplies coordinates normalized to 0..1000.
+    if any(value < 0 or value > 1000 for value in bbox):
+        return None
+    if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+        from io import BytesIO
+
+        from PIL import Image, ImageOps
+
+        try:
+            with Image.open(path) as source:
+                image = ImageOps.exif_transpose(source)
+                box = (int(bbox[0] * image.width / 1000), int(bbox[1] * image.height / 1000),
+                       int(bbox[2] * image.width / 1000), int(bbox[3] * image.height / 1000))
+                if box[2] <= box[0] or box[3] <= box[1]:
+                    return None
+                output = BytesIO()
+                image.crop(box).save(output, format="PNG")
+                return _store_image(asset_id, run_id, output.getvalue(), ".png")
+        except (OSError, ValueError):
+            return None
     module = pdf_text._pymupdf()
     if module is None:
         rendered = pdf_text.render_pdf_page(path, source_page.page_number, dpi=180)
@@ -487,12 +558,8 @@ def _render_figure_crop(
 
             with Image.open(BytesIO(rendered)) as image:
                 x0, y0, x1, y1 = bbox
-                if all(0 <= value <= 1000 for value in bbox):
-                    x0, x1 = x0 * image.width / 1000, x1 * image.width / 1000
-                    y0, y1 = y0 * image.height / 1000, y1 * image.height / 1000
-                else:
-                    x0, x1 = x0 * image.width / source_page.width, x1 * image.width / source_page.width
-                    y0, y1 = y0 * image.height / source_page.height, y1 * image.height / source_page.height
+                x0, x1 = x0 * image.width / 1000, x1 * image.width / 1000
+                y0, y1 = y0 * image.height / 1000, y1 * image.height / 1000
                 box = (max(0, int(x0)), max(0, int(y0)), min(image.width, int(x1)), min(image.height, int(y1)))
                 if box[2] <= box[0] or box[3] <= box[1]:
                     return None
@@ -507,10 +574,8 @@ def _render_figure_crop(
                 return None
             page = document[source_page.page_number - 1]
             width, height = float(page.rect.width), float(page.rect.height)
-            box = bbox
-            if all(0 <= value <= 1000 for value in box):
-                box = [box[0] * width / 1000, box[1] * height / 1000,
-                       box[2] * width / 1000, box[3] * height / 1000]
+            box = [bbox[0] * width / 1000, bbox[1] * height / 1000,
+                   bbox[2] * width / 1000, bbox[3] * height / 1000]
             rect = module.Rect(*box) & page.rect
             if rect.is_empty or rect.width < 2 or rect.height < 2:
                 return None
@@ -612,24 +677,20 @@ def _find_raw_block(
     if not isinstance(blocks, list):
         return None
     target_type = rendered_item.get("type")
-    candidates: list[Any] = []
-
-    def collect(items: list[Any]) -> None:
-        for block in items:
-            kind = getattr(getattr(block, "type", None), "value", getattr(block, "type", None))
-            aliases = {target_type}
-            if target_type == "image":
-                aliases.add("image_body")
-            elif target_type == "chart":
-                aliases.add("chart_body")
-            if kind in aliases:
-                candidates.append(block)
-            children = getattr(block, "content", None)
-            if isinstance(children, list):
-                collect(children)
-
-    collect(blocks)
-    return candidates[index] if index < len(candidates) else None
+    raw_type = "equation" if target_type == "equation_interline" else target_type
+    candidates = [block for block in blocks if
+                  getattr(getattr(block, "type", None), "value", getattr(block, "type", None))
+                  == raw_type]
+    if index < 0 or index >= len(candidates):
+        return None
+    parent = candidates[index]
+    children = getattr(parent, "content", None)
+    if isinstance(children, list):
+        expected = f"{raw_type}_body"
+        return next((child for child in children if
+                     getattr(getattr(child, "type", None), "value", getattr(child, "type", None))
+                     == expected), None)
+    return parent
 
 
 def _mineru_image_bytes(block: Any) -> tuple[bytes, str] | None:

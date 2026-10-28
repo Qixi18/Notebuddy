@@ -131,6 +131,7 @@ def _block_payload(block) -> dict[str, Any]:
             "edges": block.figure.edges[:40],
             "latex": block.figure.latex,
             "uncertain": block.figure.uncertain,
+            "evidence_ref": block.block_id if block.figure.image_key else None,
         }
     return {
         "block_id": block.block_id,

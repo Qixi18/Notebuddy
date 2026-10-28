@@ -480,26 +480,40 @@ def get_document_coverage(asset_id: str, notebook_id: str | None = None,
     if run is None:
         raise HTTPException(404, "该资料还没有完成的解析版本")
     rows = db.execute(
-        select(DocumentBlock.block_id, DocumentPage.page_number, DocumentBlock.text)
+        select(DocumentBlock, DocumentPage.page_number)
         .join(DocumentPage, DocumentPage.id == DocumentBlock.page_id)
-        .where(DocumentBlock.parse_run_id == run.id, DocumentBlock.text != "")
+        .where(DocumentBlock.parse_run_id == run.id)
     ).all()
     links = db.execute(
         select(NotebookBlockSource, Notebook)
         .join(Notebook, Notebook.id == NotebookBlockSource.notebook_id)
-        .where(NotebookBlockSource.parse_run_id == run.id)
+        .where(NotebookBlockSource.parse_run_id == run.id,
+               NotebookBlockSource.status == "active")
     ).all()
     cited: dict[str, list[dict]] = {}
     for link, notebook in links:
-        cited.setdefault(link.block_id, []).append({
+        if notebook_id and notebook.id != notebook_id:
+            continue
+        cited.setdefault(link.document_block_id, []).append({
             "notebook_id": notebook.id, "notebook_title": notebook.title,
             "block_id": link.block_id, "page_number": link.page_number,
         })
     blocks = []
-    for block_id, page_number, text in rows:
+    import json
+
+    for row, page_number in rows:
+        try:
+            table = json.loads(row.table_json or "null")
+            figure = json.loads(row.figure_json or "null")
+        except (TypeError, ValueError):
+            table = figure = None
+        if not (row.text.strip() or (row.latex or "").strip()
+                or (isinstance(table, dict) and table.get("rows"))
+                or (isinstance(figure, dict) and figure.get("image_key"))):
+            continue
         blocks.append({
-            "block_id": block_id, "page_number": page_number, "quote": text[:300],
-            "citations": cited.get(block_id, []),
+            "block_id": row.block_id, "page_number": page_number, "quote": row.text[:300],
+            "citations": cited.get(row.id, []),
         })
     total = len(blocks)
     cited_total = sum(1 for block in blocks if block["citations"])
@@ -624,7 +638,7 @@ def retry_asset_parse(asset_id: str, db: Session = Depends(get_db)):
         raise HTTPException(409, "图片解析任务已在队列中")
     job = AssetProcessingJob(
         asset_id=asset_id, notebook_id=owner.notebook_id, owner_link_id=owner.id,
-        kind="image_parse",
+        kind="image_reparse",
         status="pending", attempt_count=0,
     )
     db.add(job)

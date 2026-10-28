@@ -241,7 +241,7 @@ def compose_offline(
                 elif text:
                     buffer.append(text)
                     buffer_sources.append(block["block_id"])
-            elif kind == "figure":
+            elif kind in {"figure", "image"}:
                 flush()
                 figure = block.get("figure") or {}
                 description = (figure.get("description") or "").strip()
@@ -289,7 +289,8 @@ SYSTEM_PROMPT = (
     '{"nodes":[Tiptap节点...],"sources":{"<节点blockId>":["<原文块id>",...]}}。'
     "规则：1) 只依据给定资料陈述，不编造事实或来源；2) 每个顶层节点必须有唯一 attrs.blockId，"
     "并在 sources 中列出支撑它的原文块 id；3) 不要重写、复制已有正文，只输出需要新增的内容；"
-    "4) 公式用 blockMath(latex)，表格用 table，禁止 image/URL/HTML/SVG；"
+    "4) 公式用 blockMath(latex)，表格用 table，tableCell/tableHeader 的文本需放入 paragraph；"
+    "callout 要有 title，内部内容放入 paragraph；禁止 image/URL/HTML/SVG；"
     "5) 资料不足或图形未识别时，用 callout(tone=warning) 明确写“需人工核对”，不要猜测；"
     "6) 输出应是有教学顺序的完整讲解：定义、前提、推导/方法、例题、易错点。"
 )

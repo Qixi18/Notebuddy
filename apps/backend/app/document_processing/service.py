@@ -146,6 +146,8 @@ def execute_parse_run(
     run = db.get(DocumentParseRun, run_id)
     if run is None:
         raise DocumentProcessingError("解析版本不存在", code="parse_run_missing")
+    if run.status == "completed":
+        raise DocumentProcessingError("已完成的解析版本不可再次执行", code="parse_run_completed")
     asset = db.get(Asset, run.asset_id)
     if asset is None:
         raise DocumentProcessingError("资源不存在", code="asset_missing")
@@ -390,6 +392,8 @@ def fail_parse_run(
     run = db.get(DocumentParseRun, run_id)
     if run is None:
         return None
+    if run.status == "completed":
+        raise DocumentProcessingError("已完成的解析版本不可标记失败", code="parse_run_completed")
     run.status = "failed"
     run.error_code = code[:60]
     run.error_message = message[:2000]

@@ -69,6 +69,42 @@ def test_mineru_equation_keeps_literal_inequalities():
     assert blocks[0].latex == latex
 
 
+@pytest.mark.parametrize("text", [
+    "Cout = AB + ACin + BCin",
+    r"S = A \text{ xor } B \text{ xor Cin}",
+])
+def test_mineru_math_expression_paragraph_becomes_reviewable_equation(text):
+    blocks = map_item("paragraph", {"paragraph_content": text})
+    assert len(blocks) == 1
+    assert blocks[0].type == "equation"
+    assert blocks[0].text == text
+    assert blocks[0].latex == text
+    assert any("核对公式语义" in warning for warning in blocks[0].warnings)
+
+
+def test_mineru_explanatory_sentence_remains_paragraph():
+    blocks = map_item("paragraph", {
+        "paragraph_content": "The limit of f(x) as x approaches a is L.",
+    })
+    assert blocks[0].type == "paragraph"
+
+
+def test_mineru_explicit_blank_page_caption_is_not_persisted_as_source_text():
+    from app.document_processing.adapters.mineru import _is_blank_page_model_output
+
+    caption = (
+        "The image contains no text or content to process. It is a blank white background "
+        "with no visible content, text, or symbols. Therefore, the correct OCR output is an empty string."
+    )
+    assert _is_blank_page_model_output([{
+        "type": "paragraph", "content": {"paragraph_content": caption},
+    }])
+    assert not _is_blank_page_model_output([
+        {"type": "paragraph", "content": {"paragraph_content": caption}},
+        {"type": "paragraph", "content": {"paragraph_content": "Real page text"}},
+    ])
+
+
 def test_mineru_spans_keep_spaces_between_words():
     blocks = map_item("paragraph", {"paragraph_content": [
         {"type": "text", "content": "Hello "},
@@ -92,7 +128,7 @@ def test_mineru_image_sidecar_is_saved_with_bbox_and_roundtrips(tmp_path, monkey
 
     raw = SimpleNamespace(image_base64="data:image/png;base64," + base64.b64encode(payload).decode())
     blocks = _map_item(
-        {"type": "image", "bbox": [0.1, 0.2, 0.8, 0.9], "content": {"image_caption": ["流程图"]}},
+        {"type": "image", "bbox": [100, 200, 800, 900], "content": {"image_caption": ["流程图"]}},
         block_id="image-1", page_number=1, order=0, global_order=0, asset_id="asset-1",
         raw_block=raw, image_store=store,
     )
@@ -102,6 +138,118 @@ def test_mineru_image_sidecar_is_saved_with_bbox_and_roundtrips(tmp_path, monkey
     assert stored[block.figure.image_key] == payload
     restored = FigureData.from_dict(block.figure.to_dict())
     assert restored and restored.image_key == block.figure.image_key
+
+
+def test_mineru_visual_blocks_use_type_ordinals_and_body():
+    from app.document_processing.adapters.mineru import _find_raw_block
+
+    def visual(kind, data):
+        body = SimpleNamespace(type=f"{kind}_body", image_base64=data)
+        return SimpleNamespace(type=kind, content=[body]), body
+
+    image1, body1 = visual("image", "first")
+    image2, body2 = visual("image", "second")
+    chart, chart_body = visual("chart", "chart")
+    table, _ = visual("table", "table")
+    parsed = SimpleNamespace(pages=[SimpleNamespace(
+        page_idx=0, blocks=[table, image1, chart, image2],
+    )])
+    assert _find_raw_block(parsed, 0, 0, {"type": "image"}) is body1
+    assert _find_raw_block(parsed, 0, 1, {"type": "image"}) is body2
+    assert _find_raw_block(parsed, 0, 0, {"type": "chart"}) is chart_body
+    assert _find_raw_block(parsed, 0, 2, {"type": "image"}) is None
+
+
+def test_embedded_pdf_image_is_only_suppressed_when_nearly_fully_covered():
+    from app.document_processing.adapters.mineru import _embedded_image_covered
+    from app.document_processing.ir import BlockIR, FigureData
+
+    original = [100, 100, 300, 300]
+    block = BlockIR(block_id="b", page_number=1, order=0, global_order=0, type="figure",
+                    bbox=[100, 100, 300, 300], figure=FigureData(image_key="derived/a.png"))
+    assert _embedded_image_covered(original, 1000, 1000, [block])
+    block.bbox = [100, 100, 200, 200]
+    assert not _embedded_image_covered(original, 1000, 1000, [block])
+
+
+def test_mineru_image_crop_uses_v2_normalized_coordinates(tmp_path, monkeypatch):
+    from PIL import Image
+
+    from app.document_processing.adapters.mineru import _render_figure_crop
+    from app.document_processing.engines.pdf_text import RawPage
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    path = tmp_path / "source.png"
+    image = Image.new("RGB", (100, 80), "white")
+    for x in range(60, 90):
+        for y in range(40, 70):
+            image.putpixel((x, y), (255, 0, 0))
+    image.save(path)
+    key = _render_figure_crop(path, RawPage(1, width=100, height=80),
+                              [600, 500, 900, 875], "asset", "run")
+    with Image.open(tmp_path / key) as cropped:
+        assert cropped.size == (30, 30)
+        assert cropped.getpixel((15, 15)) == (255, 0, 0)
+
+
+def test_mineru_pdf_crop_uses_normalized_coordinates_with_pdfium(tmp_path, monkeypatch):
+    import pymupdf
+    from PIL import Image
+
+    from app.document_processing.adapters.mineru import _render_figure_crop
+    from app.document_processing.engines import pdf_text
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    path = tmp_path / "source.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(pymupdf.Rect(306, 396, 550, 710), color=(1, 0, 0), fill=(1, 0, 0))
+    doc.save(path)
+    doc.close()
+    monkeypatch.setattr(pdf_text, "_pymupdf", lambda: None)
+    key = _render_figure_crop(path, pdf_text.RawPage(1, width=612, height=792),
+                              [500, 500, 800, 800], "asset", "run")
+    assert key
+    with Image.open(tmp_path / key) as image:
+        red, green, blue = image.convert("RGB").getpixel((image.width // 2, image.height // 2))
+        assert red > 200 and green < 30 and blue < 30
+
+
+def test_mineru_image_input_does_not_call_pdf_extraction(tmp_path, monkeypatch):
+    import sys
+    from types import ModuleType
+
+    from PIL import Image
+
+    from app.document_processing.adapters.mineru import parse_document
+    from app.document_processing.adapters.pdf import ParseContext
+    from app.document_processing.engines import pdf_text
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setenv("NOTEBOOK_MINERU_TIER", "flash")
+    monkeypatch.setattr(pdf_text, "extract_pdf", lambda path: pytest.fail("image used PDF extraction"))
+    mineru = ModuleType("mineru")
+    mineru.parse = lambda *args, **kwargs: SimpleNamespace(
+        middle_json=SimpleNamespace(pages=[SimpleNamespace(page_idx=0, blocks=[])]),
+    )
+    render_module = ModuleType("mineru.render")
+    render_module.render = lambda *args: [[{"type": "paragraph", "content": {
+        "paragraph_content": "recognized text",
+    }}]]
+    contracts = ModuleType("mineru.render.contracts")
+    contracts.RenderFormat = SimpleNamespace(CONTENT_LIST_V2="v2")
+    monkeypatch.setitem(sys.modules, "mineru", mineru)
+    monkeypatch.setitem(sys.modules, "mineru.render", render_module)
+    monkeypatch.setitem(sys.modules, "mineru.render.contracts", contracts)
+    path = tmp_path / "input.png"
+    Image.new("RGB", (100, 80), "white").save(path)
+    context = ParseContext(asset_id="asset", parse_run_id="run", doc_type="image", title="test")
+    document = parse_document(path, context)
+    assert document.page_count == 1
+    assert "recognized text" in document.pages[0].text
+    original = next(block for block in document.pages[0].blocks if block.type == "image")
+    assert original.figure and original.figure.image_key
+    assert (tmp_path / original.figure.image_key).read_bytes() == path.read_bytes()
 
 
 def test_mineru_vision_enrichment_uses_saved_crop(monkeypatch, tmp_path):

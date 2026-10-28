@@ -9,9 +9,13 @@ from app.document_processing.engines.pdf_text import RawLine, RawSpan, RawTextBl
 from app.document_processing.ir import BlockIR, SourceSpan
 from app.document_processing.normalization.sections import heading_level_from_numbering
 
-MATH_CHARS = set("=+-−×÷∑∏∫√∞≤≥≈≠∈∉⊂⊃⊆⊇→←↔∂∇°′″±∓⋅·^_{}|[]()<>/\\%")
+MATH_CHARS = set("=+-−×÷∑∏∫√∞≤≥≈≠∈∉⊂⊃⊆⊇→←↔∂∇°′″±∓⋅·⊕^_{}|[]()<>/\\%")
 GREEK = set("αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ")
 CJK = re.compile(r"[\u4e00-\u9fff]")
+WORD_MATH_OPERATOR = re.compile(r"\bxor\b", re.IGNORECASE)
+PROSE_WORDS = {"a", "an", "and", "are", "as", "because", "by", "for", "from", "if",
+               "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "we",
+               "when", "which", "with"}
 LIST_PREFIX = re.compile(r"^\s*(?:[-•·●▪◦]|\(?\d+[.)、）]|[一二三四五六七八九十]+[、.)）])\s*")
 SENTENCE_END = ("。", "！", "？", "；", ".", "!", "?", ";", ":", "：")
 
@@ -100,7 +104,26 @@ def math_ratio(text: str) -> float:
     if not stripped:
         return 0.0
     math = sum(1 for char in stripped if char in MATH_CHARS or char in GREEK)
+    math += len(WORD_MATH_OPERATOR.findall(text))
     return math / len(stripped)
+
+
+def _has_equation_operator(text: str) -> bool:
+    normalized = re.sub(r"\\(?:mathrm|text)\s*\{([^{}]*)\}", r"\1", text)
+    compact = re.sub(r"\s+", "", normalized)
+    if any(symbol in compact for symbol in "∑∏∫√∞≤≥≈≠∈∉⊂⊃⊆⊇→←↔∂∇±∓"):
+        return True
+    if re.search(r"[A-Za-z0-9α-ωΑ-Ω)][=<>][A-Za-z0-9α-ωΑ-Ω(]", compact):
+        return True
+    if re.search(r"[A-Za-z0-9α-ωΑ-Ω(][+×÷⋅·^][A-Za-z0-9α-ωΑ-Ω(]", compact):
+        return True
+    if re.search(r"[A-Za-z0-9][−][A-Za-z0-9]", compact):
+        return True
+    if re.search(r"[A-Za-z][/][A-Za-z]", compact):
+        return True
+    # A bare function expression is meaningful math; tuples and list labels
+    # such as (716,445) and (vii) are not equations.
+    return bool(re.fullmatch(r"[A-Za-z]{1,3}\([^()]+\)", compact))
 
 
 def is_equation(text: str) -> bool:
@@ -110,11 +133,17 @@ def is_equation(text: str) -> bool:
     ratio = math_ratio(stripped)
     if CJK.search(stripped):
         return False
+    if not _has_equation_operator(stripped):
+        return False
     # Prose with a couple of parentheses/equals signs is not an equation.
-    words = re.findall(r"[A-Za-z]{3,}", stripped)
-    if len(words) >= 2 and ratio < 0.35:
+    words = {word.casefold() for word in re.findall(r"[A-Za-z]{3,}", stripped)}
+    operator_count = sum(1 for char in stripped if char in MATH_CHARS or char in GREEK)
+    operator_count += len(WORD_MATH_OPERATOR.findall(stripped))
+    if len(words) >= 2 and ratio < 0.35 and (words & PROSE_WORDS or len(words) >= 5):
         return False
     if ratio >= 0.22:
+        return True
+    if ratio >= 0.12 and operator_count >= 2:
         return True
     return ratio >= 0.12 and any(token in stripped for token in ("=", "∫", "∑", "√", "→"))
 

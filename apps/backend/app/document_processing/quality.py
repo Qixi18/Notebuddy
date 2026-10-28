@@ -110,7 +110,7 @@ def assess(
                 unstructured_tables.append(page.page_number)
             if block.type == "equation" and not (block.latex or "").strip():
                 unlabelled_equations.append(page.page_number)
-            if block.type == "figure" and block.figure and not (
+            if block.type in {"figure", "image"} and block.figure and not (
                 block.figure.description or block.figure.nodes or block.figure.latex
             ):
                 unexplained_figures.append(page.page_number)

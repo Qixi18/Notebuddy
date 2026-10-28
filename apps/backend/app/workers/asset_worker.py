@@ -13,6 +13,7 @@ from app.document_processing.service import (
     create_parse_run,
     execute_parse_run,
     fail_parse_run,
+    load_ir,
 )
 from app.notes.assets import AssetUnavailable, storage_path
 
@@ -50,12 +51,15 @@ def process_asset_job(job_id: str) -> None:
             except AssetUnavailable as exc:
                 raise DocumentProcessingError(str(exc), code="asset_missing") from exc
 
-            run = create_parse_run(db, asset=asset)
-            run_id = run.id
+            run = create_parse_run(db, asset=asset, reparse=job.kind == "image_reparse")
             db.commit()
-            outcome = execute_parse_run(db, run.id, source_path=source_path,
-                                        title=asset.original_name)
-            quality = outcome.ir.quality
+            if run.status == "completed":
+                quality = load_ir(db, run).quality
+            else:
+                run_id = run.id
+                outcome = execute_parse_run(db, run.id, source_path=source_path,
+                                            title=asset.original_name)
+                quality = outcome.ir.quality
             job.error_code = None
             job.error_message = None
             if quality.status in {"complete", "partial"} and quality.generation_allowed:

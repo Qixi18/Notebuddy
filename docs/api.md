@@ -40,7 +40,7 @@ Web 路由为 `/courses/:courseId/notebooks/:notebookId?chapter=<materialId>&sec
 
 Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`；历史小节用 `chapter=history`，整本模式加 `mode=book`（包含所有历史整理正文）。旧 `/courses/:courseId/notes/:noteId` 按原 ID 转入对应位置。正文保存仍使用乐观版本号，AI 重解析变化只创建建议。
 
-现有 `/api/v1` 地址保持不变。路由按 `courses.py`、`materials.py`、`jobs.py`、`knowledge.py`、`notes.py`、`assistant.py`、`config.py` 拆分，`routes.py` 负责汇总。输入和输出模型在 `app/schemas/` 按域声明，`app/schemas/api.py` 保留兼容导出。
+现有 `/api/v1` 地址保持不变。路由模块由 `routes.py` 汇总，包括 `courses.py`、`materials.py`、`jobs.py`、`knowledge.py`、`notebook.py`、`generation.py`、`assistant.py`、`conversations.py`、`agent.py`、`feedback.py`、`backup.py`、`terms.py`、`forest.py` 和 `forest_imports.py`。笔记相关路由位于 `notebook.py`，不是独立的 `notes.py`。输入和输出模型在 `app/schemas/` 按域声明，`app/schemas/api.py` 保留兼容导出。
 
 | 能力 | 接口 | 阶段一行为 |
 |---|---|---|

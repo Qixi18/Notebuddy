@@ -124,9 +124,13 @@ def parse_pdf(
                         page.render_key = render_key
                     except Exception:  # pragma: no cover
                         render_key = None
+            blank_page = bool(png and not raw_page.image_blocks and _is_white_page(png))
             if raw_page.render_error:
                 page.status = "failed"
                 page.warnings.append(raw_page.render_error)
+            elif blank_page:
+                page.status = "empty"
+                page.warnings.append("本页渲染为空白页")
             elif png is None and ocr_available:
                 page.status = "needs_ocr"
                 page.warnings.append("扫描页无法渲染，OCR 未执行")
@@ -155,7 +159,7 @@ def parse_pdf(
                 page.status = "needs_ocr"
                 page.warnings.append("本页没有文字层，需要 OCR；当前环境没有可用 OCR 引擎")
 
-            if not drafts and vision_available and png and not raw_page.render_error:
+            if not drafts and vision_available and png and not raw_page.render_error and not blank_page:
                 vision_blocks = _describe_page_image(
                     png, page, context, render_key=render_key,
                     start_global=global_order, describe=describe,
@@ -193,6 +197,20 @@ def parse_pdf(
             if table_block is not None:
                 blocks.append(table_block)
                 global_order += 1
+
+        if scanned and png and figure_store and page.status not in {"empty", "failed"}:
+            # Keep the rendered scan as independently addressable visual evidence,
+            # including when OCR produced text but missed a diagram or table.
+            key = figure_store(raw_page.page_number, png, ".png")
+            blocks.append(BlockIR(
+                block_id=f"{run_prefix}-p{raw_page.page_number}-scan", page_number=raw_page.page_number,
+                order=len(blocks), global_order=global_order, type="image", text="",
+                figure=FigureData(image_key=key, uncertain=True), extraction="none",
+                source=SourceSpan(asset_id=context.asset_id, page_number=raw_page.page_number,
+                                  render_key=render_key),
+                warnings=["扫描页面作为图像证据保留，图表与公式需核对"],
+            ))
+            global_order += 1
 
         if not scanned:
             for image in raw_page.image_blocks:
@@ -243,6 +261,19 @@ def parse_pdf(
     document.page_count = len(pages)
     document.quality = QualityReport()  # replaced by service.assess
     return document
+
+
+def _is_white_page(png: bytes) -> bool:
+    """Only call a page blank if every rendered RGB pixel is exactly white."""
+    from io import BytesIO
+
+    try:
+        from PIL import Image
+
+        with Image.open(BytesIO(png)) as image:
+            return all(lo == 255 and hi == 255 for lo, hi in image.convert("RGB").getextrema())
+    except (OSError, ValueError):
+        return False
 
 
 def _largest_image_area_ratio(page: RawPage) -> float:

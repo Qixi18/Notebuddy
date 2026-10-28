@@ -173,6 +173,16 @@ def parse_image(
         ))
         if page.status == "parsed":
             page.status = "needs_ocr"
+    elif not any(block.figure and block.figure.image_key == image_key for block in blocks):
+        # OCR text and its original image are separate pieces of evidence.
+        blocks.append(BlockIR(
+            block_id=f"{run_prefix}-p1-img1", page_number=1, order=len(blocks),
+            global_order=len(blocks), type="image", text="",
+            figure=FigureData(image_key=image_key, uncertain=True),
+            source=SourceSpan(asset_id=context.asset_id, page_number=1),
+            extraction="none", confidence=None,
+            warnings=["原始图片保留为来源证据，图中内容需核对"],
+        ))
 
     for order, block in enumerate(blocks):
         block.order = order

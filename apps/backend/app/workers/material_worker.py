@@ -19,6 +19,7 @@ from app.document_processing.service import (
     create_parse_run,
     execute_parse_run,
     fail_parse_run,
+    load_ir,
 )
 from app.notes.assets import AssetUnavailable, storage_path
 
@@ -56,18 +57,21 @@ def process_material(job_id: str) -> None:
 
         reparse = job.kind in {"reparse_material", "ocr_material"}
         run = create_parse_run(db, asset=asset, reparse=reparse)
-        run_id = run.id
         job.progress = 10
         job.heartbeat_at = datetime.now(UTC)
         db.commit()
 
-        outcome = execute_parse_run(
-            db, run.id, source_path=source_path, title=material.lecture_title,
-        )
-        quality = outcome.ir.quality
+        if run.status == "completed":
+            quality = load_ir(db, run).quality
+        else:
+            run_id = run.id
+            outcome = execute_parse_run(
+                db, run.id, source_path=source_path, title=material.lecture_title,
+            )
+            quality = outcome.ir.quality
 
-        material.parser_version = outcome.run.parser_version
-        material.page_count = outcome.run.page_count
+        material.parser_version = run.parser_version
+        material.page_count = run.page_count
         material.document_warning = _quality_warning(quality)
         material.status = "completed"
 

@@ -28,6 +28,23 @@ from tests.notebook_fixtures import (
 )
 
 
+def test_model_table_cells_and_callout_inline_content_are_normalized():
+    from app.notes.document import normalize_document, validate_document
+
+    nodes = [{"type": "table", "attrs": {"blockId": "table"}, "content": [
+        {"type": "tableRow", "content": [
+            {"type": "tableHeader", "content": [{"type": "text", "text": "A"}]},
+            {"type": "tableCell", "content": [{"type": "text", "text": "1"}]},
+        ]},
+    ]}, {"type": "callout", "attrs": {"blockId": "warning", "tone": "warning"},
+         "content": [{"type": "text", "text": "需要核对"}]}]
+    repaired = worker._normalize_model_blocks(nodes)
+    validate_document(normalize_document({"type": "doc", "content": repaired}))
+    assert repaired[0]["content"][0]["content"][0]["content"][0]["type"] == "paragraph"
+    assert repaired[1]["attrs"]["title"] == "请核对"
+    assert nodes[0]["content"][0]["content"][0]["content"][0]["type"] == "text"
+
+
 @pytest.fixture()
 def file_db(tmp_path):
     engine = create_engine(f"sqlite:///{(tmp_path / 'test.db').as_posix()}",

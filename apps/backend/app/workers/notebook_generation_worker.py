@@ -6,6 +6,7 @@ append-only merge with revision CAS -> source relations -> derived index.
 
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from datetime import UTC, datetime
@@ -19,13 +20,16 @@ from app.db.database import SessionLocal
 from app.db.models import (
     DocumentBlock,
     DocumentPage,
+    DocumentParseRun,
     Notebook,
+    NotebookAsset,
     NotebookBlockSource,
     NotebookGenerationInput,
     NotebookGenerationJob,
 )
 from app.generation.composer import CompositionError, compose
 from app.generation.context import GenerationInputError, current_outline
+from app.generation.figures import append_source_figures
 from app.generation.planner import build_plan
 from app.notes.document import (
     DocumentValidationError,
@@ -75,6 +79,11 @@ def process_generation_job(job_id: str) -> None:
         if not _checkpoint(db, job, attempt):
             return
         snapshot = _parse_json(job.input_snapshot_json) or {}
+        try:
+            _validate_snapshot_sources(db, job.notebook_id, snapshot)
+        except GenerationInputError as exc:
+            _fail_inputs(db, job, exc.code, str(exc), attempt)
+            return
         plan = _parse_json(job.knowledge_plan_json) if job.knowledge_plan_json else None
         if plan is None:
             if not _guard_processing(db, job.id, attempt):
@@ -140,7 +149,9 @@ def process_generation_job(job_id: str) -> None:
             _fail_inputs(db, job, "empty_generation", "没有可追加的正文内容（资料可能已全部覆盖）", attempt)
             return
         try:
-            fragment = validate_document(normalize_document({"type": "doc", "content": nodes}))
+            fragment = validate_document(normalize_document({
+                "type": "doc", "content": _normalize_model_blocks(nodes),
+            }))
             _reject_images(fragment)
             _validate_source_map(fragment, source_map)
         except DocumentValidationError as exc:
@@ -156,7 +167,12 @@ def process_generation_job(job_id: str) -> None:
             _fail_inputs(db, job, "invalid_sources", "生成内容引用了本次输入之外的原文块", attempt)
             return
 
-        merged = _merge_with_retry(db, job, fragment, source_map, attempt)
+        try:
+            merged = _merge_with_retry(db, job, fragment, source_map, attempt, snapshot, plan)
+        except DocumentValidationError as exc:
+            db.rollback()
+            _fail_inputs(db, job, "invalid_figure", str(exc)[:1000], attempt)
+            return
         if merged is None:
             _fail_inputs(
                 db, job, "revision_conflict",
@@ -164,25 +180,34 @@ def process_generation_job(job_id: str) -> None:
                 attempt,
             )
             return
-        notebook, next_revision = merged
-        _write_sources(db, notebook, job, source_rows, source_map)
-        job.status = "completed"
-        job.generator = generator
-        job.source_map_json = json.dumps(source_map, ensure_ascii=False)
-        job.error_code = job.error_message = None
-        job.finished_at = job.updated_at = datetime.now(UTC)
-        _complete_inputs(db, job, next_revision)
-        if notebook.course_id is not None:
-            from app.forest.notebook_relations import enqueue_notebook_relations
+        notebook, next_revision, created = merged
+        try:
+            source_rows = _resolve_source_rows(db, allowed_runs, source_map)
+            if source_rows is None:
+                raise DocumentValidationError("生成图片的来源不存在")
+            _write_sources(db, notebook, job, source_rows, source_map)
+            job.status = "completed"
+            job.generator = generator
+            job.source_map_json = json.dumps(source_map, ensure_ascii=False)
+            job.error_code = job.error_message = None
+            job.finished_at = job.updated_at = datetime.now(UTC)
+            _complete_inputs(db, job, next_revision)
+            if notebook.course_id is not None:
+                from app.forest.notebook_relations import enqueue_notebook_relations
 
-            enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id)
-        db.commit()
+                enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            for path in created:
+                path.unlink(missing_ok=True)
+            raise
 
 
 def _merge_with_retry(
     db, job: NotebookGenerationJob, fragment: dict[str, Any], source_map: dict[str, list[str]],
-    attempt: int,
-) -> tuple[Notebook, int] | None:
+    attempt: int, snapshot: dict[str, Any], plan: dict[str, Any],
+) -> tuple[Notebook, int, list] | None:
     attempts = 3
     for _ in range(attempts):
         # This write locks the task until body, sources, input statuses and
@@ -226,21 +251,36 @@ def _merge_with_retry(
                 block_id = new_id
             if isinstance(block_id, str):
                 used.add(block_id)
-        merged_document = validate_document({
-            "type": "doc", "content": [*content["content"], *fragment["content"]],
-        })
+        nodes = copy.deepcopy(fragment["content"])
+        created = []
+        original_keys = set(source_map)
         try:
+            append_source_figures(db, notebook.id, snapshot, plan, nodes, source_map, created)
+            merged_document = validate_document({
+                "type": "doc", "content": [*content["content"], *nodes],
+            })
             next_revision, _content = write_document(
                 db, notebook, merged_document,
                 expected_revision=notebook.document_revision, origin="ai_append",
             )
             db.flush()
-            return notebook, next_revision
+            return notebook, next_revision, created
         except DocumentConflict:
             db.rollback()
+            for path in created:
+                path.unlink(missing_ok=True)
+            for key in set(source_map) - original_keys:
+                del source_map[key]
             # Reload and retry: append-only merge never overwrites user edits.
             db.expire_all()
             continue
+        except Exception:
+            db.rollback()
+            for path in created:
+                path.unlink(missing_ok=True)
+            for key in set(source_map) - original_keys:
+                del source_map[key]
+            raise
     return None
 
 
@@ -253,6 +293,32 @@ def _reject_images(document: dict[str, Any]) -> None:
         if node.get("type") == "image":
             raise DocumentValidationError("AI 生成的补充内容不能新增图片资源")
         stack.extend(node.get("content") or [])
+
+
+def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Repair only unambiguous inline-to-paragraph model formatting."""
+    result = copy.deepcopy(nodes)
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        kind = node.get("type")
+        children = node.get("content")
+        if kind == "callout":
+            attrs = node.get("attrs")
+            if isinstance(attrs, dict) and not attrs.get("title"):
+                attrs["title"] = "请核对" if attrs.get("tone") == "warning" else "提示"
+        if kind in {"tableHeader", "tableCell", "callout", "example"} and isinstance(children, list):
+            inline_types = {"text", "hardBreak", "inlineMath"}
+            if children and all(isinstance(child, dict) and child.get("type") in inline_types
+                                for child in children):
+                node["content"] = [{"type": "paragraph", "content": children}]
+        for child in node.get("content") or []:
+            visit(child)
+
+    for node in result:
+        visit(node)
+    return result
 
 
 def _validate_source_map(document: dict[str, Any], source_map: dict[str, list[str]]) -> None:
@@ -350,6 +416,27 @@ def _resolve_source_rows(
         # matches the stored evidence.
         return None
     return resolved
+
+
+def _validate_snapshot_sources(db, notebook_id: str, snapshot: dict[str, Any]) -> None:
+    """A queued job can only consume the exact retained, owned source versions."""
+    sources = snapshot.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise GenerationInputError("生成快照缺少资料", code="snapshot_invalid")
+    for source in sources:
+        if not isinstance(source, dict):
+            raise GenerationInputError("生成快照格式不正确", code="snapshot_invalid")
+        run = db.get(DocumentParseRun, source.get("parse_run_id"))
+        owner = db.scalar(select(NotebookAsset.id).where(
+            NotebookAsset.notebook_id == notebook_id,
+            NotebookAsset.asset_id == source.get("asset_id"),
+            NotebookAsset.is_owner.is_(True), NotebookAsset.detached_at.is_(None),
+            NotebookAsset.role == "source_material",
+        ))
+        if (run is None or run.status != "completed" or run.asset_id != source.get("asset_id")
+                or not source.get("ir_fingerprint") or run.fingerprint != source["ir_fingerprint"]
+                or owner is None):
+            raise GenerationInputError("生成快照的资料归属或解析版本已失效", code="snapshot_invalid")
 
 
 def _write_sources(

@@ -135,10 +135,14 @@ def _retrieve_documents(
             continue
         lexical = _lexical_score(chunk.text, terms)
         vector = 0.0
-        if query_vector and chunk.embedding_json:
+        if query_vector and chunk.embedding_json and chunk.embedding_model == settings_model():
             try:
-                vector = cosine_similarity(query_vector, json.loads(chunk.embedding_json))
-            except (TypeError, ValueError, json.JSONDecodeError):
+                stored = json.loads(chunk.embedding_json)
+                if (isinstance(stored, list) and len(stored) == len(query_vector)
+                        and all(isinstance(value, (int, float)) and math.isfinite(value)
+                                for value in stored)):
+                    vector = cosine_similarity(query_vector, stored)
+            except (TypeError, ValueError, OverflowError, json.JSONDecodeError):
                 vector = 0.0
         score = vector * 10 + lexical
         if score <= 0:
