@@ -7,17 +7,6 @@
 export const PET_FLOAT_SIZE = 120
 /** 位移低于该值按点击处理，不进入拖拽 */
 export const PET_DRAG_THRESHOLD = 6
-/** 松手速度采样窗口 */
-export const PET_VELOCITY_WINDOW_MS = 120
-export const PET_VELOCITY_MIN_SAMPLES = 3
-/** 超过该速度（px/s）进入惯性甩抛 */
-export const PET_FLING_SPEED = 800
-/** 每帧（60fps 基准）速度保留比例 */
-export const PET_FLING_FRICTION = 0.985
-/** 低于该速度（px/s）惯性停止 */
-export const PET_FLING_STOP_SPEED = 34
-/** 低速撞边直接停，不反弹，避免贴边抖动 */
-export const PET_BOUNCE_MIN_SPEED = 120
 /** 距边缘小于该值吸附半隐藏 */
 export const PET_SNAP_RANGE = 56
 /** 吸附后立绘露出的宽度 */

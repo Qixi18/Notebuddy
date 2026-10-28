@@ -56,7 +56,6 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
   avoidRef?: RefObject<HTMLElement | null>
 }>(function PetAvatar({ mode, onModeChange, status, character, bubbleHint, avoidRef }, ref) {
   const wide = useMediaQuery(`(min-width: ${FLOAT_MIN_VIEWPORT}px)`)
-  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const effectiveMode: PetMode = wide ? mode : 'rail'
 
   const stageRef = useRef<HTMLDivElement | null>(null)
@@ -68,7 +67,6 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
     mode: effectiveMode,
     size: { width: PET_FLOAT_SIZE, height: PET_FLOAT_SIZE },
     enabled: wide,
-    reducedMotion,
     getRailOrigin: () => {
       const rect = stageRef.current?.getBoundingClientRect()
       return rect ? { x: rect.left, y: rect.top } : null
@@ -115,7 +113,7 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
             onPointerDown={handleStagePointerDown}
             onClick={showBubble}
           >
-            <TeacherCharacter status={status} animated character={character} />
+            <TeacherCharacter status={status} animated character={character} pet />
           </div>
           {bubbleNode}
         </div>
@@ -126,14 +124,14 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
           className={`workspace-petfloat${drag.dockEdge ? ` is-docked-${drag.dockEdge}` : ''}${drag.dragging ? ' is-dragging' : ''}`}
           role="button"
           tabIndex={0}
-          aria-label={`${character === 'elf' ? '莉艾尔' : '桌宠'}浮层：方向键移动，Home 回左栏，双击回位`}
+          aria-label="沃雅妮莎桌宠浮层：方向键移动，Home 回左栏，双击回位"
           onPointerDown={drag.onPointerDown}
           onKeyDown={drag.onKeyDown}
           onDoubleClick={drag.onDoubleClick}
           onClick={showBubble}
         >
           <div className="workspace-petfloat-inner">
-            <TeacherCharacter status={status} animated character={character} />
+            <TeacherCharacter status={status} animated character={character} pet />
           </div>
           {bubbleNode}
         </div>,

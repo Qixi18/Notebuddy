@@ -2521,7 +2521,9 @@ button.workspace-evidence-open:hover, .workspace-evidence-open:hover { backgroun
   width: 100%;
   height: 100%;
   transition: transform .22s ease;
-  pointer-events: none;
+  /* 命中区必须跟随被 translate 的内层：贴边时人物会露在 120px 宿主盒之外。
+     若此处为 none，鼠标落在人物身上会命中页面而不是宿主，表现为"身上抓不住、身外能抓"。 */
+  pointer-events: auto;
 }
 
 .workspace-petfloat.is-gliding .workspace-petfloat-inner { transition: transform .24s ease; }

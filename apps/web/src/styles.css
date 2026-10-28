@@ -67,7 +67,7 @@ a { color: inherit; text-decoration: none; }
 .teacher-character-halo { position: absolute; top: 15px; width: 210px; height: 210px; border: 1px solid rgba(255,255,255,.86); border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.92), rgba(211,236,253,.75) 70%, rgba(198,229,250,.25)); box-shadow: 0 16px 35px rgba(80, 139, 185, .13); }
 .teacher-character-halo::after { position: absolute; inset: 14px; border: 1px dashed rgba(96, 158, 203, .24); border-radius: 50%; content: ''; }
 .teacher-character-stage { position: relative; z-index: 1; align-self: end; justify-self: center; height: 252px; aspect-ratio: 1024 / 1536; transform-origin: 50% 100%; }
-.teacher-character-image { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; max-width: none; object-fit: contain; object-position: center bottom; filter: drop-shadow(0 12px 14px rgba(80, 139, 185, .12)); }
+.teacher-character-image { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; max-width: none; object-fit: contain; object-position: center bottom; filter: drop-shadow(0 12px 14px rgba(80, 139, 185, .12)); -webkit-user-drag: none; user-select: none; }
 .teacher-character-fx { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; overflow: visible; }
 .teacher-character-label { position: absolute; bottom: 0; z-index: 2; max-width: calc(100% - 12px); overflow: hidden; border: 1px solid #dbeefa; border-radius: 999px; padding: 5px 10px; color: #5c91b8; background: rgba(255,255,255,.94); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .teacher-character-thinking .teacher-character-halo { animation: teacher-thinking-pulse 1.8s ease-in-out infinite; }
@@ -1039,6 +1039,19 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 }
 
 /* ===== 首页待机连续帧：10×6 网格雪碧图，60 帧 @12fps = 5s 循环 ===== */
+/* 沃雅妮莎用 webp 内动画：关闭全部 CSS 状态动效(呼吸/漂浮/光环脉动/贴边),
+   并按素材比例(408×544)居中填满容器,避免被底部对齐与宽高比错位推偏或溢出 */
+.teacher-character-pet-idle .teacher-character-stage {
+  animation: none !important;
+  aspect-ratio: 408 / 544;
+  align-self: center;
+  height: 100%;
+}
+.teacher-character-pet-idle .teacher-character-image { animation: none !important; object-position: center; }
+/* halo 是莉艾尔立绘的"光晕底座",与沃雅妮莎无关且会溢出成圆盘——pet 模式整体隐藏 */
+.teacher-character-pet .teacher-character-halo,
+.teacher-character-pet .teacher-character-halo::after { display: none !important; }
+.teacher-character-pet-idle .teacher-character-sprite { animation: none !important; }
 .teacher-character-sprite { position: absolute; bottom: 0; left: 0; right: 0; z-index: 1; margin-inline: auto; width: auto; aspect-ratio: 720 / 960; background-image: url('/assets/teacher/teacher-idle-sheet.webp'); background-size: 1000% 600%; background-repeat: no-repeat; animation: teacher-idle-frames 5s step-end infinite; will-change: background-position; }
 /* label 跟随人物脚下，不再压在人物身上 */
 /* 舞台层限宽：窄框下图与雪碧图都在框内 contain，不再右侧溢出裁剪。

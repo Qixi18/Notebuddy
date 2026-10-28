@@ -1,0 +1,20 @@
+{
+  "character": "pet",
+  "canvas": [
+    408,
+    544
+  ],
+  "fps": 12,
+  "actions": {
+    "idle": {
+      "id": "idle",
+      "file": "idle.webp",
+      "loop": true,
+      "outputFrames": 70,
+      "duration": 5.83,
+      "width": 408,
+      "height": 544,
+      "bytes": 1583604
+    }
+  }
+}

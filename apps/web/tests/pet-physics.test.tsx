@@ -1,7 +1,6 @@
 import { cleanup } from '@testing-library/react'
 import { afterEach, expect, test } from 'vitest'
 
-import { FlingTracker, speedOf, stepFling } from '../src/features/pet/petPhysics'
 import {
   PET_DOCK_VISIBLE,
   PET_FLOAT_SIZE,
@@ -18,55 +17,6 @@ afterEach(cleanup)
 
 const SIZE = { width: PET_FLOAT_SIZE, height: PET_FLOAT_SIZE }
 const VIEW = { width: 1440, height: 900 }
-
-test('FlingTracker：120ms 窗口内采样估算 px/s，样本不足返回 null', () => {
-  const tracker = new FlingTracker()
-  expect(tracker.velocity()).toBeNull()
-  tracker.push(0, 0, 1000)
-  expect(tracker.velocity()).toBeNull() // 只有 1 个样本
-  tracker.push(30, 40, 1040)
-  tracker.push(90, 120, 1100)
-  const velocity = tracker.velocity()
-  expect(velocity).not.toBeNull()
-  expect(speedOf(velocity!)).toBeCloseTo(Math.hypot(90, 120) / 0.1, 0) // 1500 px/s
-})
-
-test('FlingTracker：窗口外的旧样本被丢弃，不影响速度估算', () => {
-  const tracker = new FlingTracker()
-  tracker.push(0, 0, 0)
-  tracker.push(100, 0, 1000) // 与下一采样的间隔把 t=0 挤出 120ms 窗口
-  tracker.push(110, 0, 1060)
-  tracker.push(170, 0, 1120) // 1120-1000 = 120，恰好在窗口内
-  const velocity = tracker.velocity()
-  expect(velocity?.vx).toBeCloseTo(70 / 0.12, 5) // 只用窗口内首尾两点
-})
-
-test('stepFling：摩擦衰减，速度低于阈值停止', () => {
-  let state = { x: 200, y: 200, vx: 600, vy: 0 }
-  let frames = 0
-  while (frames < 600) {
-    const result = stepFling(state, 1 / 60, SIZE, VIEW)
-    state = result.state
-    frames++
-    if (result.done) break
-  }
-  expect(frames).toBeLessThan(600)
-  expect(speedOf(state)).toBeLessThan(34)
-  expect(state.vx).toBe(0)
-})
-
-test('stepFling：高速撞边反弹，低速贴边停止，位置不出界', () => {
-  const bounced = stepFling({ x: 1430, y: 100, vx: -0, vy: 0 }, 1 / 60, SIZE, VIEW)
-  expect(bounced.state.x).toBeLessThanOrEqual(1440 - PET_FLOAT_SIZE - 8)
-
-  let state = { x: 1432, y: 100, vx: 300, vy: 0 }
-  state = stepFling(state, 1 / 60, SIZE, VIEW).state
-  expect(state.x).toBeLessThanOrEqual(1440 - PET_FLOAT_SIZE - 8)
-  expect(state.vx).toBeLessThan(0) // 高速入射反弹
-
-  const stopped = stepFling({ x: 1432, y: 100, vx: 50, vy: 0 }, 1 / 60, SIZE, VIEW)
-  expect(stopped.state.vx).toBe(0) // 低速撞边直接停
-})
 
 test('几何：clamp、贴边判定、吸附平移、比例换算', () => {
   expect(clampToViewport({ x: -20, y: 2000 }, SIZE, VIEW)).toEqual({ x: 8, y: 900 - PET_FLOAT_SIZE - 8 })
