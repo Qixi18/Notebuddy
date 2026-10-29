@@ -1,7 +1,7 @@
 import type {
   DocNode, Note, Notebook, NotebookAttachment, NotebookDocumentResponse, NotebookRead,
   NotebookEditSuggestion, NotebookRevision, NotebookRevisionSummary, NotebookSummary,
-  NotebookGenerationJob,
+  NotebookGenerationJob, NotebookReadingPosition,
   NotebookUploadBatch,
 } from '../types'
 import { request } from './http'
@@ -93,6 +93,13 @@ export const notebookApi = {
   restoreNotebookRevision: (courseId: string, notebookId: string, revision: number, expectedRevision: number) => request<NotebookDocumentResponse>(`/api/v1/courses/${courseId}/notebooks/${notebookId}/revisions/${revision}/restore`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ expected_revision: expectedRevision }),
+  }),
+  getReadingPosition: (courseId: string, notebookId: string) => request<NotebookReadingPosition | null>(`/api/v1/courses/${encodeURIComponent(courseId)}/notebooks/${encodeURIComponent(notebookId)}/reading-position`),
+  putReadingPosition: (courseId: string, notebookId: string, position: {
+    chapter_id: string | null; note_id: string | null; block_id: string | null
+    mode: 'chapter' | 'book'; section_offset: number; expected_revision: number
+  }) => request<NotebookReadingPosition>(`/api/v1/courses/${encodeURIComponent(courseId)}/notebooks/${encodeURIComponent(notebookId)}/reading-position`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(position),
   }),
   visitCourse: (courseId: string) => request<{ last_opened_at: string }>(`/api/v1/courses/${courseId}/visit`, { method: 'POST' }),
   getNotebook: (courseId: string) => request<Notebook>(`/api/v1/courses/${courseId}/notebook`),

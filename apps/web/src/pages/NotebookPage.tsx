@@ -13,6 +13,7 @@ import {
   type DocNode,
 } from '../features/notebook-editor/document'
 import { useNotebookSave } from '../features/notebook-editor/useNotebookSave'
+import { useDocumentReadingPosition } from '../features/notebook-editor/useDocumentReadingPosition'
 import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
 import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features/notebook-editor/NotebookBridge'
 import { DocumentSourcePreview } from '../features/notebook-editor/DocumentSourcePreview'
@@ -73,6 +74,7 @@ function NotebookPageBody() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState<DocNode>({ type: 'doc', content: [] })
   const [loaded, setLoaded] = useState(false)
+  const [editorReady, setEditorReady] = useState(false)
   const [loadError, setLoadError] = useState<string>()
   const [documentWarning, setDocumentWarning] = useState<string>()
   const [uploadError, setUploadError] = useState<string>()
@@ -231,6 +233,7 @@ function NotebookPageBody() {
     setDraftFound(null)
     setEditVersion(0)
     editorReadyRef.current = false
+    setEditorReady(false)
     void Promise.all([api.getNotebookById(courseId, notebookId), api.getNotebookDocument(courseId, notebookId)])
       .then(async ([nextOutline, document]) => {
         if (!active) return
@@ -408,6 +411,11 @@ function NotebookPageBody() {
   }, [courseId, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision, uploadBatchGenerationJobIds])
 
   const headings = useMemo(() => extractOutline(content), [content])
+  useDocumentReadingPosition({
+    courseId, notebookId, editorRef, ready: loaded && editorReady,
+    explicitLink: Boolean(linkedSectionId || linkedChapterId),
+    onRestore: setActiveBlockId,
+  })
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
   const generationStatusCoveredByToast = Boolean(
     uploadProgress?.batchId && generationJob?.id && uploadBatchGenerationJobIds.split('|').includes(generationJob.id),
@@ -986,6 +994,7 @@ function NotebookPageBody() {
             onSaveShortcut={() => void save.saveNow()}
             onReady={(editor) => {
               editorReadyRef.current = true
+              setEditorReady(true)
               save.reset(editor.getJSON() as DocNode, save.revision, save.lastSavedAt)
             }}
           />

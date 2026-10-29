@@ -64,9 +64,7 @@ describe('persistent botanical slots', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开知识点：知识点1' }))
     expect(callbacks.onNote).toHaveBeenCalledWith('course', first.id, first.chapters[0].sections[1])
     expect(notebookGeometry(first)).toEqual(oldGeometry)
-    const growth = view.container.querySelectorAll('.kt-branch-growth')
-    expect(growth).toHaveLength(1)
-    expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe('new-book')
+    expect(view.container.querySelectorAll('.kt-branch-growth')).toHaveLength(0)
     fireEvent.keyDown(screen.getByRole('button', { name: '续读笔记本：新增的笔记本' }), { key: 'Enter' })
     expect(callbacks.onNotebook).toHaveBeenCalledExactlyOnceWith('course', 'new-book')
     // A refreshed copy of the directory must not replay old branch growth.
@@ -104,11 +102,9 @@ describe('persistent botanical slots', () => {
     const second = { ...book(0, 1), id: 'created-while-away', title: '返回时的新笔记本' }
     const returned = render(<KnowledgeTreeScene courses={[course]} trees={[]} initialView={saved} onViewChange={onViewChange} {...callbacks} />)
     returned.rerender(<KnowledgeTreeScene courses={[course]} trees={[{ course_id: 'course', notebooks: [first, second] }]} initialView={saved} onViewChange={onViewChange} {...callbacks} />)
-    const growth = returned.container.querySelectorAll('.kt-branch-growth')
-    expect(growth).toHaveLength(1)
-    expect(growth[0].closest('[data-wood-notebook-id]')?.getAttribute('data-wood-notebook-id')).toBe(second.id)
+    expect(returned.container.querySelectorAll('.kt-branch-growth')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: '课程菜单：离散数学' }))
-    expect(onViewChange.mock.lastCall![0].knownNotebookIds.course).toEqual(['book', second.id])
+    expect(onViewChange.mock.lastCall![0]).not.toHaveProperty('knownNotebookIds')
   })
   it('shows the new branch immediately without growth motion when reduced motion is requested', () => {
     vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))

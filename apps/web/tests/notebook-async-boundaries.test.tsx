@@ -8,6 +8,7 @@ import { NotebookPage } from '../src/pages/NotebookPage'
 vi.mock('../src/api', () => ({ api: {
   getNotebookById: vi.fn(), getNotebookDocument: vi.fn(), getNotebookChapter: vi.fn(),
   saveNotebookDocument: vi.fn(), listNotebookRevisions: vi.fn(),
+  getReadingPosition: vi.fn().mockResolvedValue(null), putReadingPosition: vi.fn().mockResolvedValue({ revision: 1 }),
   listNotebookAssets: vi.fn().mockResolvedValue([]), listDetachedNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
   getNotebookUploadBatch: vi.fn(), getNotebookGenerationJob: vi.fn(), listNotebookAssetJobs: vi.fn().mockResolvedValue([]),
   listDeletedMaterials: vi.fn().mockResolvedValue([]),

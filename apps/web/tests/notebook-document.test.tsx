@@ -19,6 +19,7 @@ vi.mock('../src/api', () => ({
     listDeletedMaterials: vi.fn().mockResolvedValue([]),
     retryNotebookGenerationJob: vi.fn(), retryAssetParse: vi.fn(), uploadNotebookAsset: vi.fn(),
     useAssetInline: vi.fn(),
+    getReadingPosition: vi.fn().mockResolvedValue(null), putReadingPosition: vi.fn().mockResolvedValue({ revision: 1 }),
   },
 }))
 

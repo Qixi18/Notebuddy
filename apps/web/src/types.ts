@@ -403,7 +403,7 @@ export type NotebookRevision = NotebookRevisionSummary & { schema_version: numbe
 export type OutlineItem = { id: string; level: number; text: string }
 export type CourseTree = { course_id: string; notebooks: NotebookRead[] }
 export type NotebookReadingPosition = {
-  notebook_id: string; chapter_id: string | null; note_id: string | null
+  notebook_id: string; chapter_id: string | null; note_id: string | null; block_id: string | null
   mode: 'chapter' | 'book'; section_offset: number; revision: number; updated_at: string
 }
 export type NoteRevision = {
