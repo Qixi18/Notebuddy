@@ -56,11 +56,7 @@ export function CourseCanopy({ canopy, empty, previewId, previewNoteId, onPrevie
         <title>{book.title} · 打开笔记本</title>{items.filter(item => item.book.id === book.id).map((item, index) => <path key={index} transform={item.transform} d={item.branch.hitPath} fill="none" stroke="transparent" strokeWidth={forest ? operationSize(zoom) : 30} />)}
       </TreeAction>
     </g>)}
-<<<<<<< HEAD
     {items.flatMap(({ book, leaves }) => leaves.map(leaf => <g key={leaf.section.id} data-note-id={leaf.section.id} data-notebook-id={book.id} data-growth-book={book.id} data-growth-leaf={leaf.section.block_id ? sectionGrowthKey(book.id, leaf.section.block_id) : undefined} className={leaf.section.block_id && growingNotes?.has(sectionGrowthKey(book.id, leaf.section.block_id)) ? 'kt-leaf-growth' : undefined} onMouseEnter={() => { if (detail) show(book, leaf) }} onMouseLeave={onLeave} onBlur={onLeave}>
-=======
-    {items.flatMap(({ book, leaves }) => leaves.map(leaf => <g key={leaf.section.id} data-note-id={leaf.section.id} data-notebook-id={book.id} className={leaf.section.block_id && growingNotes?.has(sectionGrowthKey(book.id, leaf.section.block_id)) ? 'kt-leaf-growth' : undefined} onMouseEnter={() => { if (detail) show(book, leaf) }} onMouseLeave={onLeave} onBlur={onLeave}>
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
       <TreeAction disabled={!detail} label={`打开知识点：${leaf.section.title}`} describedBy={previewNoteId === leaf.section.id ? previewId : undefined} className={`home-tree-leaf${forest ? ' kt-note' : ''}`} onActivate={() => onNote(book, leaf.section)} onFocus={() => show(book, leaf)}>
         <g data-leaf-paint="true" transform={`translate(${leaf.x},${leaf.y})`}>
           {[-62, 60].map((angle, index) => <g key={angle} transform={`rotate(${leaf.angle}) translate(0,3) rotate(${angle}) scale(.61) translate(0,-3)`}><LeafSprite variant={(leaf.variant + index + 1) % 4} /></g>)}

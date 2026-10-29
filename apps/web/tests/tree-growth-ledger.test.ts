@@ -32,13 +32,8 @@ function makeTree(courseId: string, notebooks: Array<{ id: string; sections: Arr
   }
 }
 
-<<<<<<< HEAD
 test('growth is enabled by default and reduced motion or offscreen content cannot animate', () => {
   assert.equal(treeGrowthEnabled(undefined), true)
-=======
-test('the feature is opt-in and reduced motion or offscreen content cannot animate', () => {
-  assert.equal(treeGrowthEnabled(undefined), false)
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
   assert.equal(treeGrowthEnabled('false'), false)
   assert.equal(treeGrowthEnabled('true'), true)
   assert.equal(canPlayGrowth(false, false, true), false)
@@ -68,7 +63,6 @@ test('initial directory load seeds a baseline; block IDs deduplicate across refr
   assert.equal(sectionGrowthKey('book-a', 'heading-2'), JSON.stringify(['book-a', 'heading-2']))
 })
 
-<<<<<<< HEAD
 test('new courses receive one growth receipt and deleting a course cancels an unplayed receipt', () => {
   const ledger = new GrowthLedger(memoryStorage())
   ledger.observeCourses(['course-a'])
@@ -81,8 +75,6 @@ test('new courses receive one growth receipt and deleting a course cancels an un
   assert.deepEqual(ledger.pending(), [])
 })
 
-=======
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
 test('new notebook owns its section namespace and does not inherit legacy row IDs', () => {
   const ledger = new GrowthLedger(memoryStorage())
   ledger.observeDirectory(makeTree('course-a', [{ id: 'book-a', sections: [{ id: 'same-row', block_id: 'same-block' }] }]))

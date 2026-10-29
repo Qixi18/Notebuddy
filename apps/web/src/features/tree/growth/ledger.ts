@@ -1,5 +1,4 @@
 import type { CourseTree, NotebookRead, NotebookSection } from '../../../types'
-<<<<<<< HEAD
 import type { NotebookRelation } from '../../forest/types'
 
 export type GrowthEvent =
@@ -7,12 +6,6 @@ export type GrowthEvent =
   | { kind: 'notebook'; id: string; courseId: string; notebookId: string }
   | { kind: 'section'; id: string; courseId: string; notebookId: string }
   | { kind: 'relation'; id: string; courseId: string; targetCourseId: string }
-=======
-
-export type GrowthEvent =
-  | { kind: 'notebook'; id: string; courseId: string; notebookId: string }
-  | { kind: 'section'; id: string; courseId: string; notebookId: string }
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
 
 type Storage = Pick<globalThis.Storage, 'getItem' | 'setItem'>
 type SavedLedger = { version: 2; seen: string[]; scopes: string[]; events: GrowthEvent[] }
@@ -22,15 +15,10 @@ const MAX_SEEN = 5000
 const MAX_EVENTS = 100
 
 const notebookKey = (id: string) => `notebook:${id}`
-<<<<<<< HEAD
 const courseKey = (id: string) => `course:${id}`
 const sectionKey = (notebookId: string, blockId: string) => `section:${sectionGrowthKey(notebookId, blockId)}`
 const directoryKey = (courseId: string) => `directory:${courseId}`
 const relationKey = (id: string) => `relation:${id}`
-=======
-const sectionKey = (notebookId: string, blockId: string) => `section:${sectionGrowthKey(notebookId, blockId)}`
-const directoryKey = (courseId: string) => `directory:${courseId}`
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
 const validStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string')
 
 /** A section is identified by its owner and stable Tiptap block id, never by a legacy Note id. */
@@ -39,11 +27,7 @@ export function sectionGrowthKey(notebookId: string, blockId: string): string {
 }
 
 export function treeGrowthEnabled(value: string | undefined): boolean {
-<<<<<<< HEAD
   return value !== 'false'
-=======
-  return value === 'true'
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
 }
 
 export function canPlayGrowth(enabled: boolean, reducedMotion: boolean, visible: boolean): boolean {
@@ -100,7 +84,6 @@ export class GrowthLedger {
       this.seen = new Set(saved.seen.slice(-MAX_SEEN))
       this.scopes = new Set(saved.scopes)
       for (const event of saved.events) {
-<<<<<<< HEAD
         if (!event || !['course', 'notebook', 'section', 'relation'].includes(event.kind) || typeof event.id !== 'string' || typeof event.courseId !== 'string') continue
         if (event.kind === 'relation') {
           if (typeof event.targetCourseId !== 'string') continue
@@ -112,10 +95,6 @@ export class GrowthLedger {
           continue
         }
         if (typeof event.notebookId !== 'string') continue
-=======
-        if (!event || (event.kind !== 'notebook' && event.kind !== 'section') ||
-          typeof event.id !== 'string' || typeof event.courseId !== 'string' || typeof event.notebookId !== 'string') continue
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
         const key = event.kind === 'section' ? sectionKey(event.notebookId, event.id) : notebookKey(event.id)
         this.events.set(key, event)
       }
@@ -162,10 +141,7 @@ export class GrowthLedger {
     this.update(() => {
       const directory = directoryKey(tree.course_id)
       const initialized = this.scopes.has(directory)
-<<<<<<< HEAD
       this.seen.add(courseKey(tree.course_id))
-=======
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
       const liveBooks = new Set<string>()
       const liveSections = new Set<string>()
 
@@ -195,11 +171,7 @@ export class GrowthLedger {
       // A newly observed Notebook gets one branch event. Its first set of sections
       // is baseline, so they cannot produce duplicate leaf events.
       for (const [key, event] of this.events) {
-<<<<<<< HEAD
         if (event.kind === 'relation' || event.kind === 'course' || event.courseId !== tree.course_id) continue
-=======
-        if (event.courseId !== tree.course_id) continue
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
         const live = event.kind === 'notebook' ? liveBooks.has(event.notebookId) : liveSections.has(key)
         if (!live) this.events.delete(key)
       }
@@ -210,7 +182,6 @@ export class GrowthLedger {
   observeCourses(courseIds: string[]) {
     this.update(() => {
       const current = new Set(courseIds)
-<<<<<<< HEAD
       const initialized = this.scopes.has('courses')
       for (const id of courseIds) {
         const key = courseKey(id)
@@ -237,20 +208,13 @@ export class GrowthLedger {
       }
       for (const [key, event] of this.events) if (event.kind === 'relation' && !live.has(key)) this.events.delete(key)
       this.scopes.add(scope)
-=======
-      for (const [key, event] of this.events) if (!current.has(event.courseId)) this.events.delete(key)
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
     })
   }
 
   consume(events: GrowthEvent[]) {
     this.update(() => {
       for (const event of events) {
-<<<<<<< HEAD
         this.events.delete(event.kind === 'relation' ? relationKey(event.id) : event.kind === 'course' ? courseKey(event.id) : event.kind === 'section' ? sectionKey(event.notebookId, event.id) : notebookKey(event.id))
-=======
-        this.events.delete(event.kind === 'section' ? sectionKey(event.notebookId, event.id) : notebookKey(event.id))
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
       }
     })
   }

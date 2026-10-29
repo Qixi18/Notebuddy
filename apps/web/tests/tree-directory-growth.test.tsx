@@ -8,11 +8,7 @@ import { ForestPage } from '../src/pages/ForestPage'
 vi.mock('../src/api', () => ({ api: { getForest: vi.fn(), getForestRelations: vi.fn().mockResolvedValue([]), getCourseTree: vi.fn(), getLatestForestJob: vi.fn().mockResolvedValue(null), getForestJob: vi.fn(), createNotebook: vi.fn(), listNotebooks: vi.fn(), getCapabilities: vi.fn().mockResolvedValue(undefined), listDeletedMaterials: vi.fn().mockResolvedValue([]) } }))
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); sessionStorage.clear() })
 
-<<<<<<< HEAD
 test.each(['home', 'forest'])('%s root creation reaches the real upload page and keeps stable Notebook anchors', async mode => {
-=======
-test.each(['home', 'forest'])('%s root creation reaches the real upload page while growth playback stays disabled by default', async mode => {
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)
   const course = { id: 'c', name: '课程', created_at: '2026-10-15', last_opened_at: null }
   const old = { id: 'old-book', course_id: 'c', title: '旧笔记本', tree_slot: 0, order_revision: 0, chapters: [{ id: 'm', title: '第一讲', status: 'completed', sections: [{ id: 'old-note', block_id: 'old-note', notebook_id: 'old-book', title: '旧知识点', tree_slot: 0, material_id: 'm' }] }], historical_sections: [], removed_chapters: [] }
@@ -57,11 +53,7 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page whi
   await waitFor(() => expect((screen.getByLabelText('目标笔记本') as HTMLSelectElement).value).toBe(added.id))
   fireEvent.click(screen.getByRole('button', { name: '浏览器返回' }))
   await screen.findByRole('button', { name: '续读笔记本：新增笔记本' })
-<<<<<<< HEAD
   expect(container.querySelectorAll('.kt-branch-growth')).toHaveLength(1)
-=======
-  expect(container.querySelectorAll('.kt-branch-growth')).toHaveLength(0)
->>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
   // Changing the notebook count selects a new crown silhouette. The existing
   // knowledge point keeps its real identity and notebook ownership as it moves.
   const oldLeaf = screen.getByRole('button', { name: '打开知识点：旧知识点' })
