@@ -256,7 +256,12 @@ function QuizCard({ quiz, onAsk }: { quiz: QuizDto; onAsk?: (prompt: string) => 
     if (graded[item.id] || busyId || !answer.trim()) return
     setBusyId(item.id)
     setError(undefined)
-    void api.submitAttempts(quiz.id, [{ item_id: item.id, answer }])
+    /* 每次作答动作一个 request_key：网络重试复用同一个键（服务端 exactly-once），
+       而用户改天重新作答是新的动作，即使选了同一个选项也会如实记成一次新作答。 */
+    const requestKey = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `quiz-${item.id}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    void api.submitAttempts(quiz.id, [{ item_id: item.id, answer, request_key: requestKey }])
       .then((result) => {
         const verdict = result.results.find((entry) => entry.item_id === item.id)
         if (verdict) setGraded((current) => ({ ...current, [item.id]: verdict }))

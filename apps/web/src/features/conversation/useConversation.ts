@@ -30,7 +30,8 @@ export type AskScope = {
 /** agent 执行中的实时状态：步骤时间线 + 流式文本 + 最终事件 */
 export type AgentRunState = {
   steps: AgentStepEvent[]
-  thinking: string
+  /** 是否正在思考（状态位）。思维链原文既不外发也不在本地保存。 */
+  thinking: boolean
   streamingText: string
   notice?: string
   final?: AgentFinalEvent
@@ -340,7 +341,7 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
-    setAgentRun({ steps: [], thinking: '', streamingText: '' })
+    setAgentRun({ steps: [], thinking: false, streamingText: '' })
     let targetId = ''
     const historyRequest = historyRequestRef.current
     /* 中断器：用户点「停止」时 abort 本次请求（signal 铺在 fetch 上，见 api/agent.ts） */
@@ -376,9 +377,10 @@ export function useConversation(
         reading_context: options.readingContext,
         notebook_context: options.notebookContext,
       }, {
-        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
-        onThinking: (event) => setAgentRun((current) => current ? { ...current, thinking: current.thinking + event.text } : current),
-        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
+        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, thinking: false, steps: [...current.steps, event] } : current),
+        /* 后端只发思考边界信号，不含思维链原文；这里仅维护一个「正在思考」的状态位。 */
+        onThinking: () => setAgentRun((current) => current ? { ...current, thinking: true } : current),
+        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, thinking: false, streamingText: current.streamingText + event.text } : current),
         onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {

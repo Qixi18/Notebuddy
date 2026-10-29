@@ -89,7 +89,7 @@ export const quizApi = {
     ),
   getQuiz: (quizId: string) =>
     request<QuizDto>(`/api/v1/quizzes/${quizId}`),
-  submitAttempts: (quizId: string, answers: Array<{ item_id: string; answer: string }>) =>
+  submitAttempts: (quizId: string, answers: Array<{ item_id: string; answer: string; request_key?: string }>) =>
     request<{ quiz_id: string; status: string; results: QuizAttemptResult[]; score: string }>(
       `/api/v1/quizzes/${quizId}/attempts`,
       {

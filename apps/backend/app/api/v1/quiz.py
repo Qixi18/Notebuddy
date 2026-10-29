@@ -27,6 +27,8 @@ router = APIRouter()
 class QuizAnswerEntry(BaseModel):
     item_id: str = Field(min_length=1, max_length=36)
     answer: str = Field(min_length=1, max_length=500)
+    # 同一次作答动作（含网络重试）复用同一个键 → exactly-once；不带键则按旧规则兜底。
+    request_key: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class QuizSubmission(BaseModel):

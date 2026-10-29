@@ -67,6 +67,12 @@ async function copyText(text: string): Promise<boolean> {
 /** 追问建议：点一下只把话术填进输入框，由用户决定要不要发 */
 const FOLLOW_UPS = ['再展开讲讲', '能举个例子吗', '这和上一讲有什么关系'] as const
 
+/** 过程记录只展示耗时，绝不展示思维链原文（后端也不再落库原文）。 */
+function thinkingDurationLabel(thinkingMs?: number): string {
+  if (!thinkingMs || thinkingMs < 100) return ''
+  return thinkingMs < 1000 ? ' · 思考 <1s' : ` · 思考 ${(thinkingMs / 1000).toFixed(1)}s`
+}
+
 function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, retryText, onFollowUp, skillCourseId, onSkillAsk }: {
   message: ConversationMessage
   personaName: string
@@ -127,8 +133,10 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
         </div>
 
         {message.process ? <details className="message-process">
-          <summary>过程记录{message.process.steps.length ? ` · ${message.process.steps.length} 个步骤` : ''}</summary>
-          {message.process.thinking ? <pre className="agent-thinking-body agent-thinking-body-open">{message.process.thinking}</pre> : null}
+          <summary>
+            过程记录{message.process.steps.length ? ` · ${message.process.steps.length} 个步骤` : ''}
+            {thinkingDurationLabel(message.process.thinking_ms)}
+          </summary>
           <AgentSteps steps={message.process.steps.map((step) => ({
             type: 'step' as const, tool: step.tool, detail: step.detail,
             duration_ms: step.duration_ms, status: 'done' as const,
@@ -316,7 +324,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
               <p className="workspace-agent-aborted-note">这次回答已停止，下面是已收到的部分；可以直接继续提问。</p>
             ) : null}
             <AgentSteps steps={agentRun.steps} />
-            <AgentThinking thinking={agentRun.thinking} live={!agentRun.final && !agentRun.aborted} />
+            <AgentThinking live={agentRun.thinking && !agentRun.final && !agentRun.aborted} />
             {agentRun.notice ? <p className="workspace-agent-notice">{agentRun.notice}</p> : null}
             {agentRun.streamingText ? (
               <div className="workspace-agent-streaming">

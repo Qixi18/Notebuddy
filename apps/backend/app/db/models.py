@@ -1275,11 +1275,17 @@ class QuizItem(Base):
 
 class QuizAttempt(Base):
     __tablename__ = "quiz_attempts"
-    __table_args__ = (Index("ix_quiz_attempts_item_created", "item_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_quiz_attempts_item_created", "item_id", "created_at"),
+        # 请求级幂等键：同一次作答动作（含其网络重试）只能落一行；不同动作即使答案
+        # 相同也各算一次。NULL 在唯一索引里互不相同，因此不传键的旧客户端不受影响。
+        Index("uq_quiz_attempts_item_request", "item_id", "request_key", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"))
     item_id: Mapped[str] = mapped_column(ForeignKey("quiz_items.id", ondelete="CASCADE"))
+    request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     correct: Mapped[bool] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)

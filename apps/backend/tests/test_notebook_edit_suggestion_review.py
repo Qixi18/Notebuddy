@@ -16,6 +16,7 @@ import sqlite3
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
 from app.ai.agent_tools import execute_tool
 from app.api.v1.notebook import (
@@ -28,6 +29,7 @@ from app.api.v1.notebook import (
     review_edit_suggestion,
 )
 from app.core.config import settings
+from app.db.forest_models import ForestJob
 from app.db.models import NotebookEditSuggestion
 from app.notes.document import load_document, normalize_document
 from app.notes.store import write_document
@@ -329,3 +331,92 @@ def test_restored_notebook_can_still_reject_its_pending_suggestion(session, chec
     assert result["revision"] == before_revision
     assert _body(session, book) == (before_json, before_revision)
     assert session.get(NotebookEditSuggestion, suggestion_id).status == "rejected"
+
+
+def _other_course_with_body(session, name: str = "另一门课"):
+    """森林关系候选需要「别的课程」的正文才有 targets，否则作业不会入队。"""
+    course = make_course(session, name)
+    book = make_notebook(session, course)
+    body = normalize_document({
+        "type": "doc",
+        "content": [
+            {"type": "heading", "attrs": {"level": 1, "blockId": "h-1"},
+             "content": [{"type": "text", "text": f"第 1 章 {name}"}]},
+            {"type": "paragraph", "attrs": {"blockId": "p-1"},
+             "content": [{"type": "text", "text": "跨课程关系候选的正文。"}]},
+        ],
+    })
+    write_document(session, book, body, expected_revision=0, origin="autosave")
+    session.commit()
+    return course, book
+
+
+def _relation_jobs(session):
+    session.expire_all()
+    return list(session.scalars(select(ForestJob).where(ForestJob.kind == "notebook_relations")).all())
+
+
+def _clear_jobs(session) -> None:
+    for job in session.scalars(select(ForestJob)).all():
+        session.delete(job)
+    session.commit()
+
+
+def test_batch_apply_refreshes_forest_relation_job(session):
+    """批量采纳改了正文，就必须重建森林关系候选（回归 apply-all 漏传 refresh_relations）。"""
+    course, book = _setup(session)
+    _other_course_with_body(session)
+    _clear_jobs(session)
+    assert _relation_jobs(session) == []
+
+    suggestion_id = _propose(session, course, book, "批量采纳后应当重建森林关系。")
+    before_revision = book.document_revision
+
+    apply_course_edit_suggestions(
+        course.id, NotebookEditSuggestionBatchReview(suggestion_ids=[suggestion_id]), session,
+    )
+
+    session.refresh(book)
+    assert book.document_revision == before_revision + 1
+    assert "批量采纳后应当重建森林关系" in json.dumps(
+        load_document(book.document_json).content, ensure_ascii=False,
+    )
+
+    jobs = _relation_jobs(session)
+    assert len(jobs) == 1, "批量采纳后必须入队恰好一个森林关系刷新作业"
+    job = jobs[0]
+    assert job.course_id == course.id
+    assert job.status == "pending"
+    snapshot = json.loads(job.source_snapshot_json)
+    assert snapshot["sources"], snapshot
+    assert {row["notebook_id"] for row in snapshot["sources"]} == {book.id}
+    assert snapshot["targets"], snapshot
+
+
+def test_relation_refresh_skipped_when_body_unchanged(session):
+    """正文没变就不该刷关系：同一份正文重复保存只能留下一个作业。"""
+    _course, book = _setup(session)
+    _other_course_with_body(session)
+    _clear_jobs(session)
+
+    content = load_document(book.document_json).content
+    revision = book.document_revision
+    revision, _ = write_document(
+        session, book, content, expected_revision=revision, origin="autosave",
+        refresh_relations=True,
+    )
+    session.commit()
+    assert _relation_jobs(session) == [], "内容未变时不应入队关系作业"
+
+    # 真的改了内容，才应该入队
+    edited = json.loads(json.dumps(content, ensure_ascii=False))
+    edited["content"].append({
+        "type": "paragraph", "attrs": {"blockId": "p-new"},
+        "content": [{"type": "text", "text": "新增段落触发关系刷新。"}],
+    })
+    write_document(
+        session, book, edited, expected_revision=revision, origin="autosave",
+        refresh_relations=True,
+    )
+    session.commit()
+    assert len(_relation_jobs(session)) == 1

@@ -130,8 +130,11 @@ def run_agent(
             tool_call_event: dict[str, Any] | None = None
             for event in client.chat_stream(messages, tools=specs, max_tokens=2400):
                 if event["type"] == "reasoning":
-                    yield {"type": "thinking", "text": event.get("text", "")}
-                    continue  # 仅用于过程展示；不进入回答正文和证据
+                    # 思维链原文既不外发也不落库：只发一个不带内容的边界信号，供上层
+                    # 计量思考耗时。模型侧要求的 reasoning_content 回传在 tool_calls
+                    # 分支单独处理，不经过这里。
+                    yield {"type": "thinking"}
+                    continue
                 if event["type"] == "delta":
                     round_text.append(event["text"])
                     total_text.append(event["text"])

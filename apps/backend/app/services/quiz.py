@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.deepseek import DeepSeekClient, DeepSeekError
@@ -374,19 +375,34 @@ def grade_answers(
         answer = str(entry.get("answer") or "").strip()[:SHORT_ANSWER_MAX_CHARS]
         if not answer:
             continue
-        previous = db.scalar(
-            select(QuizAttempt)
-            .where(QuizAttempt.quiz_id == quiz.id, QuizAttempt.item_id == item.id)
-            .order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc())
-            .limit(1)
-        )
-        if previous is not None and previous.answer == answer:
-            results.append({
-                "item_id": item.id, "seq": item.seq, "correct": previous.correct,
-                "answer": item.answer, "explanation": item.explanation,
-                "comment": "", "points": [],
-            })
-            continue
+        request_key = str(entry.get("request_key") or "").strip()[:64] or None
+        if request_key:
+            # 请求级幂等：同一次作答动作（含其网络重试）只认第一次，重发直接回放结果。
+            replayed = db.scalar(select(QuizAttempt).where(
+                QuizAttempt.item_id == item.id, QuizAttempt.request_key == request_key,
+            ))
+            if replayed is not None:
+                results.append({
+                    "item_id": item.id, "seq": item.seq, "correct": replayed.correct,
+                    "answer": item.answer, "explanation": item.explanation,
+                    "comment": "", "points": [],
+                })
+                continue
+        else:
+            # 未带键的旧客户端：沿用「最近一次答案相同即视为重试」的兜底，保证重试安全。
+            previous = db.scalar(
+                select(QuizAttempt)
+                .where(QuizAttempt.quiz_id == quiz.id, QuizAttempt.item_id == item.id)
+                .order_by(QuizAttempt.created_at.desc(), QuizAttempt.id.desc())
+                .limit(1)
+            )
+            if previous is not None and previous.answer == answer:
+                results.append({
+                    "item_id": item.id, "seq": item.seq, "correct": previous.correct,
+                    "answer": item.answer, "explanation": item.explanation,
+                    "comment": "", "points": [],
+                })
+                continue
         points: list[dict[str, Any]] = []
         if item.item_type == "choice":
             correct = answer == item.answer
@@ -409,7 +425,25 @@ def grade_answers(
                     point = str(entry.get("point") or "").strip()
                     if point:
                         points.append({"point": point[:160], "hit": bool(entry.get("hit"))})
-        db.add(QuizAttempt(quiz_id=quiz.id, item_id=item.id, answer=answer, correct=correct))
+        if request_key:
+            # 唯一索引兜底：并发下两个事务都通过了上面的查重时，后写的一方会撞
+            # (item_id, request_key) 唯一约束。捕获后回放已落库的结果，保证跨引擎
+            # （SQLite 的写锁串行化 / PostgreSQL 的约束报错）都得到 exactly-once。
+            try:
+                with db.begin_nested():
+                    db.add(QuizAttempt(
+                        quiz_id=quiz.id, item_id=item.id, answer=answer,
+                        correct=correct, request_key=request_key,
+                    ))
+                    db.flush()
+            except IntegrityError:
+                replayed = db.scalar(select(QuizAttempt).where(
+                    QuizAttempt.item_id == item.id, QuizAttempt.request_key == request_key,
+                ))
+                if replayed is not None:
+                    correct = replayed.correct
+        else:
+            db.add(QuizAttempt(quiz_id=quiz.id, item_id=item.id, answer=answer, correct=correct))
         results.append({
             "item_id": item.id, "seq": item.seq, "correct": correct,
             "answer": item.answer, "explanation": item.explanation, "comment": rationale,
