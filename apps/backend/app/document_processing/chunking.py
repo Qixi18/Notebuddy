@@ -46,11 +46,13 @@ def build_chunks(
         current_pages: set[int] = set()
         current_blocks: list[str] = []
         current_len = len(prefix)
+        current_has_short_evidence = False
 
         def flush(section=section, prefix=prefix) -> None:
             nonlocal current_text, current_pages, current_blocks, current_len
+            nonlocal current_has_short_evidence
             text = current_text.strip()
-            if len(text) >= min_chars:
+            if len(text) >= min_chars or (text and current_has_short_evidence):
                 chunks.append(ChunkDraft(
                     order=len(chunks),
                     section_id=section.section_id if section else None,
@@ -62,9 +64,13 @@ def build_chunks(
             current_pages = set()
             current_blocks = []
             current_len = len(prefix)
+            current_has_short_evidence = False
 
         for block in blocks:
             piece = block.searchable_text()
+            if not piece and block.type in {"figure", "image"} and block.figure and block.figure.image_key:
+                # This is an evidence locator, not a claim about image meaning.
+                piece = f"第 {block.page_number} 页有未解读图像证据，请查看原图。"
             if not piece:
                 continue
             for part in _split_oversized(piece, max_chars):
@@ -76,6 +82,8 @@ def build_chunks(
                 current_pages.add(block.page_number)
                 if block.block_id not in current_blocks:
                     current_blocks.append(block.block_id)
+                if block.type == "equation" or block.type in {"figure", "image"}:
+                    current_has_short_evidence = True
         flush()
     return chunks
 
