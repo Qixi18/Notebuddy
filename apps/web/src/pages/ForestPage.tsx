@@ -5,7 +5,6 @@ import { useWorkspace } from '../components/AppLayout'
 import { CurriculumImportPanel } from '../features/forest/CurriculumImportPanel'
 import { ForestCoursePanel } from '../features/forest/ForestCoursePanel'
 import { ForestRelationsPanel } from '../features/forest/ForestRelationsPanel'
-import { ForestBackdrop } from '../features/forest/ForestBackdrop'
 import { HomeCoursesDialog } from '../features/forest/HomeCoursesDialog'
 import { HOME_COURSE_LIMIT } from '../features/workspace/homeCourses'
 import { KnowledgeTreeScene, type KnowledgeTreeView } from '../features/tree/KnowledgeTreeScene'
@@ -13,6 +12,7 @@ import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 import { useNotebookRelations } from '../features/forest/useNotebookRelations'
 import { useTreeDirectories } from '../features/forest/useTreeDirectories'
 import { readSceneSnapshot, saveSceneSnapshot } from '../features/tree/snapshot'
+import { growthLedger } from '../features/tree/growth/ledger'
 import { notebookPath } from '../features/notebook/navigation'
 import type { ForestCourse, ForestSearchResult } from '../features/forest/types'
 import type { NotebookSection } from '../types'
@@ -57,11 +57,16 @@ export function ForestPage() {
     void directories.refresh()
     const [forest] = await Promise.allSettled([api.getForest(), vines.refresh()])
     if (!mounted.current || read !== forestRead.current) return
-    if (forest.status === 'fulfilled') setCourses(forest.value.courses)
+    if (forest.status === 'fulfilled') { growthLedger.observeCourses(forest.value.courses.map(course => course.course_id)); setCourses(forest.value.courses) }
     else setError(forest.reason instanceof Error ? forest.reason.message : '森林读取失败')
     setLoading(false)
   }, [directories.refresh, vines.refresh])
   useEffect(() => { void reload() }, [reload])
+  useEffect(() => {
+    const refresh = () => { void reload(); void vines.discoverJobs() }
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [reload, vines.discoverJobs])
   useEffect(() => { if (query.get('course')) setFocusId(query.get('course')!) }, [query])
   useEffect(() => { if (query.get('relation')) setSelectedRelation(query.get('relation')!) }, [query])
   useEffect(() => {
@@ -121,7 +126,7 @@ export function ForestPage() {
   return <div className="forest-page">
     <header className="forest-header"><div className="forest-heading"><div><h1>知识森林</h1><p>沿着学期，让知识慢慢生长</p></div></div><div className="forest-header-actions"><button onClick={() => { setSettingsOpen(true); if (!focusId && courses[0]) focus(courses[0].course_id) }}>课程设置</button><button onClick={() => setDialog('relations')}>跨课藤蔓</button><button className="forest-action" onClick={() => setDialog('import')}>导入培养方案</button></div></header>
     <div className="forest-surface">
-      <KnowledgeTreeScene toolbar={tools} backdrop={<ForestBackdrop />} courses={courses} trees={directories.trees} initialView={restored?.view} onViewChange={rememberView} focusCourseId={focusId} onFocusCourse={setFocusId} search={search} relations={relations} pinnedNoteIds={pins} selectedRelationId={selectedRelation} onVisibleCourseIdsChange={visibleDirectories} homeBusyCourseId={homeBusy} onToggleHome={id => { const course = courses.find(row => row.course_id === id); if (course) void toggleHome(course) }}
+      <KnowledgeTreeScene toolbar={tools} courses={courses} trees={directories.trees} initialView={restored?.view} onViewChange={rememberView} focusCourseId={focusId} onFocusCourse={setFocusId} search={search} relations={relations} pinnedNoteIds={pins} selectedRelationId={selectedRelation} onVisibleCourseIdsChange={visibleDirectories} homeBusyCourseId={homeBusy} onToggleHome={id => { const course = courses.find(row => row.course_id === id); if (course) void toggleHome(course) }}
         onRoot={setRoot} onNotebook={(courseId, notebookId) => navigate(notebookPath(courseId, undefined, undefined, notebookId), { state: returnState })} onNote={openNote} onRelation={relation => { setSelectedRelation(relation.id); setDialog('relations') }} />
       {loading && <p role="status" className="forest-scene-message">正在打开森林…</p>}
       {(error || vines.error) && <div className="forest-scene-error" role="alert">{error ?? vines.error}<button onClick={() => { setError(undefined); void reload() }}>重新读取</button></div>}

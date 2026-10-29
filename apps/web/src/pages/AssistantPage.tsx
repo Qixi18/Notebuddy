@@ -10,6 +10,7 @@ import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
 import { NoteScopePicker } from '../features/assistant/NoteScopePicker'
 import { KnowledgeProposalCards, NotebookEditSuggestionCards } from '../features/assistant/AgentCards'
+import { MistakeBook } from '../features/assistant/MistakeBook'
 import { useNotebookEditSuggestions } from '../features/assistant/useNotebookEditSuggestions'
 import { ChangesPanel } from '../features/assistant/ChangesPanel'
 import { TermDialog } from '../features/assistant/TermDialog'
@@ -56,6 +57,9 @@ export function AssistantPage() {
   const handledNotebookRoute = useRef<string | undefined>(undefined)
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
   const [changesOpen, setChangesOpen] = useState(false)
+  const [mistakesOpen, setMistakesOpen] = useState(false)
+  const [learningMode, setLearningMode] = useState<'direct' | 'guided'>('direct')
+  const [materialId, setMaterialId] = useState<string>()
   const [notePickerOpen, setNotePickerOpen] = useState(false)
   const [scopeLockHint, setScopeLockHint] = useState(false)
   const scopeLockTimer = useRef<number | undefined>(undefined)
@@ -79,6 +83,7 @@ export function AssistantPage() {
       title: scopeTargetTitle ?? 'Notebook',
       revision: scopeTargetRevision,
     } : null,
+    courseId: scopeKind === 'note' ? undefined : courseId,
     agentFinalId: agentRun?.final?.message_id,
   })
   const knowledgeProposals = useMemo(
@@ -92,18 +97,20 @@ export function AssistantPage() {
      答疑页的「整门课程」= agent 的 course 且不收窄到某份课件（agent 的 course 档可带 material_id）；
      答疑页的「锁定笔记」锁的是用户指定的任意一篇，而 agent 的 note 档强制要求 reading_context.note_id
      （后端 agent.py 会 422），所以要把这篇笔记的正文节选一起带过去。 */
-  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext }>(() => {
-    if (scope.kind === 'global') return { scope: 'global' }
+  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext; allowQuiz: boolean; learningMode: 'direct' | 'guided' }>(() => {
+    if (scope.kind === 'global') return { scope: 'global', allowQuiz: true, learningMode }
     if (scope.kind === 'note' && scope.targetId) {
       return {
         scope: 'note',
+        allowQuiz: true,
+        learningMode,
         readingContext: {
           note_title: scope.targetTitle,
         },
       }
     }
-    return { scope: 'course' }
-  }, [scope.kind, scope.targetTitle])
+    return { scope: 'course', materialId, allowQuiz: true, learningMode }
+  }, [scope.kind, scope.targetTitle, scope.targetId, materialId, learningMode])
 
   /* 切换会话时，把范围 chip 对齐到该会话的真实归属。
      范围是会话级属性，存在 Conversation 行上；只有「还没有消息」的会话才允许再改。
@@ -285,6 +292,7 @@ export function AssistantPage() {
     setScopeKind(next.kind)
     setScopeTargetId(next.targetId)
     setScopeTargetTitle(next.targetTitle)
+    if (next.kind !== 'course') setMaterialId(undefined)
   }
 
   function changePetMode(mode: PetMode) {
@@ -344,6 +352,12 @@ export function AssistantPage() {
       '帮我列出这门课需要先掌握的基础。',
       '我该怎么开始整理第一份课件？',
     ]
+
+  const quickPrompts = materials.length ? [
+    { label: '考考我', prompt: '考考我：针对当前课件出两道题。' },
+    { label: '复习提纲', prompt: '帮我把当前课件整理成复习提纲。' },
+    { label: '易混概念', prompt: '当前课件有哪些容易混淆的概念？请对比说明。' },
+  ] : []
 
   const scopeLabel = scopeKind === 'global'
     ? '全局可查'
@@ -468,6 +482,13 @@ export function AssistantPage() {
               title="搜索会话（Ctrl+K）"
               aria-label="搜索会话"
             >⌕</button>
+            <button
+              type="button"
+              className="workspace-topbar-mistakes"
+              onClick={() => setMistakesOpen(true)}
+              title="错题本与复习提纲"
+              aria-label="打开错题本"
+            >复习</button>
             <button type="button" className="workspace-topbar-changes"
               onClick={() => setChangesOpen((open) => !open)} aria-pressed={changesOpen}
               title={changesOpen ? '收起改动栏' : '展开改动栏'} aria-label={changesOpen ? '收起改动栏' : '展开改动栏'}>改动</button>
@@ -526,6 +547,8 @@ export function AssistantPage() {
           onRetry={retryQuestion}
           onFollowUp={useStarter}
           agentRun={agentRun}
+          skillCourseId={courseId}
+          onSkillAsk={useStarter}
           extras={(
             <>
               <NotebookEditSuggestionCards
@@ -562,17 +585,39 @@ export function AssistantPage() {
             onTermClick={() => setTermOpen(true)}
             onComposerFocus={() => petRef.current?.yieldFromRect(composerAreaRef.current?.getBoundingClientRect() ?? null)}
             textareaRef={composerRef}
+            materials={scopeKind === 'course'
+              ? materials.filter((item) => item.status === 'completed').map((item) => ({ id: item.id, lecture_title: item.lecture_title }))
+              : undefined}
+            materialId={materialId}
+            onMaterialChange={setMaterialId}
+            learningMode={learningMode}
+            onLearningModeChange={setLearningMode}
+            quickPrompts={quickPrompts}
+            onQuickPrompt={useStarter}
           />
         </div>
       </section>
 
-      <ChangesPanel open={changesOpen} onToggle={() => setChangesOpen((open) => !open)} items={[]}
-        onApplyAll={() => undefined} applying={false} onPreview={() => undefined} />
+      <ChangesPanel open={changesOpen} onToggle={() => setChangesOpen((open) => !open)}
+        items={notebookSuggestions.changes}
+        onApplyAll={() => void notebookSuggestions.applyAll()}
+        applying={notebookSuggestions.busyId === '__all__'}
+        onPreview={(item) => { if (courseId) navigate(`/courses/${courseId}/notebooks/${item.noteId}`) }} />
+
+      <MistakeBook
+        open={mistakesOpen}
+        courseId={courseId}
+        courseName={course?.name}
+        onClose={() => setMistakesOpen(false)}
+        onExplain={useStarter}
+        onRetry={useStarter}
+      />
 
       {paletteOpen && (
         <ConversationSearch
           conversations={conversation.conversations}
           conversationId={conversation.conversationId}
+          courseId={courseId}
           onSelect={(id) => void conversation.selectConversation(id)}
           onClose={() => setPaletteOpen(false)}
         />

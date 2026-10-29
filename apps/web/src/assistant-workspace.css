@@ -1,15 +1,37 @@
 /* 答疑工作台 · v3 结构补充（在 course-assistant.css 之后加载） */
 
-/* 三栏：240 历史 + 阅读列 + 改动栏（收起 44） */
+/* ---- 答疑页局部 token：把历史遗留的旧调色板收敛到 garden 色板。
+   只在 .assistant-page 内生效，不污染其它页面；语义色（成功/失败/高亮）保留可辨识度。 ---- */
+.assistant-page {
+  --ws-tint: #eaecdb;
+  --ws-tint-2: #f2f2e6;
+  --ws-line: var(--nb-line);
+  --ws-line-soft: #e6e8d8;
+  --ws-line-strong: #cdd3bb;
+  --ws-ink-2: #4b5a49;
+  --ws-ok: #2b5a41;
+  --ws-ok-bg: #e4ecd8;
+  --ws-ok-line: #b3c69b;
+  --ws-warn: #8a5340;
+  --ws-warn-bg: #f7ece6;
+  --ws-warn-tint: #faf1ea;
+  --ws-warn-line: #d9b6a8;
+  --ws-hl: #f6ecd0;
+  --ws-note: #7c6132;
+}
+
+/* 三栏：240 历史 + 阅读列 + 改动栏（收起 44）。
+   gap 必须为 0：底层「包边」靠左右栏与顶栏共用一条背景带连成整体，
+   一有间隙，中栏两侧就会各露出一条白缝，顶部绿带也会断成三段。 */
 .workspace-pet {
-  grid-template-columns: 240px minmax(0, 1fr) auto;
-  gap: 24px;
+  grid-template-columns: 208px minmax(0, 1fr) auto;
+  gap: 0;
 }
 
 .workspace-title {
   margin: 0;
   min-width: 0;
-  font-family: var(--nb-serif);
+  font-family: var(--ws-serif);
   font-size: 22px;
   font-weight: 600;
   letter-spacing: -.01em;
@@ -25,10 +47,12 @@
   font-weight: 400;
 }
 
-.workspace-topbar-changes {
-  font-size: 13px !important;
-  padding: 3px 9px !important;
-  border-color: var(--nb-line) !important;
+/* 用「父级 + 自身」把特异性抬到 (0,2,0)，压过基础规则的 .workspace-topbar-actions button，
+   不必再用 !important —— 之前那四个 !important 就是被基础规则压掉后的补丁。 */
+.workspace-topbar-actions .workspace-topbar-changes {
+  font-size: 13px;
+  padding: 3px 9px;
+  border-color: var(--nb-line);
 }
 
 /* ---- 历史：课程 → 整门课程 / 笔记 ---- */
@@ -49,7 +73,7 @@
   cursor: pointer;
 }
 
-.workspace-history-head:hover { background: #f7faf7; }
+.workspace-history-head:hover { background: var(--ws-tint-2); }
 
 .workspace-history-icon {
   width: 22px;
@@ -79,11 +103,12 @@
   margin-left: auto;
   flex: none;
   color: var(--nb-sage);
-  font-size: 9px;
+  font-size: 10px;
   transition: transform .16s ease;
 }
 
 .workspace-history-head[aria-expanded="false"] .workspace-history-chevron,
+.workspace-history-sub[aria-expanded="false"] .workspace-history-chevron,
 .workspace-history-sub-note[aria-expanded="false"] .workspace-history-chevron { transform: rotate(-90deg); }
 
 .workspace-history-body { padding-left: 10px; }
@@ -104,7 +129,7 @@
   cursor: pointer;
 }
 
-.workspace-history-sub:hover { background: #f7faf7; }
+.workspace-history-sub:hover { background: var(--ws-tint-2); }
 
 .workspace-history-subtitle {
   min-width: 0;
@@ -115,7 +140,7 @@
 
 .workspace-history-count { margin-left: auto; flex: none; color: var(--nb-muted); font-size: 11px; }
 .workspace-history-note-icon { flex: none; display: grid; place-items: center; color: var(--nb-forest); }
-.workspace-history-chevron.is-small { font-size: 8px; margin-left: 0; }
+.workspace-history-chevron.is-small { font-size: 10px; margin-left: 0; }
 
 .workspace-history-sub-note .workspace-history-subtitle {
   color: var(--nb-ink);
@@ -130,7 +155,7 @@
 .workspace-sources {
   margin-top: 14px;
   padding-top: 12px;
-  border-top: 2px solid var(--nb-line);
+  border-top: 1px solid var(--nb-line);
 }
 
 .workspace-sources-head { display: flex; align-items: center; gap: 8px; }
@@ -164,10 +189,10 @@
   gap: 5px;
   min-height: 32px;
   padding: 0 9px;
-  border: 1px solid #dfeae2;
+  border: 1px solid var(--ws-line);
   border-radius: 999px;
-  background: #f7fbf8;
-  color: #3d4a3f;
+  background: var(--ws-tint-2);
+  color: var(--ws-ink-2);
   font-size: 12px;
   white-space: nowrap;
   cursor: pointer;
@@ -184,7 +209,7 @@
   background: var(--blue-soft);
   color: var(--nb-forest);
   font-family: var(--nb-mono);
-  font-size: 8.5px;
+  font-size: 10px;
   font-style: normal;
 }
 
@@ -204,13 +229,13 @@
   gap: 8px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: #f6faf7;
+  background: var(--ws-tint-2);
 }
 
 .workspace-source-detail li.is-active { box-shadow: inset 0 0 0 1px var(--nb-sage); }
-.workspace-source-detail-no { flex: none; color: var(--nb-forest); font-family: var(--nb-mono); font-size: 10px; }
+.workspace-source-detail-no { flex: none; color: var(--nb-forest); font-family: var(--nb-mono); font-size: 11px; }
 .workspace-source-detail strong { display: block; font-size: 13px; color: var(--nb-ink); }
-.workspace-source-detail p { margin: 2px 0 0; color: #46544a; font-size: 12px; line-height: 1.6; }
+.workspace-source-detail p { margin: 2px 0 0; color: var(--ws-ink-2); font-size: 12px; line-height: 1.6; }
 .workspace-source-open { margin-top: 4px; border: 0; background: none; padding: 2px 0; color: var(--nb-forest); font-size: 12px; cursor: pointer; }
 
 /* ---- 右侧：本次改动 ---- */
@@ -239,12 +264,12 @@
   cursor: pointer;
 }
 
-.workspace-changes-rail:hover { background: #f7faf7; }
+.workspace-changes-rail:hover { background: var(--ws-tint-2); }
 .workspace-changes-rail-icon { font-size: 12px; }
-.workspace-changes-rail-label { writing-mode: vertical-rl; letter-spacing: .16em; font-size: 10px; }
+.workspace-changes-rail-label { writing-mode: vertical-rl; letter-spacing: .16em; font-size: 11px; }
 
 .workspace-changes-head { display: flex; align-items: center; gap: 6px; padding: 4px 2px 10px; }
-.workspace-changes-head strong { font-size: 12.5px; font-weight: 600; color: var(--nb-forest-deep); }
+.workspace-changes-head strong { font-size: 13px; font-weight: 600; color: var(--nb-forest-deep); }
 
 .workspace-changes-count {
   min-width: 17px;
@@ -256,7 +281,7 @@
   background: var(--blue-soft);
   color: var(--nb-forest);
   font-family: var(--nb-mono);
-  font-size: 8.5px;
+  font-size: 10px;
 }
 
 .workspace-changes-toggle {
@@ -270,7 +295,7 @@
   cursor: pointer;
 }
 
-.workspace-changes-toggle:hover { background: #f2f6f2; color: var(--nb-forest); }
+.workspace-changes-toggle:hover { background: var(--ws-line-soft); color: var(--nb-forest); }
 
 .workspace-changes-empty {
   flex: 1;
@@ -287,7 +312,7 @@
 
 .workspace-changes-list { flex: 1; min-height: 0; overflow: auto; }
 
-.workspace-change-item { border-bottom: 1px solid #f2f6f2; }
+.workspace-change-item { border-bottom: 1px solid var(--ws-line-soft); }
 
 .workspace-change-row {
   display: flex;
@@ -301,7 +326,7 @@
   cursor: pointer;
 }
 
-.workspace-change-row:hover, .workspace-change-row.is-open { background: #f6faf7; }
+.workspace-change-row:hover, .workspace-change-row.is-open { background: var(--ws-tint-2); }
 
 .workspace-change-file {
   width: 17px;
@@ -313,22 +338,22 @@
   border-radius: 4px;
   background: var(--blue-soft);
   color: var(--nb-forest);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .workspace-change-main { min-width: 0; }
-.workspace-change-main b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; color: var(--nb-ink); }
-.workspace-change-main small { color: var(--nb-muted); font-size: 10px; }
+.workspace-change-main b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--nb-ink); }
+.workspace-change-main small { color: var(--nb-muted); font-size: 11px; }
 
-.workspace-change-diff { margin-left: auto; flex: none; display: flex; gap: 5px; font-family: var(--nb-mono); font-size: 9.5px; }
+.workspace-change-diff { margin-left: auto; flex: none; display: flex; gap: 5px; font-family: var(--nb-mono); font-size: 10px; }
 .workspace-change-diff i { font-style: normal; color: var(--nb-forest); }
 .workspace-change-diff em { font-style: normal; color: var(--dirty, #a95d4c); }
 
-.workspace-change-preview { margin: 2px 0 8px; padding: 9px 10px; border-radius: 8px; background: #f6faf7; }
-.workspace-change-preview p { margin: 0 0 3px; padding: 1px 4px; border-radius: 3px; font-size: 10.5px; line-height: 1.6; }
-.workspace-change-preview .is-removed { background: #fbefef; color: #8a4b3f; }
-.workspace-change-preview .is-added { background: #e8f2ec; color: #1e5a44; }
-.workspace-change-preview .is-context { color: #5a675b; white-space: normal; }
+.workspace-change-preview { margin: 2px 0 8px; padding: 9px 10px; border-radius: 8px; background: var(--ws-tint-2); }
+.workspace-change-preview p { margin: 0 0 3px; padding: 1px 4px; border-radius: 3px; font-size: 11px; line-height: 1.6; }
+.workspace-change-preview .is-removed { background: var(--ws-warn-bg); color: var(--ws-warn); }
+.workspace-change-preview .is-added { background: var(--ws-ok-bg); color: var(--ws-ok); }
+.workspace-change-preview .is-context { color: var(--ws-ink-2); white-space: normal; }
 /* 逐行预览：+ 绿 / − 红，可滚动、可换行 */
 .workspace-change-diffview {
   max-height: 230px;
@@ -340,19 +365,19 @@
 }
 .workspace-change-diffview p { display: flex; gap: 5px; align-items: flex-start; white-space: pre-wrap; word-break: break-word; }
 .workspace-change-diffview p b { flex: none; font-weight: 700; }
-.workspace-change-diffview .is-added b { color: #1d6b3c; }
-.workspace-change-diffview .is-removed b { color: #a3291c; }
+.workspace-change-diffview .is-added b { color: var(--ws-ok); }
+.workspace-change-diffview .is-removed b { color: var(--ws-warn); }
 
-.workspace-changes-foot { flex: none; padding: 10px 2px 2px; border-top: 1px solid #f2f6f2; }
+.workspace-changes-foot { flex: none; padding: 10px 2px 2px; border-top: 1px solid var(--ws-line-soft); }
 
 .workspace-changes-apply {
   width: 100%;
   height: 32px;
-  border: 1px solid #cfe0d6;
+  border: 1px solid var(--ws-line-strong);
   border-radius: 8px;
   background: var(--blue-soft);
   color: var(--nb-forest);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -365,27 +390,308 @@
 }
 
 /* 桌宠让位给历史：立绘收到 150，舞台 172 */
-.workspace-petstage { min-height: 172px; }
-.workspace-petstage .teacher-character { width: 150px; }
+.workspace-petstage { min-height: 126px; }
+.workspace-petstage .teacher-character { width: 104px; }
 .workspace-pet-identity-text h2 { font-size: 18px; }
 .workspace-pet-identity-text p { font-size: 11px; }
 
 /* 收起态竖条：标签居中，像一条页签 */
 .workspace-changes.is-collapsed { justify-content: center; }
 .workspace-changes-rail { border-color: transparent; background: none; }
-.workspace-changes-rail:hover { background: #f7faf7; }
+.workspace-changes-rail:hover { background: var(--ws-tint-2); }
 
 /* 正文放大到 v3 规格 */
-.workspace-msg-content { font-size: 14.5px; }
-.workspace-msg-user p { font-size: 14.5px; }
-.workspace-conv-title { font-size: 12.5px; }
+.workspace-msg-content { font-size: 14px; }
+.workspace-msg-user p { font-size: 14px; }
+.workspace-conv-title { font-size: 13px; }
 .workspace-msg-head strong { font-size: 12px; }
+
+/* ---- 答疑页的 agent 实时块：步骤时间线 + 流式正文（与悬浮坞同一套能力） ---- */
+.workspace-agent-live .workspace-msg-head em { color: var(--nb-forest); }
+.workspace-agent-notice {
+  margin: 0;
+  padding: 5px 8px;
+  border-radius: 7px;
+  color: var(--ws-note);
+  background: var(--ws-hl);
+  font-size: 11px;
+}
+.workspace-agent-streaming {
+  color: var(--nb-ink);
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+/* ---- P3 课件收窄：composer 工具区的消息级收窄控件（仅 course 档显示） ----
+   菜单复用 .workspace-scope-option 的条目样式；composer 在页面底部，菜单向上弹。 */
+.workspace-material-wrap { position: relative; min-width: 0; }
+.workspace-composer-tool.is-active {
+  color: var(--nb-forest-deep);
+  border-color: var(--nb-sage);
+  background: var(--ws-tint);
+}
+.workspace-composer-tool .workspace-material-label {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-material-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--nb-line);
+  border-radius: 12px;
+  box-shadow: var(--nb-shadow-float);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.assistant-page .workspace-material-menu { animation: nb-pop-in 150ms var(--nb-ease) both; transform-origin: bottom left; }
 
 /* ---- P1 中断：停止按钮 + 「已中断」态 ---- */
 .workspace-composer-stop { background: var(--nb-clay); border-color: var(--nb-clay); color: #fff; }
 .workspace-composer-stop:hover { background: #9a553c; border-color: #9a553c; color: #fff; }
 .workspace-agent-live.is-aborted .workspace-msg-head em { color: var(--nb-clay-ink); }
 .workspace-agent-aborted-note { margin: 0 0 6px; color: var(--nb-clay-ink); font-size: 11px; line-height: 1.6; }
+
+/* ---- P6 搜索：面板两级结果 + 命中高亮 + 消息定位闪烁 ---- */
+.workspace-palette-group {
+  margin: 2px 0 4px;
+  color: var(--nb-muted);
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+.workspace-palette-list ul { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.workspace-palette-hit-title {
+  display: block;
+  font-weight: 600;
+  color: var(--nb-forest-deep);
+  font-size: 12px;
+}
+.workspace-palette-snippet {
+  display: block;
+  color: var(--nb-muted-strong, var(--ws-ink-2));
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.workspace-palette-snippet mark {
+  background: var(--ws-hl);
+  color: var(--ws-note);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.workspace-msg.is-flash {
+  animation: nb-msg-flash 1.6s var(--nb-ease, ease) both;
+}
+@keyframes nb-msg-flash {
+  0%, 55% { background: var(--ws-hl); box-shadow: 0 0 0 3px var(--ws-hl); }
+  100% { background: transparent; box-shadow: 0 0 0 3px transparent; }
+}
+
+/* ---- 能力行（WorkBuddy 式）：输入框上方的任务与模式 chips ---- */
+.workspace-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 8px;
+}
+
+.message-process { margin: 12px 0 6px; padding: 8px 11px; border: 1px solid var(--nb-line, #e5e2d8); border-radius: 10px; color: var(--nb-muted, #777); }
+.message-process > summary { cursor: pointer; font-size: 11px; }
+.message-process .agent-steps { margin: 9px 0 0; }
+.message-process .agent-thinking-body { max-height: 180px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
+.agent-thinking { margin: 8px 0; padding: 8px 10px; border-radius: 9px; background: var(--nb-paper-muted, #f5f4ef); color: var(--nb-muted, #777); font-size: 11px; }
+.agent-thinking-head { display: flex; align-items: center; gap: 7px; }
+.agent-thinking-body { max-height: 180px; overflow: auto; margin: 7px 0 0; white-space: pre-wrap; font: inherit; }
+.agent-spinner { width: 10px; height: 10px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; animation: agent-spin .8s linear infinite; }
+@keyframes agent-spin { to { transform: rotate(360deg); } }
+.workspace-quick-chip {
+  border: 1px solid var(--nb-line);
+  background: var(--nb-white);
+  border-radius: 999px;
+  padding: 4px 13px;
+  font-size: 12px;
+  color: var(--nb-ink);
+  cursor: pointer;
+  transition: border-color 120ms var(--nb-ease), background 120ms var(--nb-ease);
+}
+.workspace-quick-chip:hover { border-color: var(--nb-sage); background: var(--ws-tint-2); }
+.workspace-quick-chip.is-mode.is-active {
+  border-color: var(--nb-forest);
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-weight: 600;
+}
+.workspace-quick-spacer { flex: 1; }
+
+/* ---- P10 自测卷（考卷形态：卷头/题号/选项状态色/答案区与题目分离）+ P11 反馈原因 ---- */
+.quiz-paper { border-left: 3px solid var(--nb-forest); }
+.quiz-paper-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.quiz-paper-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--nb-forest);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.quiz-paper-title { font-size: 14px; color: var(--nb-forest-deep); }
+/* 难度标签：用户自定义原话原样展示（「挑战」「考研」），不归一化 */
+.quiz-paper-difficulty {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.quiz-paper-progress { margin-left: auto; color: var(--nb-muted); font-size: 11px; font-family: var(--nb-mono); }
+.quiz-paper-foot {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-size: 12px;
+}
+.quiz-item {
+  margin: 10px 0 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--nb-line);
+  border-radius: 10px;
+  background: var(--nb-white);
+}
+.quiz-item.is-correct { border-color: var(--ws-ok-line); }
+.quiz-item.is-wrong { border-color: var(--ws-warn-line); }
+.quiz-item-stem {
+  margin: 0 0 7px;
+  color: var(--nb-ink);
+  font-size: 13px;
+  line-height: 1.7;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.quiz-item-stem small { color: var(--nb-muted); }
+.quiz-item-no {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-size: 11px;
+  font-weight: 700;
+  transform: translateY(2px);
+}
+.quiz-item-options { display: flex; flex-direction: column; gap: 4px; }
+.quiz-item-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--nb-ink);
+  transition: background 120ms var(--nb-ease), border-color 120ms var(--nb-ease);
+}
+.quiz-item-option:hover { border-color: var(--nb-sage); background: var(--ws-tint-2); }
+.quiz-item-option.is-selected { border-color: var(--nb-forest); background: var(--ws-tint); }
+.quiz-item-option input { accent-color: var(--nb-forest); }
+.quiz-item-option.is-correct { border-color: var(--ws-ok-line); background: var(--ws-ok-bg); color: var(--ws-ok); }
+.quiz-item-option.is-wrong { border-color: var(--ws-warn-line); background: var(--ws-warn-bg); color: var(--ws-warn); }
+.quiz-item-option.is-dim { opacity: 0.55; cursor: default; }
+.quiz-option-mark { margin-left: auto; font-weight: 700; }
+.quiz-item-short-wrap { display: flex; flex-direction: column; gap: 6px; }
+.quiz-item-short {
+  width: 100%;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--nb-ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+  resize: vertical;
+}
+.quiz-item-submit {
+  align-self: flex-end;
+  border: 1px solid var(--nb-forest);
+  background: var(--nb-forest);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.quiz-item-submit:disabled { opacity: 0.45; cursor: default; }
+/* 答案区：与题目分离的独立块，判分后才出现 */
+.quiz-verdict {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.75;
+}
+.quiz-verdict.is-correct { background: var(--ws-ok-bg); color: var(--ws-ok); }
+.quiz-verdict.is-wrong { background: var(--ws-warn-bg); color: var(--ws-warn); }
+.quiz-verdict-line { margin: 0; font-weight: 600; }
+.quiz-verdict-why { margin: 3px 0 0; opacity: 0.92; }
+.workspace-msg-reasons { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.workspace-msg-reasons button {
+  border: 1px solid var(--nb-line);
+  background: var(--nb-white);
+  color: var(--nb-muted-strong, var(--ws-ink-2));
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.workspace-msg-reasons button:hover { border-color: var(--nb-sage); color: var(--nb-forest); }
+
+/* ---- P4 多目标建议：卡片标注目标笔记 + 改动栏按笔记分组 ---- */
+.agent-card-note {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-weight: 600;
+}
+.workspace-change-group {
+  margin: 8px 0 2px;
+  color: var(--nb-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-change-group:first-child { margin-top: 0; }
 
 /* ---- P2 回答卡二次操作：复制 / 重试 / 追问 chips / 用户气泡时间 ---- */
 .workspace-msg-copy {
@@ -425,11 +731,12 @@
   align-self: flex-end;
   color: var(--nb-muted);
   font-family: var(--nb-mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 /* ---- P5 锁定预告 + 悬浮坞锁定态 ---- */
 .workspace-scope-lock-tip { color: var(--nb-muted); font-size: 11px; }
+/* 悬浮坞是全站共用的（AppLayout 挂载），这里保持原值，不动别处 */
 .assistant-dock-scope-lock { margin: 0; color: var(--nb-muted); font-size: 10.5px; line-height: 1.6; }
 .assistant-dock-stop {
   border: 1px solid var(--nb-clay);
@@ -441,3 +748,1102 @@
   cursor: pointer;
 }
 .assistant-dock-stop:hover { background: #fdf4f0; }
+
+/* ---- 整篇笔记预览弹窗 ---- */
+.note-preview {
+  width: min(100%, 760px);
+  max-height: min(84vh, 720px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+.note-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--nb-line);
+}
+.note-preview-head h3 { font-size: 18px; }
+.note-preview-sub { margin: 4px 0 0; color: var(--nb-muted); font-size: 12px; }
+.note-preview-tabs { display: flex; gap: 4px; flex: none; }
+.note-preview-tabs button {
+  border: 1px solid var(--nb-line);
+  border-radius: 7px;
+  background: var(--nb-white);
+  color: var(--nb-muted);
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.note-preview-tabs button.is-active {
+  border-color: var(--nb-forest);
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-weight: 600;
+}
+.note-preview-body {
+  flex: 1;
+  min-height: 180px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  background: var(--nb-mist);
+}
+.note-preview-diff {
+  max-height: none;
+  border-color: var(--nb-line);
+  background: var(--nb-white);
+}
+.note-preview-plain {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--nb-ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-preview-hint { margin-right: auto; color: var(--nb-muted); font-size: 12px; }
+.note-preview .modal-actions { padding: 12px 20px 16px; }
+
+/* ---- 锁定笔记的选择框：按课程筛 + 按名称搜 ---- */
+.note-picker {
+  width: min(100%, 520px);
+  max-height: min(78vh, 640px);
+  padding: 22px 22px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.note-picker h3 { font-size: 18px; }
+
+.note-picker-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.note-picker-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 190px;
+  min-width: 0;
+}
+.note-picker-field > span {
+  color: var(--nb-muted);
+  font-size: 11px;
+}
+.note-picker-field select,
+.note-picker-field input {
+  width: 100%;
+  border: 1px solid var(--nb-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--nb-ink);
+  font-size: 13px;
+  padding: 7px 9px;
+}
+.note-picker-field select:focus-visible,
+.note-picker-field input:focus-visible {
+  outline: 2px solid var(--nb-forest);
+  outline-offset: 1px;
+  border-color: var(--nb-forest);
+}
+
+.note-picker-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--nb-line);
+  border-radius: 10px;
+  background: var(--nb-mist);
+}
+.note-picker-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.note-picker-item:hover { background: var(--ws-tint); }
+.note-picker-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--nb-ink);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-picker-course {
+  flex: none;
+  color: var(--nb-muted);
+  font-size: 11px;
+}
+.note-picker-empty {
+  margin: 0;
+  padding: 16px 12px;
+  color: var(--nb-muted);
+  font-size: 13px;
+  text-align: center;
+}
+.note-picker-count {
+  margin-right: auto;
+  color: var(--nb-muted);
+  font-size: 12px;
+}
+
+/* ---- 错题本（v6 §7 第一批）：顶栏复习入口 + 按课件分组的错题弹窗 ---- */
+.workspace-topbar-actions .workspace-topbar-mistakes {
+  font-size: 13px;
+  padding: 3px 9px;
+  border-color: var(--nb-line);
+}
+.mistake-book {
+  width: min(100%, 720px);
+  max-height: min(86vh, 760px);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+.mistake-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--nb-line);
+}
+.mistake-head h3 { font-size: 18px; }
+.mistake-sub { margin: 4px 0 0; color: var(--nb-muted); font-size: 12px; }
+.mistake-body {
+  flex: 1;
+  min-height: 200px;
+  overflow-y: auto;
+  padding: 14px 18px 18px;
+  background: var(--nb-mist);
+}
+.mistake-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--nb-muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.mistake-empty p { margin: 0 0 6px; color: var(--nb-ink); font-size: 14px; font-weight: 600; }
+.mistake-group { margin-bottom: 16px; }
+.mistake-group-title {
+  margin: 0 0 6px;
+  color: var(--nb-forest-deep);
+  font-size: 12px;
+  font-weight: 600;
+}
+.mistake-item {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--nb-line);
+  border-radius: 10px;
+  background: var(--nb-white);
+}
+.mistake-stem {
+  margin: 0;
+  color: var(--nb-ink);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.mistake-seq {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+.mistake-wrong-count {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--ws-warn-bg);
+  color: var(--ws-warn);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mistake-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.mistake-yours { color: var(--ws-warn); }
+.mistake-right { color: var(--ws-ok); }
+.mistake-why {
+  margin: 6px 0 0;
+  color: var(--nb-muted-strong, var(--ws-ink-2));
+  font-size: 12px;
+  line-height: 1.7;
+}
+.mistake-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+}
+.mistake-action-primary {
+  border: 1px solid var(--nb-forest);
+  border-radius: 999px;
+  background: var(--nb-forest);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+.mistake-action {
+  border: 1px solid var(--nb-line);
+  border-radius: 999px;
+  background: var(--nb-white);
+  color: var(--nb-muted-strong, var(--ws-ink-2));
+  font-size: 12px;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+.mistake-action:hover { border-color: var(--nb-sage); color: var(--nb-forest); }
+.mistake-source { margin-left: auto; color: var(--nb-muted); font-size: 11px; }
+
+/* B1：简答判分要点命中明细（选择题不渲染） */
+.quiz-points {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.quiz-points li { display: flex; gap: 5px; align-items: baseline; }
+.quiz-points li.is-hit { color: var(--ws-ok); }
+.quiz-points li.is-missed { color: var(--ws-warn); opacity: 0.9; }
+.quiz-verdict-ask {
+  margin-top: 7px;
+  border: 1px solid rgba(138, 75, 63, 0.35);
+  border-radius: 999px;
+  background: var(--nb-white);
+  color: var(--ws-warn);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.quiz-verdict-ask:hover { border-color: var(--ws-warn); }
+
+@media (max-width: 899.98px) {
+  .mistake-book { width: 100%; max-height: 92vh; }
+  .mistake-head { padding: 14px 16px 10px; }
+  .mistake-body { padding: 12px 14px 16px; }
+}
+
+/* ================================================================
+   最终版 · 答疑页收口（只作用于 .assistant-page：不改 DOM、不改全局 token）
+   1) 撤掉页面卡片：整页回到一张纸，分区靠发丝线，不靠色块与投影
+   2) 会话栏 208，与正文共用纸面；顶栏、上下文条撤掉底色和分隔线
+   3) 右栏展开态是一张浮卡，收起态仍是 44px 竖条
+   4) 描边统一 1px；字号 7 档；流式与落定同字号
+   ================================================================ */
+
+/* 页面不再是一个圆角盒子：撤掉外框与底色，让它和 app-main 的纸面连成一片。
+   分区只靠一条发丝线，视觉重量从「四块拼起来」降为「一张纸 + 一张卡」。 */
+.assistant-page .workspace-pet {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.assistant-page .workspace-chat { background: transparent; }
+
+.assistant-page .workspace-rail {
+  padding: 14px 12px 12px;
+  border-right: 1px solid var(--ws-line);
+  background: transparent;
+}
+
+/* 顶栏与上下文条撤掉底色和分隔线，靠留白分组；
+   页面标题因此比原来更靠上，也更像「一张纸上的标题」而不是工具条。 */
+.assistant-page .workspace-topbar {
+  padding: 18px 20px 6px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.assistant-page .workspace-context {
+  padding: 0 20px 12px;
+  border-bottom: 0;
+}
+
+.assistant-page .workspace-thread { padding: 4px 20px 16px; }
+
+.assistant-page .workspace-composer {
+  margin: 0 20px 14px;
+  border: 1px solid var(--ws-line);
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.assistant-page :is(.workspace-error, .workspace-inline-status) { margin: 0 20px; }
+
+/* 展开态是一张独立的卡；收起态的 44px 竖条保持原样，仍贴着纸边。 */
+.assistant-page .workspace-changes:not(.is-collapsed) {
+  align-self: start;
+  margin: 14px 20px 20px 0;
+  padding: 14px 14px 12px;
+  max-height: calc(100dvh - 190px);
+  border: 1px solid var(--ws-line);
+  border-radius: 12px;
+  background: var(--nb-white);
+}
+
+/* 收起态只有 44px 宽：外边距与内边距都要跟着缩回去，否则竖排文字会被挤断 */
+.assistant-page .workspace-changes.is-collapsed {
+  margin: 14px 0 20px;
+  padding-left: 4px;
+}
+
+.assistant-page .workspace-changes-rail { border-width: 1px; }
+
+/* 回答原来是一个带 2px 边框的白气泡，在整片纸面上等于又开了一张卡。
+   改成「左侧一条发丝线 + 透明底」，回答落回纸面，提问气泡才成为唯一的色块。 */
+.assistant-page .workspace-msg-body {
+  border: 0;
+  border-left: 1px solid var(--ws-line);
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 0 0 16px;
+}
+
+.assistant-page .workspace-msg-assistant.is-failed .workspace-msg-body {
+  border: 0;
+  border-left: 1px solid var(--ws-warn-line);
+  background: transparent;
+  padding-right: 0;
+}
+
+/* 提问的气泡样式已被文末「引文形态」取代（同一选择器、更靠后），这里不再重复定义 */
+
+/* 落定正文 14px；流式正文原先 13.5px，两者不同档会让回答"长完"的瞬间文字跳大一截 */
+.assistant-page .workspace-agent-streaming {
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+/* ================================================================
+   v3 · 定稿形态：整页收成「一片纸 + 一张卡」
+   只动样式：不改组件、不改 DOM、不改任何交互与状态。
+   1) 撤掉三层卡片框与顶部色带，纸面透出 .app-main 自带的 --garden-grain
+   2) 会话栏退成正文左侧的一条索引：208px、透明、只留一条发丝线
+   3) 笔记改动浮成唯一的白卡；输入框是第二处浮起
+   4) 1280 以下右栏仍是卡片，1180 以下由组件自身的收起逻辑处理
+   ================================================================ */
+@media (min-width: 900px) {
+  .assistant-page.workspace-pet {
+    grid-template-columns: 208px minmax(0, 1fr) auto;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* 左栏：透明 + 发丝线，桌宠和列表直接坐在纸面上 */
+  .assistant-page .workspace-rail {
+    padding: 14px 12px 12px;
+    background: transparent;
+    border-right: 1px solid var(--ws-line);
+  }
+
+  /* 栏头那行「DESK PET · 桌宠」与顶栏标题重复，收掉 */
+  .assistant-page .workspace-rail-head { display: none; }
+
+  .assistant-page .workspace-chat { background: transparent; }
+
+  /* 顶栏不再是色带，只是一行标题加一条线 */
+  .assistant-page .workspace-topbar {
+    height: 56px;
+    padding: 0 20px;
+    background: transparent;
+    border-bottom: 1px solid var(--ws-line);
+  }
+
+  .assistant-page .workspace-context {
+    padding: 9px 20px;
+    border-bottom: 1px solid var(--ws-line-soft);
+  }
+
+  .assistant-page .workspace-thread { padding: 22px 20px 8px; }
+
+  /* 输入区：纸面上第一处浮起 */
+  .assistant-page .workspace-composer {
+    margin: 0 20px 18px;
+    border: 1px solid var(--ws-line);
+    border-radius: 14px;
+    background: var(--nb-white);
+    box-shadow: 0 8px 24px -14px #22392c40;
+  }
+
+  .assistant-page .workspace-composer:focus-within {
+    border-color: #b9c79f;
+    box-shadow: 0 10px 28px -14px #22392c52;
+  }
+
+  /* 右栏：全页唯一的卡 */
+  .assistant-page .workspace-changes {
+    align-self: start;
+    width: 284px;
+    max-height: calc(100dvh - 120px);
+    margin: 0 0 18px 16px;
+    padding: 14px;
+    background: var(--nb-white);
+    border: 1px solid var(--ws-line);
+    border-radius: 14px;
+    box-shadow: 0 10px 30px -22px #22392c4d;
+  }
+
+
+  /* 回答不再套一张白卡：纸面上直接读，左上是桌宠的小标记 */
+  .assistant-page .workspace-msg-body {
+    padding: 2px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    gap: 6px;
+  }
+
+  /* 失败态仍然要有可辨认的底，否则错误会被读成正文 */
+  .assistant-page .workspace-msg-assistant.is-failed .workspace-msg-body {
+    padding: 12px 14px;
+    border: 1px solid #e3c6bb;
+    border-radius: 10px;
+    background: #fff8f4;
+  }
+
+  /* 采纳按钮改成实心，右栏里只有它该抢眼 */
+  .assistant-page .workspace-changes-apply {
+    border-color: var(--nb-forest);
+    background: var(--nb-forest);
+    color: #fbfae9;
+  }
+
+  .assistant-page .workspace-changes-apply:hover:not(:disabled) { background: #365d44; }
+
+  /* 收起态是一条页签，不该还是个卡 */
+  .assistant-page .workspace-changes.is-collapsed {
+    align-self: stretch;
+    width: 44px;
+    padding: 0;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+}
+
+/* 900–1120：三栏都变窄，索引列同步收到 196 */
+@media (min-width: 900px) and (max-width: 1120px) {
+  .assistant-page.workspace-pet { grid-template-columns: 196px minmax(0, 1fr) auto; }
+  .assistant-page .workspace-changes { width: 260px; margin-left: 12px; }
+}
+
+/* ================================================================
+   v3 · 结构微调（只改呈现，不接管事件、不改状态）
+   1) 提问从靠右气泡改成正文上方的一段引文
+   2) 右栏补「本讲资料」清单：这页答案是从哪些课件来的
+   3) 回答里出现表格时，按对照表的版式渲染
+   ================================================================ */
+
+.assistant-page .workspace-msg-user {
+  /* 用列向 flex 调顺序：DOM 里 time 在最前，视觉上要落在问题下面 */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  align-self: stretch;
+  max-width: none;
+  padding-left: 16px;
+  border-left: 3px solid var(--nb-sage);
+  background: none;
+}
+
+/* 「你」是气泡时代的署名，引文形态里多余 */
+.assistant-page .workspace-msg-user > span[aria-hidden="true"] { display: none; }
+
+.assistant-page .workspace-msg-user p {
+  order: 1;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.7;
+  letter-spacing: .01em;
+}
+
+.assistant-page .workspace-msg-user time {
+  order: 2;
+  align-self: flex-start;
+  display: block;
+  margin-top: 6px;
+  font-family: var(--nb-mono);
+  font-size: 10px;
+  color: #9aa695;
+}
+
+/* 本讲资料：右栏底部的只读清单 */
+.workspace-refs {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ws-line-soft);
+}
+
+.workspace-refs-label {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 9.5px;
+  letter-spacing: .12em;
+}
+
+.workspace-refs-label b { margin-left: 3px; font-family: var(--nb-mono); color: var(--nb-clay); }
+
+.workspace-refs-row { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 6px 0; }
+
+.workspace-refs-icon {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  border-radius: 4px;
+  background: var(--blue-soft);
+  color: var(--nb-forest);
+  font-size: 9px;
+}
+
+.workspace-refs-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ws-ink-2);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-refs-row em { flex: none; color: var(--muted); font-family: var(--nb-mono); font-size: 9.5px; font-style: normal; }
+
+/* 表格：模型真给了表，也不能是一张浏览器默认表 */
+.assistant-page .workspace-msg-content table {
+  width: 100%;
+  margin: 14px 0;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.assistant-page .workspace-msg-content thead th {
+  padding: 6px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--ws-line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-align: left;
+}
+
+.assistant-page .workspace-msg-content tbody td {
+  padding: 10px;
+  border-bottom: 1px solid var(--ws-line-soft);
+  color: var(--ws-ink-2);
+  vertical-align: top;
+}
+
+.assistant-page .workspace-msg-content tbody tr:last-child td { border-bottom: 1px solid var(--ws-line); }
+.assistant-page .workspace-msg-content tbody tr:hover { background: #00000005; }
+.assistant-page .workspace-msg-content :is(th, td):last-child { text-align: right; white-space: nowrap; }
+.assistant-page .workspace-msg-content tbody td:first-child { white-space: nowrap; color: var(--muted); font-family: var(--nb-mono); font-size: 12px; }
+
+/* ================================================================
+   v3 · 字体与字号：把这一页的字号推到 v3 的比例
+   只改字体、字色、字号、行高、字距；不碰布局、交互、状态。
+   ================================================================ */
+
+.assistant-page {
+  --ws-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", "STSong", Georgia, serif;
+  --ws-ink: #22392c;
+  --ws-ink-2: #445645;
+  --ws-faint: #6f7c68;
+}
+
+/* 标题：衬线 26；课程名退回无衬线小字，主次才分得开 */
+.assistant-page .workspace-title {
+  font-family: var(--ws-serif);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ws-ink);
+}
+
+.assistant-page .workspace-title span {
+  font-family: var(--nb-sans);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: .02em;
+  color: var(--ws-faint);
+}
+
+/* 提问：全页唯一「被引用」的一句话，衬线、比正文大一号 */
+.assistant-page .workspace-msg-user p {
+  font-family: var(--ws-serif);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.62;
+  letter-spacing: .01em;
+  color: var(--ws-ink);
+}
+
+/* 正文：15 / 1.85 —— 答案要比界面大一号，读起来才是「内容」 */
+.assistant-page .workspace-msg-content {
+  color: #26392c;
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.assistant-page .workspace-msg-content p { margin: 0 0 12px; }
+/* 加粗即强调：正文里唯一的红色落点。
+   模型只要输出 **结论**，这里就会变成陶土色 —— 不需要额外标记。 */
+.assistant-page .workspace-msg-content strong {
+  color: var(--nb-clay-ink);
+  font-weight: 600;
+}
+
+/* 署名与元信息 */
+.assistant-page .workspace-msg-head strong { font-size: 13px; }
+.assistant-page .workspace-msg-head em { color: var(--ws-faint); font-size: 12px; }
+.assistant-page .workspace-msg-user time { font-size: 10.5px; letter-spacing: .04em; }
+
+/* 依据 */
+.assistant-page .workspace-sources-label { font-size: 12.5px; }
+.assistant-page .workspace-source-chip { font-size: 12.5px; }
+.assistant-page .workspace-source-chip i { font-size: 9.5px; }
+
+/* 表格 */
+.assistant-page .workspace-msg-content thead th { font-size: 10.5px; letter-spacing: .1em; }
+.assistant-page .workspace-msg-content tbody td { font-size: 13.5px; }
+.assistant-page .workspace-msg-content tbody td:first-child { font-size: 12px; }
+
+/* 会话列表 */
+.assistant-page .workspace-mini-label { font-size: 10px; letter-spacing: .16em; }
+.assistant-page .workspace-conv-label { font-size: 10px; letter-spacing: .14em; }
+.assistant-page .workspace-conv-title { font-size: 13px; }
+.assistant-page .workspace-conv-time { font-size: 10.5px; }
+
+/* 右栏 */
+.assistant-page .workspace-changes-head strong {
+  font-family: var(--ws-serif);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.assistant-page .workspace-change-main b { font-size: 13px; }
+.assistant-page .workspace-change-main small { font-size: 10.5px; }
+.assistant-page .workspace-refs-title { font-size: 12px; }
+
+/* 输入区 */
+.assistant-page .workspace-composer textarea { font-size: 15px; line-height: 1.75; }
+.assistant-page .workspace-composer-hint { font-size: 10.5px; }
+.assistant-page .workspace-composer-tool { font-size: 12px; }
+
+/* 引用角标保持原来的深绿：红色只属于结论句，角标不参与强调。 */
+
+/* 范围菜单与会话条目：这两处还留着旧调色板的亮绿/薄荷绿，收进同一族 */
+.assistant-page .workspace-scope-option { color: var(--ws-ink-2); }
+.assistant-page .workspace-scope-option:hover { background: var(--ws-tint-2); }
+.assistant-page .workspace-scope-option.is-active {
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+}
+.assistant-page .workspace-conv-item:hover { background: #284b390e; }
+.assistant-page .workspace-conv-item.is-active { background: #284b3916; }
+.assistant-page .workspace-conv-item.is-active:hover { background: #284b3924; }
+
+/* 红色只给结论句，并且限流：
+   ① 同一段里只认第一处加粗；
+   ② 只在回答开头两段里认。
+   这样最坏情况下，一条回答也只会出现两处红。 */
+.assistant-page .workspace-msg-content strong ~ strong { color: inherit; }
+.assistant-page .workspace-msg-content .cite-paragraph:nth-child(n+3) strong { color: inherit; }
+
+/* ================================================================
+   三张技能卡（复习提纲 / 易混概念 / 自测卷）是各自独立出现在一轮回答下的，
+   不是并列的一组。所以只共用「纸面 + 发丝线 + 绿系」这套材质，
+   内部按各自的用途分别设计：
+     复习提纲 = 可勾选的目录（进度条 + 分组 + 文本动作）
+     易混概念 = 一张对照表（分栏表 + 结论行 + 实心主按钮）
+     自测卷   = 一张微型试卷（卷头 + 题号 + 判分区）
+   全部带 .assistant-page 前缀 —— 悬浮坞里的同名卡片不受影响。
+   ================================================================ */
+
+.assistant-page .agent-cards { gap: 10px; margin-bottom: 14px; }
+.assistant-page .agent-cards-title { color: var(--nb-muted); font-size: 10.5px; letter-spacing: .14em; }
+
+/* 只共用外壳：纸白面 + 1px 发丝线 + 12 圆角 + 14/16 内边距。
+   左侧不再有粗竖线 —— 「强调笔画」在这一页只留给提问引文，卡片一律平齐。 */
+.assistant-page .agent-card {
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--ws-line);
+  border-radius: 12px;
+  background: var(--nb-white);
+}
+
+.assistant-page .agent-card-info { border-color: var(--ws-line); background: var(--ws-tint-2); }
+.assistant-page .agent-card-adopted { border-color: var(--ws-ok-line); background: var(--ws-ok-bg); }
+.assistant-page .agent-card-body { color: var(--ws-ink-2); font-size: 13px; line-height: 1.7; }
+
+.assistant-page .agent-card-confirm {
+  border: 1px solid var(--nb-forest);
+  border-radius: 8px;
+  padding: 5px 14px;
+  background: var(--nb-forest);
+  color: #fdfbf3;
+  font-size: 12px;
+}
+
+.assistant-page .agent-card-reject {
+  border: 1px solid var(--ws-line);
+  border-radius: 8px;
+  padding: 5px 14px;
+  background: transparent;
+  color: var(--nb-muted);
+  font-size: 12px;
+}
+
+/* ================================================================
+   01 · 复习提纲 —— 一张可勾选的目录
+   这张卡的主角是「进度 + 勾选」，不是卡片本身，所以：
+     衬线标题 —— 它是一份文档，不是一块界面（三张卡里只有它用衬线）
+     通栏 3px 进度线 —— 填多少就是多少，比右上角一个数字更像进度
+     条目左侧一条发丝线 —— 表示「这几条属于上面那个模块」，层级靠线不靠底色
+     全卡只有一个实心块（优先标签），其余全是纸面和线
+   ================================================================ */
+.assistant-page .agent-card-outline { padding: 16px 18px; gap: 12px; }
+
+.assistant-page .outline-head { flex-wrap: wrap; gap: 2px 12px; align-items: baseline; }
+.assistant-page .outline-head strong {
+  font-family: var(--ws-serif);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  color: var(--nb-forest-deep);
+}
+.assistant-page .outline-progress {
+  order: 2;
+  flex: 1 1 100%;
+  flex-direction: row-reverse;
+  gap: 12px;
+  margin-top: 8px;
+  color: var(--nb-muted);
+  font-size: 10.5px;
+  font-family: var(--nb-mono);
+}
+.assistant-page .outline-progress-track { flex: 1; width: auto; height: 3px; border-radius: 2px; background: var(--ws-line-soft); }
+.assistant-page .outline-progress-fill { border-radius: 2px; background: var(--nb-forest); }
+
+/* 模块 */
+.assistant-page .outline-module { gap: 6px; }
+.assistant-page .outline-module-title { color: var(--nb-forest-deep); font-size: 13.5px; font-weight: 600; gap: 8px; }
+/* 优先级用绿的三档深浅，不用红 —— 红留给结论句和改动计数 */
+.assistant-page .outline-priority { padding: 2px 7px; border-radius: 5px; font-size: 10px; letter-spacing: .06em; }
+.assistant-page .outline-priority.is-high { color: #fdfbf3; background: var(--nb-forest); }
+.assistant-page .outline-priority.is-medium { color: var(--nb-forest-deep); background: var(--ws-tint); }
+.assistant-page .outline-priority.is-low { color: var(--nb-muted); background: var(--ws-tint-2); }
+
+/* 条目：左侧发丝线 + 8px 左内距 = 缩进层级 */
+.assistant-page .outline-items {
+  gap: 1px;
+  margin: 0;
+  padding: 0 0 0 11px;
+  border-left: 1px solid var(--ws-line-soft);
+}
+.assistant-page .outline-items li { padding: 4px 8px; border-radius: 0 6px 6px 0; }
+.assistant-page .outline-items li:hover { background: var(--ws-tint-2); }
+.assistant-page .outline-item-point { color: var(--ws-ink); font-size: 14px; line-height: 1.7; }
+.assistant-page .outline-items li.is-checked .outline-item-point { color: var(--ws-faint); }
+.assistant-page .outline-item-row input { accent-color: var(--nb-forest); }
+.assistant-page .outline-item-ref { color: var(--ws-faint); font-size: 10.5px; font-family: var(--nb-mono); }
+/* 追问是「从这一条派生出去」的动作，所以是文字按钮，不跟条目抢注意力 */
+.assistant-page .outline-item-ask {
+  border: 0;
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--nb-forest);
+  font-size: 11px;
+}
+.assistant-page .outline-item-ask:hover { background: var(--ws-tint); }
+
+/* ================================================================
+   02 · 易混概念 —— 一张左右分栏的对照表
+   这张卡要回答「这两个到底差在哪」，所以骨架就是分栏：
+     两个概念名会出现两次 —— 一次做标题（15/600），一次做列标（10.5/字距/淡），
+       重复不是冗余，靠字号和字重分出主次，读者先看见名字再顺着列往下读
+     列与列之间用竖向发丝线切开 —— 没有竖线，读起来是清单；有了竖线，读起来才是对照
+     结论行是「一句话答案」，给一块淡绿；表格是「逐条证据」，全是纸面和线
+     唯一的实心块在右下角 —— 「出题」是这张卡唯一的下游动作
+   ================================================================ */
+.assistant-page .agent-card-contrast { padding: 16px 18px; gap: 16px; }
+.assistant-page .contrast-pair { gap: 12px; }
+/* 一张卡里可能有多对概念：用发丝线分隔，不靠间距 */
+.assistant-page .contrast-pair + .contrast-pair { padding-top: 14px; border-top: 1px solid var(--ws-line-soft); }
+
+.assistant-page .contrast-pair-head { gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--ws-line); }
+.assistant-page .contrast-name { color: var(--nb-forest-deep); font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+.assistant-page .contrast-vs {
+  padding: 1px 8px;
+  border: 1px solid var(--ws-line);
+  border-radius: 999px;
+  color: var(--nb-muted);
+  font-size: 9.5px;
+  letter-spacing: .12em;
+}
+/* 结论行：一张卡里唯一一块有底色的区域 */
+.assistant-page .contrast-core {
+  padding: 8px 12px;
+  border-left: 2px solid var(--nb-sage);
+  border-radius: 0 8px 8px 0;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+/* 对照表 */
+.assistant-page .contrast-table { border-color: var(--ws-line); border-radius: 10px; }
+.assistant-page .contrast-row { grid-template-columns: 88px 1fr 1fr; }
+.assistant-page .contrast-row + .contrast-row { border-top-color: var(--ws-line-soft); }
+.assistant-page .contrast-row > span { padding: 8px 10px; color: var(--ws-ink); font-size: 13.5px; line-height: 1.6; }
+.assistant-page .contrast-row > span + span { border-left: 1px solid var(--ws-line); }
+/* 表头整行是「说明」：小、淡、带字距，把主次让给上面那行标题 */
+.assistant-page .contrast-row-head { border-bottom: 1px solid var(--ws-line); background: transparent; }
+.assistant-page .contrast-row-head > span {
+  padding: 6px 10px;
+  color: var(--nb-muted);
+  font-size: 10.5px;
+  letter-spacing: .1em;
+}
+.assistant-page .contrast-dim { background: transparent; color: var(--nb-muted); font-size: 12px; }
+
+.assistant-page .contrast-pair-foot { gap: 12px; align-items: center; }
+.assistant-page .contrast-anchor { color: var(--nb-muted); font-size: 12px; line-height: 1.6; }
+.assistant-page .contrast-quiz {
+  flex: none;
+  border: 1px solid var(--nb-forest);
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: var(--nb-forest);
+  color: #fdfbf3;
+  font-size: 12px;
+}
+.assistant-page .contrast-quiz:hover { border-color: var(--nb-forest-deep); background: var(--nb-forest-deep); }
+
+/* ================================================================
+   03 · 自测卷 —— 一张微型试卷
+   这张卡要让人「开始做题」，所以秩序来自卷子，不来自卡片：
+     卷头（徽标 / 卷名 / 难度 / 进度）下面一条通栏发丝线 —— 试卷的分隔感
+     题号是等宽圆牌，进度和得分也是等宽 —— 一套数字语言贯穿全卡
+     选项是「可以点的一行」，选中靠描边加重，不靠填色
+     判分区是结果，自成一块；颜色只在正确／错误两处出现，其余全是纸面
+   ================================================================ */
+.assistant-page .quiz-paper {
+  padding: 16px 18px;
+  border-left: 1px solid var(--ws-line);
+  border-radius: 12px;
+}
+
+/* 卷头 */
+.assistant-page .quiz-paper-head {
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.assistant-page .quiz-paper-badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--nb-forest);
+  color: #fdfbf3;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .06em;
+}
+.assistant-page .quiz-paper-title { color: var(--nb-forest-deep); font-size: 15px; font-weight: 600; }
+.assistant-page .quiz-paper-difficulty {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.assistant-page .quiz-paper-progress { color: var(--nb-muted); font-size: 10.5px; font-family: var(--nb-mono); }
+
+/* 题目：卷头已经线过一次，题与题之间再来一条更浅的 */
+.assistant-page .quiz-item {
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--ws-line-soft);
+  border-radius: 0;
+  background: transparent;
+}
+.assistant-page .quiz-item:first-of-type { margin-top: 10px; padding-top: 0; border-top: 0; }
+.assistant-page .quiz-item-stem { gap: 8px; color: var(--ws-ink); font-size: 14px; line-height: 1.7; }
+.assistant-page .quiz-item-stem small { color: var(--nb-muted); font-size: 11.5px; }
+.assistant-page .quiz-item-no {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ws-tint);
+  color: var(--nb-forest-deep);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--nb-mono);
+  transform: translateY(1px);
+}
+
+/* 选项：一行，不是一张卡 */
+.assistant-page .quiz-item-options { gap: 4px; }
+.assistant-page .quiz-item-option {
+  gap: 9px;
+  padding: 7px 11px;
+  border: 1px solid var(--ws-line-soft);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ws-ink);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.assistant-page .quiz-item-option:hover { border-color: var(--nb-sage); background: var(--ws-tint-2); }
+.assistant-page .quiz-item-option.is-selected {
+  border-color: var(--nb-forest);
+  background: rgba(234, 236, 219, .55);
+  color: var(--nb-forest-deep);
+  font-weight: 600;
+}
+.assistant-page .quiz-item-option input { accent-color: var(--nb-forest); }
+.assistant-page .quiz-item-option.is-correct { border-color: var(--ws-ok-line); background: var(--ws-ok-bg); color: var(--ws-ok); font-weight: 600; }
+.assistant-page .quiz-item-option.is-wrong { border-color: var(--ws-warn-line); background: var(--ws-warn-bg); color: var(--ws-warn); font-weight: 600; }
+.assistant-page .quiz-item-option.is-dim { opacity: .5; }
+
+/* 简答：输入框和提交按钮 */
+.assistant-page .quiz-item-short {
+  border: 1px solid var(--ws-line);
+  border-radius: 8px;
+  background: var(--nb-white);
+  color: var(--ws-ink);
+  font-size: 13.5px;
+  padding: 8px 10px;
+}
+.assistant-page .quiz-item-short:focus { border-color: var(--nb-sage); }
+.assistant-page .quiz-item-submit {
+  border-radius: 999px;
+  border-color: var(--nb-forest);
+  background: var(--nb-forest);
+  color: #fdfbf3;
+  font-size: 12px;
+  padding: 5px 14px;
+}
+.assistant-page .quiz-item-submit:hover:not(:disabled) { border-color: var(--nb-forest-deep); background: var(--nb-forest-deep); }
+
+/* 判分区：结果，所以它自带边界 */
+.assistant-page .quiz-verdict {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.assistant-page .quiz-verdict.is-correct { border-color: var(--ws-ok-line); background: var(--ws-ok-bg); }
+.assistant-page .quiz-verdict.is-wrong { border-color: var(--ws-warn-line); background: var(--ws-warn-bg); }
+.assistant-page .quiz-verdict-line { font-size: 13.5px; font-weight: 600; }
+.assistant-page .quiz-verdict-line span { font-weight: 400; opacity: .82; }
+.assistant-page .quiz-verdict-why { margin: 4px 0 0; color: var(--ws-ink-2); font-size: 13px; }
+.assistant-page .quiz-points { margin-top: 6px; gap: 3px; font-size: 12.5px; }
+.assistant-page .quiz-verdict-ask {
+  margin-top: 8px;
+  border: 1px solid var(--ws-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--nb-forest);
+  font-size: 12px;
+  padding: 4px 12px;
+}
+.assistant-page .quiz-verdict-ask:hover { border-color: var(--nb-sage); background: var(--ws-tint); }
+
+/* 底部提示条：一条发丝线 + 灰字 */
+.assistant-page .quiz-paper-foot {
+  margin-top: 10px;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--ws-line-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--nb-muted);
+  font-size: 11px;
+}
+
+/* ===== 复习面板（§7 学习闭环追加）：三 Tab / 工具栏 / 收藏标记动作 ===== */
+.review-tabs { display: flex; gap: 4px; padding: 0 16px 8px; border-bottom: 1px solid var(--nb-line, #e5e2d8); }
+.review-tab { padding: 5px 14px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--ws-faint, #8a9a86); font-size: 12.5px; }
+.review-tab.is-active { color: #fffefa; font-weight: 500; background: var(--nb-forest, #2f5d45); }
+.review-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.review-search { flex: 1 1 160px; min-width: 140px; padding: 6px 10px; border: 1px solid var(--nb-line, #ddd8c8); border-radius: 8px; background: var(--nb-white, #fffefa); color: var(--nb-ink, #3d4c3e); font-size: 12.5px; }
+.review-filters { display: inline-flex; gap: 4px; }
+.review-filter { padding: 4px 10px; border: 1px solid var(--nb-line, #ddd8c8); border-radius: 999px; background: transparent; color: var(--ws-faint, #7c8a78); font-size: 11.5px; }
+.review-filter.is-active { color: #fffefa; background: var(--nb-forest, #2f5d45); border-color: var(--nb-forest, #2f5d45); }
+.mistake-item-flags { display: inline-flex; gap: 4px; margin-left: auto; }
+.mistake-flag-tag { margin-left: 6px; color: #b8860b; font-size: 11px; }
+/* 产物卡上的收藏/删除动作 */
+.artifact-actions { display: inline-flex; gap: 6px; }
+.artifact-action { padding: 2px 9px; border: 1px solid var(--border, #d8e0d2); border-radius: 999px; background: transparent; color: var(--muted-foreground, #7c8a78); font-size: 11px; }
+.artifact-action:hover:not(:disabled) { background: var(--muted, #f1f4ec); }
+.artifact-action.is-active { color: #b8860b; border-color: #e3c96b; background: #fdf6e0; }
+.outline-artifact-bar { display: flex; justify-content: flex-end; }
+.quiz-item-flags { display: flex; gap: 6px; margin-top: 6px; }
+.artifact-action.is-danger { color: #fffefa; background: var(--nb-clay-ink, #9a553c); border-color: var(--nb-clay-ink, #9a553c); }
+.dismissed-zone { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--nb-line, #ddd8c8); }
+.dismissed-toggle { padding: 3px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ws-faint, #8a9a86); font-size: 11px; }
+.dismissed-toggle:hover { background: var(--ws-tint, #f1f4ec); }
+.dismissed-list { display: grid; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; }
+.dismissed-list li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 4px 8px; border-radius: 6px; background: var(--ws-tint-2, #f6f8f1); }
+.dismissed-title { color: var(--ws-faint, #8a9a86); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

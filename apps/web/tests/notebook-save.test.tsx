@@ -43,6 +43,27 @@ afterEach(() => {
 })
 
 describe('useNotebookSave', () => {
+  test('restoring an old local draft retains its original conflict baseline', async () => {
+    vi.mocked(api.saveNotebookDocument).mockImplementation(async (_course, _book, content, revision) => {
+      if (revision !== 6) throw new ApiError('stale', 409)
+      return savedResponse(content, 7)
+    })
+    const { result } = renderHook(() => useNotebookSave({ courseId: 'course', notebookId: 'book' }))
+    act(() => result.current.reset(base, 6))
+    act(() => result.current.restoreDraft({ key: 'notebook:course:book', content: edited,
+      revision: 1, updatedAt: '2026-10-24' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+    expect(result.current.state).toBe('conflict')
+    expect(api.saveNotebookDocument).toHaveBeenCalledWith('course', 'book', edited, 1)
+    expect(JSON.parse(localStorage.getItem('notebuddy-draft:notebook:course:book')!).revision).toBe(1)
+  })
+  test('carries document revision forward so a stale edit cannot silently win', async () => {
+    const { result } = renderHook(() => useNotebookSave({ courseId: 'course', notebookId: 'book' }))
+    act(() => result.current.reset(base, 1))
+    act(() => result.current.markEdited(edited))
+    await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+    expect(api.saveNotebookDocument).toHaveBeenCalledWith('course', 'book', edited, 1)
+  })
   test('debounces edits and confirms only the saved snapshot', async () => {
     const { result } = renderHook(() => useNotebookSave({ courseId: 'course', notebookId: 'book' }))
     act(() => result.current.reset(base, 1, '2026-10-24T09:00:00Z'))

@@ -12,6 +12,7 @@ import type { ForestCourse, ForestSearchResult } from '../features/forest/types'
 import { notebookPath } from '../features/notebook/navigation'
 import { selectHomeCourses } from '../features/workspace/homeCourses'
 import { HomeSearch } from '../features/home/HomeSearch'
+import { growthLedger } from '../features/tree/growth/ledger'
 import '../features/forest/forest.css'
 
 export function HomePage() {
@@ -44,15 +45,20 @@ function HomeScene() {
   useEffect(() => {
     let active = true
     setForestLoading(true); setForestError(undefined)
-    void api.getForest().then(result => { if (active) setForestCourses(result.courses) }).catch((cause: unknown) => { if (active) setForestError(cause instanceof Error ? cause.message : '课程树读取失败') }).finally(() => { if (active) setForestLoading(false) })
+    void api.getForest().then(result => { if (active) { growthLedger.observeCourses(result.courses.map(course => course.course_id)); setForestCourses(result.courses) } }).catch((cause: unknown) => { if (active) setForestError(cause instanceof Error ? cause.message : '课程树读取失败') }).finally(() => { if (active) setForestLoading(false) })
     return () => { active = false }
   }, [courses, forestReload])
 
   useEffect(() => {
-    const refresh = () => setForestReload(value => value + 1)
+    const refresh = () => {
+      setForestReload(value => value + 1)
+      void directories.refresh()
+      void vines.refresh()
+      void vines.discoverJobs()
+    }
     window.addEventListener('focus', refresh)
     return () => window.removeEventListener('focus', refresh)
-  }, [])
+  }, [directories.refresh, vines.refresh, vines.discoverJobs])
   const visible = selectHomeCourses(forestCourses)
   const returnState = { sceneReturn: '/', sceneEntry: entry }
 

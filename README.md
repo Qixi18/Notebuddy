@@ -56,6 +56,7 @@ cd ../..
 
 ## 进一步阅读
 
+- [软件工程文档](docs/软件工程文档/README.md)：需求分析、概要设计、需求说明和教学模板。
 - [文档索引](docs/index.md)、[架构说明](docs/architecture.md)、[API](docs/api.md)
 - [资料解析](docs/parsing.md)、[来源与证据](docs/evidence.md)、[迁移与恢复](docs/migrations.md)
 - [运维说明](docs/operations.md)、[仓库协作指南](agent.md)

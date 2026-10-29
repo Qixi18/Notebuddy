@@ -53,6 +53,12 @@ def _arg_summary(name: str, arguments: dict[str, Any]) -> str:
         return f"定位术语「{str(arguments.get('term') or '')[:20]}」"
     if name == "web_search":
         return f"联网搜索「{str(arguments.get('query') or '')[:30]}」"
+    if name == "generate_quiz":
+        return "生成课程自测题"
+    if name == "generate_review_outline":
+        return "整理复习提纲"
+    if name == "generate_concept_contrast":
+        return "辨析易混概念"
     if name == "propose_notebook_edits":
         return f"准备笔记修改建议：{str(arguments.get('rationale') or '')[:40]}"
     if name == "propose_knowledge_node":
@@ -84,13 +90,20 @@ def run_agent(
     reading_context: str = "",
     material_id: str | None = None,
     allow_web: bool = True,
+    allow_quiz: bool = True,
     learning_goal: str | None = None,
     history: list[tuple[str, str]] | None = None,
     teacher_persona: str = DEFAULT_PERSONA_ID,
+    conversation_id: str | None = None,
+    learning_mode: str = "direct",
 ) -> Iterator[dict[str, Any]]:
     persona = resolve_persona(teacher_persona)
     teaching_context = infer_context(question, learning_goal)
-    specs = build_tool_specs(scope=scope, editable_notebook=bool(editable_notebook_id), allow_web=allow_web)
+    specs = build_tool_specs(
+        scope=scope, editable_notebook=bool(editable_notebook_id),
+        allow_web=allow_web, allow_quiz=allow_quiz,
+        fixed_material_id=material_id,
+    )
     messages = build_agent_messages(
         question,
         course_name=course_name,
@@ -100,6 +113,7 @@ def run_agent(
         persona=persona.id,
         history=history,
         reading_context=reading_context,
+        learning_mode=learning_mode,
     )
     client = DeepSeekClient()
     if not client.configured:
@@ -116,7 +130,8 @@ def run_agent(
             tool_call_event: dict[str, Any] | None = None
             for event in client.chat_stream(messages, tools=specs, max_tokens=2400):
                 if event["type"] == "reasoning":
-                    continue  # 思维链不外发，仅在结束事件中带回用于回填
+                    yield {"type": "thinking", "text": event.get("text", "")}
+                    continue  # 仅用于过程展示；不进入回答正文和证据
                 if event["type"] == "delta":
                     round_text.append(event["text"])
                     total_text.append(event["text"])
@@ -173,6 +188,9 @@ def run_agent(
                     locked_notebook_id=locked_notebook_id,
                     editable_notebook_id=editable_notebook_id,
                     allow_web=allow_web,
+                    allow_quiz=allow_quiz,
+                    conversation_id=conversation_id,
+                    fixed_material_id=material_id,
                 )
                 collected_chunks.extend(outcome.chunks)
                 collected_web.extend(outcome.web_results)
@@ -182,6 +200,7 @@ def run_agent(
                     "tool": call["name"],
                     "detail": outcome.summary,
                     "status": "done",
+                    "suggestions": outcome.suggestions,
                 }
                 messages.append({
                     "role": "tool",

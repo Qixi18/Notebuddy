@@ -143,7 +143,7 @@ test('三区骨架渲染：左栏课程历史、中栏上下文条与对话、�
   renderPage()
   expect(screen.getByLabelText('桌宠与会话')).toBeTruthy()
   expect(screen.getByLabelText('课程答疑对话')).toBeTruthy()
-  expect(screen.getByLabelText('本次改动')).toBeTruthy()
+  expect(screen.getByLabelText('待确认改动')).toBeTruthy()
   /* 上下文条：可见的「上下文」二字已去掉，靠 aria-label 定位 */
   expect(screen.getByLabelText('提问上下文')).toBeTruthy()
   expect(screen.getByText('数据结构与算法')).toBeTruthy()

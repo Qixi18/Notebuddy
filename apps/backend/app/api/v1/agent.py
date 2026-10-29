@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -30,6 +31,7 @@ from app.ai.orchestrator import run_answer
 from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
 from app.db.models import (
+    Conversation,
     ConversationMessage,
     Material,
     Note,
@@ -49,6 +51,33 @@ router = APIRouter()
 
 def _sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(jsonable_encoder(event), ensure_ascii=False)}\n\n"
+
+
+def _persist_interrupted_agent(
+    db: Session, conversation: Conversation, partial_text: str,
+    learning_goal: str | None, process: dict[str, Any] | None,
+    suggestions: list[dict[str, Any]] | None = None,
+) -> None:
+    """Keep the conversation complete when an SSE client disconnects mid-answer."""
+    process_json = json.dumps(process, ensure_ascii=False) if process else None
+    partial = partial_text.strip()
+    if partial:
+        row = ConversationMessage(
+            conversation_id=conversation.id, role="assistant", content=partial,
+            learning_goal=learning_goal, status="aborted", process_json=process_json,
+            suggestions_json=json.dumps(suggestions, ensure_ascii=False) if suggestions else None,
+        )
+    else:
+        row = ConversationMessage(
+            conversation_id=conversation.id, role="assistant",
+            content="本次回答已中断，没有收到内容；请重新提问。",
+            learning_goal=learning_goal, status="failed", failure_type="ClientDisconnected",
+            process_json=process_json,
+            suggestions_json=json.dumps(suggestions, ensure_ascii=False) if suggestions else None,
+        )
+    db.add(row)
+    conversation.updated_at = datetime.now(UTC)
+    db.commit()
 
 
 @router.post("/conversations/{conversation_id}/agent-messages")
@@ -155,6 +184,35 @@ def send_agent_message(
     def event_stream() -> Iterator[str]:
         final_event: dict[str, Any] | None = None
         error_message: str | None = None
+        partial_text: list[str] = []
+        completed_suggestions: list[dict[str, Any]] = []
+        persisted = False
+        process: dict[str, Any] = {"thinking": "", "thinking_ms": 0, "steps": []}
+        thinking_started: float | None = None
+
+        def close_thinking() -> None:
+            nonlocal thinking_started
+            if thinking_started is not None:
+                process["thinking_ms"] += int((time.monotonic() - thinking_started) * 1000)
+                thinking_started = None
+
+        def persist_interrupted() -> None:
+            nonlocal persisted
+            if persisted:
+                return
+            close_thinking()
+            process["thinking"] = process["thinking"][:20000]
+            process["steps"] = [
+                {key: value for key, value in step.items() if key != "started"}
+                for step in process["steps"][:60]
+            ]
+            trace = process if process["thinking"] or process["steps"] else None
+            _persist_interrupted_agent(
+                db, conversation, "".join(partial_text), payload.learning_goal, trace,
+                completed_suggestions,
+            )
+            persisted = True
+
         try:
             for event in run_agent(
                 db,
@@ -167,17 +225,71 @@ def send_agent_message(
                 reading_context=reading_section,
                 material_id=payload.material_id,
                 allow_web=payload.allow_web,
+                allow_quiz=payload.allow_quiz,
+                learning_mode=payload.learning_mode,
                 learning_goal=payload.learning_goal,
                 history=history,
                 teacher_persona=payload.teacher_persona,
+                conversation_id=conversation.id,
             ):
                 if event["type"] == "final":
+                    close_thinking()
                     final_event = event
                 elif event["type"] == "error":
+                    close_thinking()
                     error_message = str(event.get("message") or "agent 执行失败")
                 else:
+                    if event["type"] == "thinking":
+                        if thinking_started is None:
+                            thinking_started = time.monotonic()
+                        process["thinking"] += str(event.get("text") or "")
+                    elif event["type"] == "delta":
+                        close_thinking()
+                        partial_text.append(str(event.get("text") or ""))
+                    elif event["type"] == "step":
+                        close_thinking()
+                        if event.get("status") == "done":
+                            suggestions = event.get("suggestions")
+                            if isinstance(suggestions, list):
+                                completed_suggestions.extend(
+                                    item for item in suggestions if isinstance(item, dict)
+                                )
+                                # Keep these references server-side for disconnect recovery;
+                                # the final event remains the only client card payload.
+                                event.pop("suggestions", None)
+                        if event.get("status") == "running":
+                            process["steps"].append({
+                                "tool": str(event.get("tool") or ""),
+                                "detail": str(event.get("detail") or ""),
+                                "started": time.monotonic(),
+                            })
+                        else:
+                            for step in reversed(process["steps"]):
+                                if step.get("tool") == event.get("tool") and "duration_ms" not in step:
+                                    started = step.pop("started", None)
+                                    step["duration_ms"] = (
+                                        int((time.monotonic() - started) * 1000)
+                                        if started is not None else None
+                                    )
+                                    if event.get("detail"):
+                                        step["detail"] = str(event["detail"])
+                                    event["duration_ms"] = step["duration_ms"]
+                                    break
+                            else:
+                                process["steps"].append({
+                                    "tool": str(event.get("tool") or ""),
+                                    "detail": str(event.get("detail") or ""),
+                                    "duration_ms": None,
+                                })
                     yield _sse(event)
+        except GeneratorExit:
+            try:
+                persist_interrupted()
+            except Exception:
+                db.rollback()
+            raise
         except Exception as exc:  # 流内异常必须降级为错误事件，不能断流
+            close_thinking()
             error_message = f"{type(exc).__name__}: {exc}"
 
         chunks: list = []
@@ -186,6 +298,12 @@ def send_agent_message(
             chunks = final_event.get("chunks") or []
             web_results = final_event.get("web_results") or []
             claims = [claim_payload(claim) for claim in extract_claims(str(final_event["answer"]), chunks, web_results)]
+            process["thinking"] = process["thinking"][:20000]
+            process["steps"] = [
+                {key: value for key, value in step.items() if key != "started"}
+                for step in process["steps"][:60]
+            ]
+            saved_process = process if process["thinking"] or process["steps"] else None
             assistant = persist_assistant_message(
                 db, conversation=conversation, learning_goal=payload.learning_goal,
                 content=str(final_event["answer"]), model_version=final_event.get("model_version"),
@@ -195,7 +313,10 @@ def send_agent_message(
                     "chunk_indexes": list(range(len(chunks))),
                     "web_indexes": list(range(len(web_results))),
                 }],
+                process=saved_process,
+                suggestions=final_event.get("suggestions") or None,
             )
+            persisted = True
             yield _sse({
                 "type": "final",
                 "answer": final_event["answer"],
@@ -204,12 +325,20 @@ def send_agent_message(
                 "sources": sources_from_evidence(db, assistant),
                 "suggestions": final_event.get("suggestions") or [],
                 "message_id": assistant.id,
+                "process": assistant.process,
                 "conversation_title": conversation.title,
             })
             return
 
         # agent 链路失败：回退旧问答管线（无 key / 模型异常 / 轮次超限时用户无感）
-        yield _sse({"type": "notice", "text": "智能模式暂不可用，已切换到标准问答。"})
+        try:
+            yield _sse({"type": "notice", "text": "智能模式暂不可用，已切换到标准问答。"})
+        except GeneratorExit:
+            try:
+                persist_interrupted()
+            except Exception:
+                db.rollback()
+            raise
         fallback_question = payload.question
         if reading_section:
             fallback_question = f"{fallback_question}\n\n【当前上下文】\n{reading_section}"
@@ -235,6 +364,7 @@ def send_agent_message(
                 content=result["answer"], model_version=result.get("model_version"),
                 chunks=result["chunks"], web_results=result["web_results"], claims=claims,
             )
+            persisted = True
             yield _sse({
                 "type": "final",
                 "answer": result["answer"],
@@ -257,6 +387,7 @@ def send_agent_message(
             db.add(failed)
             conversation.updated_at = datetime.now(UTC)
             db.commit()
+            persisted = True
             yield _sse({"type": "error", "message": f"问答执行失败（{type(exc).__name__}），请稍后重试"})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

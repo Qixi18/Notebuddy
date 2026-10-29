@@ -17,7 +17,7 @@ export type NoteChangeItem = {
 }
 
 /**
- * 右侧「本次改动」：本次会话改过 / 建议改的笔记。
+ * 右侧「待确认改动（本课程）」：按 Notebook 分组展示尚未审核的正文建议。
  * 没有数据时收起为 44px 竖条，不占阅读宽度。
  */
 export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying, onPreview }: {
@@ -34,7 +34,7 @@ export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying,
 
   if (!open) {
     return (
-      <aside className="workspace-changes is-collapsed" aria-label="本次改动">
+      <aside className="workspace-changes is-collapsed" aria-label="待确认改动">
         <button
           type="button"
           className="workspace-changes-rail"
@@ -43,16 +43,16 @@ export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying,
           title="展开改动栏"
         >
           <span className="workspace-changes-rail-icon" aria-hidden="true">‹</span>
-          <span className="workspace-changes-rail-label">改动 {items.length}</span>
+          <span className="workspace-changes-rail-label">待审 {items.length}</span>
         </button>
       </aside>
     )
   }
 
   return (
-    <aside className="workspace-changes" aria-label="本次改动">
+    <aside className="workspace-changes" aria-label="待确认改动">
       <header className="workspace-changes-head">
-        <strong>本次改动</strong>
+        <strong>待确认改动（本课程）</strong>
         <span className="workspace-changes-count">{items.length}</span>
         <button
           type="button"
@@ -65,29 +65,33 @@ export function ChangesPanel({ open, onToggle, items = [], onApplyAll, applying,
 
       {items.length === 0 ? (
         <div className="workspace-changes-empty">
-          <p>这次会话还没有改动笔记。</p>
-          <span>在笔记里让我修改时，改动会出现在这里。</span>
+          <p>本课程还没有待确认的笔记改动。</p>
+          <span>在答疑中让我修改 Notebook 正文时，建议会出现在这里。</span>
         </div>
       ) : (
         <div className="workspace-changes-list">
-          {items.map((item) => {
+          {items.map((item, index) => {
+            const startsGroup = index === 0 || items[index - 1].noteId !== item.noteId
             return (
-              <div className="workspace-change-item" key={item.id}>
-                <button
-                  type="button"
-                  className="workspace-change-row"
-                  title="预览整篇笔记"
-                  onClick={() => onPreview?.(item)}
-                >
-                  <span className="workspace-change-file" aria-hidden="true">◧</span>
-                  <span className="workspace-change-main">
-                    <b>{item.noteTitle}</b>
-                    <small>{item.chapter ?? '未标注章节'}</small>
-                  </span>
-                  <span className="workspace-change-diff" aria-label={`新增 ${item.added} 行，删除 ${item.removed} 行`}>
-                    <i>+{item.added}</i>{item.removed > 0 && <em>−{item.removed}</em>}
-                  </span>
-                </button>
+              <div key={item.id}>
+                {startsGroup && <p className="workspace-change-group">《{item.noteTitle}》</p>}
+                <div className="workspace-change-item">
+                  <button
+                    type="button"
+                    className="workspace-change-row"
+                    title="打开目标 Notebook"
+                    onClick={() => onPreview?.(item)}
+                  >
+                    <span className="workspace-change-file" aria-hidden="true">◧</span>
+                    <span className="workspace-change-main">
+                      <b>{item.noteTitle}</b>
+                      <small>{item.chapter ?? '结构化修改建议'}</small>
+                    </span>
+                    <span className="workspace-change-diff" aria-label={`${item.added} 项操作，删除 ${item.removed} 个章节`}>
+                      <i>{item.added} 项</i>{item.removed > 0 && <em>−{item.removed}</em>}
+                    </span>
+                  </button>
+                </div>
               </div>
             )
           })}

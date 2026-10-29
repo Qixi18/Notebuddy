@@ -13,6 +13,7 @@ import {
   type DocNode,
 } from '../features/notebook-editor/document'
 import { useNotebookSave } from '../features/notebook-editor/useNotebookSave'
+import { useDocumentReadingPosition } from '../features/notebook-editor/useDocumentReadingPosition'
 import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
 import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features/notebook-editor/NotebookBridge'
 import { DocumentSourcePreview } from '../features/notebook-editor/DocumentSourcePreview'
@@ -73,6 +74,7 @@ function NotebookPageBody() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState<DocNode>({ type: 'doc', content: [] })
   const [loaded, setLoaded] = useState(false)
+  const [editorReady, setEditorReady] = useState(false)
   const [loadError, setLoadError] = useState<string>()
   const [documentWarning, setDocumentWarning] = useState<string>()
   const [uploadError, setUploadError] = useState<string>()
@@ -231,6 +233,7 @@ function NotebookPageBody() {
     setDraftFound(null)
     setEditVersion(0)
     editorReadyRef.current = false
+    setEditorReady(false)
     void Promise.all([api.getNotebookById(courseId, notebookId), api.getNotebookDocument(courseId, notebookId)])
       .then(async ([nextOutline, document]) => {
         if (!active) return
@@ -388,7 +391,9 @@ function NotebookPageBody() {
         if (job.status === 'completed' && generationJob.status !== 'completed') {
           const trackedByUploadBatch = uploadBatchGenerationJobIds.split('|').includes(job.id)
           if (save.isDirty()) {
-            if (!trackedByUploadBatch) setNotice('AI 补充内容已写入服务器。当前有未保存的本地编辑，已保留草稿；保存冲突面板可用于合并服务器版本。')
+            const message = '当前有未保存的本地编辑，已保留草稿；保存后可重新载入最新内容。'
+            setNotice(`学习笔记已生成。${message}`)
+            if (trackedByUploadBatch && uploadBatch?.id) finishUploadProgress(uploadBatch.id, message, true)
             return
           }
           void api.getNotebookDocument(courseId!, notebookId).then((latest) => {
@@ -405,9 +410,14 @@ function NotebookPageBody() {
       })
     }, 1500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [courseId, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision, uploadBatchGenerationJobIds])
+  }, [courseId, finishUploadProgress, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision, uploadBatch?.id, uploadBatchGenerationJobIds])
 
   const headings = useMemo(() => extractOutline(content), [content])
+  useDocumentReadingPosition({
+    courseId, notebookId, editorRef, ready: loaded && editorReady,
+    explicitLink: Boolean(linkedSectionId || linkedChapterId),
+    onRestore: setActiveBlockId,
+  })
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
   const generationStatusCoveredByToast = Boolean(
     uploadProgress?.batchId && generationJob?.id && uploadBatchGenerationJobIds.split('|').includes(generationJob.id),
@@ -715,7 +725,7 @@ function NotebookPageBody() {
     editorRef.current?.replaceContent(restored)
     setContent(restored)
     setEditVersion((value) => value + 1)
-    save.markEdited(restored)
+    save.restoreDraft({ ...draftFound, content: restored })
     setDraftFound(null)
     setNotice('已恢复本地草稿，保存成功后会清除草稿副本。')
   }
@@ -986,6 +996,7 @@ function NotebookPageBody() {
             onSaveShortcut={() => void save.saveNow()}
             onReady={(editor) => {
               editorReadyRef.current = true
+              setEditorReady(true)
               save.reset(editor.getJSON() as DocNode, save.revision, save.lastSavedAt)
             }}
           />

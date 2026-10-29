@@ -14,15 +14,29 @@ export type AgentStepEvent = {
   tool: string
   detail: string
   status: 'running' | 'done'
+  duration_ms?: number | null
+  /** Tool artifacts already created, preserved if the stream ends before `final`. */
+  suggestions?: AgentSuggestion[]
 }
 
 export type AgentDeltaEvent = { type: 'delta'; text: string }
+
+export type AgentThinkingEvent = { type: 'thinking'; text: string }
 
 export type AgentNoticeEvent = { type: 'notice'; text: string }
 
 export type AgentSuggestion =
   | { type: 'notebook_edit_suggestion'; id: string; notebook_id: string; notebook_title: string; base_revision: number; impact: string }
   | { type: 'knowledge_proposal'; id: string; name: string }
+  | { type: 'quiz'; id: string; quiz_id: string; title: string; item_count: number }
+  | { type: 'review_outline'; id: string; artifact_id?: string; favorite?: boolean; title: string; module_count: number; item_count: number; modules: { title: string; priority: 'high' | 'medium' | 'low'; items: { point: string; ref?: string }[] }[] }
+  | { type: 'concept_contrast'; id: string; artifact_id?: string; pair_count: number; pairs: { a: string; b: string; core: string; dimensions: { name: string; a: string; b: string }[]; anchor?: string }[] }
+
+export type AgentProcessTrace = {
+  thinking: string
+  thinking_ms?: number
+  steps: { tool: string; detail: string; duration_ms?: number | null }[]
+}
 
 export type AgentFinalEvent = {
   type: 'final'
@@ -34,6 +48,7 @@ export type AgentFinalEvent = {
   message_id?: string
   fallback?: boolean
   reason?: string
+  process?: AgentProcessTrace | null
   /** 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表 */
   conversation_title?: string
 }
@@ -43,6 +58,7 @@ export type AgentErrorEvent = { type: 'error'; message: string }
 export type AgentEvent =
   | AgentStepEvent
   | AgentDeltaEvent
+  | AgentThinkingEvent
   | AgentNoticeEvent
   | AgentFinalEvent
   | AgentErrorEvent
@@ -69,6 +85,8 @@ export type AgentQuestionPayload = {
   teacher_persona?: string
   material_id?: string
   allow_web?: boolean
+  allow_quiz?: boolean
+  learning_mode?: 'direct' | 'guided'
   idempotency_key?: string
   reading_context?: AgentReadingContext
   notebook_context?: AgentNotebookContext
@@ -77,20 +95,23 @@ export type AgentQuestionPayload = {
 export type AgentStreamHandlers = {
   onStep?: (event: AgentStepEvent) => void
   onDelta?: (event: AgentDeltaEvent) => void
+  onThinking?: (event: AgentThinkingEvent) => void
   onNotice?: (event: AgentNoticeEvent) => void
   onFinal?: (event: AgentFinalEvent) => void
   onError?: (event: AgentErrorEvent) => void
 }
 
 /** 解析一段 SSE 缓冲为事件列表，返回未成帧的余量。 */
+const FRAME_BOUNDARY = /\r?\n\r?\n/
+
 export function parseAgentStream(buffer: string): { events: AgentEvent[]; rest: string } {
   const events: AgentEvent[] = []
   let rest = buffer
-  let boundary = rest.indexOf('\n\n')
-  while (boundary >= 0) {
-    const frame = rest.slice(0, boundary).trim()
-    rest = rest.slice(boundary + 2)
-    boundary = rest.indexOf('\n\n')
+  let boundary = FRAME_BOUNDARY.exec(rest)
+  while (boundary) {
+    const frame = rest.slice(0, boundary.index).trim()
+    rest = rest.slice(boundary.index + boundary[0].length)
+    boundary = FRAME_BOUNDARY.exec(rest)
     if (!frame.startsWith('data:')) continue
     try {
       events.push(JSON.parse(frame.slice(5).trim()) as AgentEvent)

@@ -12,6 +12,7 @@ import './assistant-workspace.css'
 import './features/home/home.css'
 import './features/home/home-courses.css'
 import './garden-theme.css'
+import './features/forest/botanical-surfaces.css'
 
 const router = createBrowserRouter([{ path: '*', element: <App /> }])
 

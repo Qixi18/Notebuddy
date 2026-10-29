@@ -62,10 +62,11 @@ def retrieve(
     material_id: str | None = None,
     page_number: int | None = None,
     limit: int = 5,
+    notebook_id: str | None = None,
 ) -> list[RetrievedChunk]:
     terms = query_terms(question)
     query_vector = _embed_query(db, course_id, question)
-    documents = _retrieve_documents(
+    documents = [] if notebook_id else _retrieve_documents(
         db, course_id=course_id, terms=terms, query_vector=query_vector,
         material_id=material_id, page_number=page_number,
     )
@@ -73,6 +74,7 @@ def retrieve(
     # mix unrelated Notebook body chunks into the result set.
     notebooks = [] if material_id else _retrieve_notebooks(
         db, course_id=course_id, terms=terms, query_vector=query_vector,
+        notebook_id=notebook_id,
     )
     merged = sorted(documents + notebooks, key=lambda item: item.score, reverse=True)
     return merged[:limit]
@@ -176,6 +178,7 @@ def _retrieve_documents(
 
 def _retrieve_notebooks(
     db: Session, *, course_id: str, terms: list[str], query_vector: list[float] | None,
+    notebook_id: str | None = None,
 ) -> list[RetrievedChunk]:
     rows = db.execute(
         select(NotebookSection, Notebook)
@@ -183,6 +186,7 @@ def _retrieve_notebooks(
         .where(
             Notebook.course_id == course_id,
             Notebook.deleted_at.is_(None),
+            *([Notebook.id == notebook_id] if notebook_id else []),
         )
     ).all()
     results: list[RetrievedChunk] = []

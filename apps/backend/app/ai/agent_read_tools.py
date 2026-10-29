@@ -22,6 +22,7 @@ from app.document_processing.service import current_run
 from app.notes.document import document_to_markdown, load_document
 from app.retrieval.rerank import rerank
 from app.retrieval.service import RetrievedChunk, retrieve
+from app.services.course_scope import material_in_course
 
 TOOL_RESULT_MAX_CHARS = 1600
 CHUNK_TEXT_MAX_CHARS = 400
@@ -52,10 +53,24 @@ def _format_chunk(index: int, chunk: RetrievedChunk) -> str:
     return f"[片段{index} | 课程资料：{chunk.lecture_title} | {location}]\n{chunk.text[:CHUNK_TEXT_MAX_CHARS]}"
 
 
-def _search_course(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
+def _search_course(
+    db: Session, *, course_id: str, arguments: dict[str, Any],
+    scope: AgentScope = "course", locked_notebook_id: str | None = None,
+) -> ToolOutcome:
     query = str(arguments.get("query") or "").strip()[:200]
     if not query:
         return ToolOutcome("检索关键词为空", "请提供非空 query。")
+    if scope == "note":
+        notebook, error = load_notebook(db, course_id, str(locked_notebook_id or ""))
+        if notebook is None:
+            return ToolOutcome("笔记范围不可用", error or "当前笔记未锁定，已拒绝检索。")
+        if arguments.get("material_id"):
+            return ToolOutcome("超出锁定范围", "锁定笔记会话不能切换到其他课件。")
+        chunks = retrieve(db, course_id=course_id, question=query, notebook_id=notebook.id, limit=6)
+        if not chunks:
+            return ToolOutcome(f"笔记中未检索到「{query}」", "当前锁定笔记中没有匹配片段。")
+        body = "\n\n".join(_format_chunk(index + 1, chunk) for index, chunk in enumerate(chunks))
+        return ToolOutcome(f"在笔记《{notebook.title}》中命中 {len(chunks)} 条", truncate(body), chunks=chunks)
     material_id = arguments.get("material_id")
     if material_id:
         material = db.get(Material, str(material_id))
@@ -83,7 +98,10 @@ def _read_notebook(
     db: Session, *, course_id: str, scope: AgentScope,
     locked_notebook_id: str | None, arguments: dict[str, Any],
 ) -> ToolOutcome:
-    notebook_id = str(arguments.get("notebook_id") or locked_notebook_id or "")
+    requested_notebook_id = str(arguments.get("notebook_id") or "")
+    if scope == "note" and requested_notebook_id and requested_notebook_id != locked_notebook_id:
+        return ToolOutcome("超出锁定范围", "锁定笔记会话只能读取当前锁定的笔记。")
+    notebook_id = str(locked_notebook_id if scope == "note" else requested_notebook_id or locked_notebook_id or "")
     if not notebook_id:
         return ToolOutcome(
             "未指定笔记",
@@ -197,11 +215,27 @@ def _get_source_coverage(db: Session, *, course_id: str, arguments: dict[str, An
     return ToolOutcome(f"覆盖：{cited_total}/{total} 个内容块已引用", truncate(payload))
 
 
-def _explain_term(db: Session, *, course_id: str, arguments: dict[str, Any]) -> ToolOutcome:
+def _explain_term(
+    db: Session, *, course_id: str, arguments: dict[str, Any],
+    scope: AgentScope = "course", locked_notebook_id: str | None = None,
+    fixed_material_id: str | None = None,
+) -> ToolOutcome:
     term = str(arguments.get("term") or "").strip()[:200]
     if not term:
         return ToolOutcome("术语为空", "请提供非空 term。")
-    chunks = retrieve(db, course_id=course_id, question=term, limit=6)
+    notebook_id = None
+    material_id = None if scope == "note" else fixed_material_id or str(arguments.get("material_id") or "").strip() or None
+    if scope == "note":
+        notebook, error = load_notebook(db, course_id, str(locked_notebook_id or ""))
+        if notebook is None:
+            return ToolOutcome("笔记范围不可用", error or "当前笔记未锁定，已拒绝检索。")
+        notebook_id = notebook.id
+    elif material_id:
+        material = db.get(Material, material_id)
+        if material is None or material.deleted_at is not None or not material_in_course(db, material, course_id):
+            return ToolOutcome("资料不属于当前课程", "指定的 material_id 不存在或不属于当前课程。")
+    chunks = retrieve(db, course_id=course_id, question=term, notebook_id=notebook_id,
+                      material_id=material_id, limit=6)
     if not chunks:
         return ToolOutcome(f"资料未出现「{term}」", f"课程资料与笔记中没有出现「{term}」，请勿编造出处。")
     lines = [f"「{term}」在课程资料/笔记中的出处："]

@@ -28,7 +28,9 @@ export function NotebookRootMenu({ courseId, courseName, onClose, returnState }:
     event.preventDefault()
     if (!title.trim() || busy) return
     setBusy(true); setError(undefined)
-    try { upload((await api.createNotebook(courseId, title.trim())).id) }
+    try {
+      upload((await api.createNotebook(courseId, title.trim())).id)
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : '笔记本创建失败') }
     finally { setBusy(false) }
   }

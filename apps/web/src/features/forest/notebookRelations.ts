@@ -10,16 +10,15 @@ export function projectDirectory(tree: CourseTree): CourseTree {
   return {
     ...tree,
     notebooks: tree.notebooks.map(book => {
-      const section = (value: SectionRead): SectionRead => {
-        const blockId = value.block_id ?? value.id
-        return { ...value, block_id: blockId, id: sceneBlockId(book.id, blockId) }
-      }
+      const section = (value: SectionRead): SectionRead[] => value.block_id
+        ? [{ ...value, id: sceneBlockId(book.id, value.block_id) }]
+        : []
       const chapters = (rows: typeof book.chapters) => rows.map(chapter => ({
-        ...chapter, sections: chapter.sections.map(section),
+        ...chapter, sections: chapter.sections.flatMap(section),
       }))
       return {
         ...book, chapters: chapters(book.chapters),
-        historical_sections: book.historical_sections.map(section),
+        historical_sections: book.historical_sections.flatMap(section),
         removed_chapters: chapters(book.removed_chapters ?? []),
       }
     }),
@@ -40,7 +39,7 @@ export function projectRelations(records: NotebookRelation[], trees: CourseTree[
     if (source?.course_id !== record.source_course_id || target?.course_id !== record.target_course_id) return []
     const anchor = (book: NonNullable<typeof source>, blockId?: string | null) => book.chapters
       .filter(chapter => !chapter.deleted_at).flatMap(chapter => chapter.sections)
-      .concat(book.historical_sections).find(section => !blockId || (section.block_id ?? section.id) === blockId)
+      .concat(book.historical_sections).find(section => section.block_id && (!blockId || section.block_id === blockId))
     const sourceBlock = source && anchor(source, record.source_block_id)
     const targetBlock = target && anchor(target, record.target_block_id)
     if (!sourceBlock || !targetBlock) return []

@@ -1074,12 +1074,32 @@ class ConversationMessage(Base):
     model_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
     failure_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    process_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggestions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     evidence: Mapped[list[MessageEvidence]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
+
+    @property
+    def process(self) -> dict | None:
+        import json
+        try:
+            value = json.loads(self.process_json) if self.process_json else None
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    @property
+    def suggestions(self) -> list | None:
+        import json
+        try:
+            value = json.loads(self.suggestions_json) if self.suggestions_json else None
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, list) else None
 
 
 class MessageEvidence(Base):
@@ -1184,6 +1204,10 @@ class NoteSuggestion(Base):
 
     note: Mapped[Note] = relationship()
 
+    @property
+    def note_title(self) -> str | None:
+        return self.note.title if self.note else None
+
 
 class Feedback(Base):
     __tablename__ = "feedback"
@@ -1204,6 +1228,78 @@ class Feedback(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="feedback")
+
+
+class Quiz(Base):
+    __tablename__ = "quizzes"
+    __table_args__ = (Index("ix_quizzes_course_status", "course_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    material_id: Mapped[str | None] = mapped_column(
+        ForeignKey("materials.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    items: Mapped[list[QuizItem]] = relationship(
+        back_populates="quiz", cascade="all, delete-orphan", order_by="QuizItem.seq"
+    )
+
+
+class QuizItem(Base):
+    __tablename__ = "quiz_items"
+    __table_args__ = (Index("ix_quiz_items_quiz_seq", "quiz_id", "seq"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"))
+    seq: Mapped[int] = mapped_column(nullable=False)
+    item_type: Mapped[str] = mapped_column(String(20), default="choice", nullable=False)
+    stem: Mapped[str] = mapped_column(Text, nullable=False)
+    options_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    difficulty: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    favorite: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    marked: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    dismissed: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    knowledge_node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    quiz: Mapped[Quiz] = relationship(back_populates="items")
+
+
+class QuizAttempt(Base):
+    __tablename__ = "quiz_attempts"
+    __table_args__ = (Index("ix_quiz_attempts_item_created", "item_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"))
+    item_id: Mapped[str] = mapped_column(ForeignKey("quiz_items.id", ondelete="CASCADE"))
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    correct: Mapped[bool] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class ReviewArtifact(Base):
+    __tablename__ = "review_artifacts"
+    __table_args__ = (Index("ix_review_artifacts_course_kind", "course_id", "kind"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    favorite: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    dismissed: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
 
 class BackupRecord(Base):

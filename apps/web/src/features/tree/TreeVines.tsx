@@ -70,6 +70,13 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
     window.addEventListener('keydown', close)
     return () => window.removeEventListener('keydown', close)
   }, [])
+  const exclusions = useMemo<VineExclusionZone[]>(() => [
+    ...(leafExclusions ?? []),
+    ...[...(courseGeometry?.values() ?? [])].map(course => {
+      const scale = course.scale ?? 1
+      return { rect: { x: course.x - 350 * scale, y: course.y - 85 * scale, width: 700 * scale, height: 170 * scale } }
+    }),
+  ], [leafExclusions, courseGeometry])
   const inputs = useMemo(() => {
     const counts = new Map<string, number>()
     const result: VineInput[] = []
@@ -98,10 +105,10 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
       }
       if (!start || !end || Math.hypot(end.x - start.x, end.y - start.y) < 30) continue
       if (start.x > end.x) [start, end] = [end, start]
-      result.push({ id: group.id, order, start, end, midpoint, relationIds: group.relations.map(relation => relation.id), leafRange: courseGeometry ? [.36,.64] : undefined, stemHitRange, startTangent: { x: 1, y: order === 0 ? -.5 : .2 }, endTangent: { x: 1, y: order === 0 ? .35 : -.3 } })
+      result.push({ id: group.id, order, start, end, midpoint, routeExclusions: exclusions, relationIds: group.relations.map(relation => relation.id), leafRange: courseGeometry ? [.36,.64] : undefined, stemHitRange, startTangent: { x: 1, y: order === 0 ? -.5 : .2 }, endTangent: { x: 1, y: order === 0 ? .35 : -.3 } })
     }
     return result
-  }, [groups, endpoints, noteBooks, selectedId, courseGeometry, stemHitRange, layout])
+  }, [groups, endpoints, noteBooks, selectedId, courseGeometry, stemHitRange, layout, exclusions])
   const groupTitle = (group: VineGroup) => {
     const first = group.relations[0]
     return `${first.source_course_name ?? group.courses[0]}与${first.target_course_name ?? group.courses[1]}`
@@ -112,7 +119,7 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
   const previewRelation = preview?.kind === 'relation' ? relationMap.get(preview.id) : undefined
   const previewGroup = preview?.kind === 'group' ? groupMap.get(preview.id) : undefined
   return <g className="kt-vines">
-    <VineLayer groups={inputs} screenScale={zoom} leafExclusions={leafExclusions} leafAtlasHref="/assets/forest/leaves-atlas.webp" selectedRelationId={selectedId} selectedGroupId={groups.find(group => group.relations.some(relation => relation.id === selectedId))?.id ?? openGroup} onSelectedPoint={onSelectedPoint}
+    <VineLayer groups={inputs} screenScale={zoom} leafExclusions={exclusions} leafAtlasHref="/assets/forest/leaves-atlas.webp" selectedRelationId={selectedId} selectedGroupId={groups.find(group => group.relations.some(relation => relation.id === selectedId))?.id ?? openGroup} onSelectedPoint={onSelectedPoint}
       groupMembers={id => groupMap.get(id)!.relations.map(relation => relation.id).join('|')}
       groupLabel={id => `查看${groupTitle(groupMap.get(id)!)}的${groupMap.get(id)!.relations.length}条知识联系`}
       relationLabel={id => relationTitle(relationMap.get(id)!)} previewId={previewId} previewItemId={preview?.id}

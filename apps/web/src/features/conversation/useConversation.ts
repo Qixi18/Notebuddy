@@ -30,6 +30,7 @@ export type AskScope = {
 /** agent 执行中的实时状态：步骤时间线 + 流式文本 + 最终事件 */
 export type AgentRunState = {
   steps: AgentStepEvent[]
+  thinking: string
   streamingText: string
   notice?: string
   final?: AgentFinalEvent
@@ -42,6 +43,8 @@ export type AgentAskOptions = {
   materialId?: string
   readingContext?: AgentReadingContext
   notebookContext?: AgentNotebookContext
+  allowQuiz?: boolean
+  learningMode?: 'direct' | 'guided'
 }
 
 export type ConversationState = {
@@ -337,7 +340,7 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
-    setAgentRun({ steps: [], streamingText: '' })
+    setAgentRun({ steps: [], thinking: '', streamingText: '' })
     let targetId = ''
     const historyRequest = historyRequestRef.current
     /* 中断器：用户点「停止」时 abort 本次请求（signal 铺在 fetch 上，见 api/agent.ts） */
@@ -367,11 +370,14 @@ export function useConversation(
         teacher_persona: teacherPersona,
         material_id: options.materialId,
         allow_web: true,
+        allow_quiz: options.allowQuiz ?? true,
+        learning_mode: options.learningMode ?? 'direct',
         idempotency_key: `${targetId}-${askedAt}`,
         reading_context: options.readingContext,
         notebook_context: options.notebookContext,
       }, {
         onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
+        onThinking: (event) => setAgentRun((current) => current ? { ...current, thinking: current.thinking + event.text } : current),
         onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
         onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
@@ -391,6 +397,8 @@ export function useConversation(
             evidence: [],
             mode: final.mode,
             sources: final.sources ?? [],
+            suggestions: final.suggestions ?? [],
+            process: final.process ?? null,
           }])
           // 同步后端回写的标题（仅标题；scope 分组字段不在流里回传，且只在首轮生效，
           // 避免把中途改范围错误反映成分组迁移——下次载入会话列表会自洽）。

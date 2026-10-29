@@ -7,7 +7,7 @@ import { api } from '../src/api'
 
 vi.mock('../src/api', () => ({ api: { getNotebookSections: vi.fn(async (_course: string, book: string) => [{ block_id: `note${book[1]}-0`, excerpt: '这是从真实笔记读取的内容预览。' }]) } }))
 
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); sessionStorage.clear() })
 const courses = [0, 1, 2].map(index => ({ course_id: `c${index}`, name: `课程${index}`, learning_state: 'learning', note_count: 8, material_count: 2, prerequisites: [] })) as unknown as ForestCourse[]
 const tree = { course_id: 'c0', notebooks: [0, 1, 2, 3].map(index => ({
   id: `b${index}`, course_id: 'c0', title: `笔记本${index}`, tree_slot: index, order_revision: 0,
@@ -15,6 +15,15 @@ const tree = { course_id: 'c0', notebooks: [0, 1, 2, 3].map(index => ({
     id: `note${index}-${n}`, notebook_id: `b${index}`, material_id: `m${index}`, title: `知识点${index}-${n}`, tree_slot: n,
   })) }],
 })) } as unknown as CourseTree
+
+test('the selected notebook survives returning to the home scene', () => {
+  const props = { courses: courses.slice(0, 1), trees: [tree], onRoot: vi.fn(), onNotebook: vi.fn(), onNote: vi.fn() }
+  const first = render(<HomeCourseGarden {...props} />)
+  fireEvent.change(screen.getByRole('combobox', { name: '课程0的笔记本目录' }), { target: { value: 'b2' } })
+  first.unmount()
+  render(<HomeCourseGarden {...props} />)
+  expect((screen.getByRole('combobox', { name: '课程0的笔记本目录' }) as HTMLSelectElement).value).toBe('b2')
+})
 
 test.each([1, 2, 3])('home shows all %i learning courses together without paging or camera controls', count => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 900, height: 700 } as DOMRect)
@@ -72,4 +81,18 @@ test('a planning course has no fabricated clickable knowledge leaves', () => {
   const { container } = render(<HomeCourseGarden courses={courses.slice(0, 1)} trees={[{ course_id: 'c0', notebooks: [] }]} onRoot={vi.fn()} onNotebook={vi.fn()} onNote={vi.fn()} />)
   expect(container.querySelectorAll('[data-home-leaf-id]')).toHaveLength(0)
   expect(screen.getByText('上传资料，让第一片知识叶子生长')).toBeTruthy()
+})
+
+test('the stone course title is the single accessible course-menu entry and keeps the full course name', () => {
+  const name = '计算机组成原理与硬件描述语言综合实践'
+  const onRoot = vi.fn()
+  render(<HomeCourseGarden courses={[{ ...courses[0], name }]} trees={[tree]}
+    onRoot={onRoot} onNotebook={vi.fn()} onNote={vi.fn()} />)
+  const title = screen.getByRole('heading', { name })
+  const entry = within(title).getByRole('button', { name: `课程菜单：${name}` })
+  expect(entry.getAttribute('type')).toBe('button')
+  expect(entry.textContent).toContain(name)
+  expect(screen.getAllByRole('button', { name: `课程菜单：${name}` })).toHaveLength(1)
+  fireEvent.click(entry)
+  expect(onRoot).toHaveBeenCalledExactlyOnceWith('c0')
 })

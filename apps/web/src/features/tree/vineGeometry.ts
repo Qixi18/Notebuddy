@@ -11,6 +11,8 @@ export type VineInput = {
   startTangent?: Point; endTangent?: Point;
   /** An optional clearance waypoint for a third tree in a triangular grove. */
   midpoint?: Point;
+  /** Root beds and course controls are hard no-cross areas for the whole stem. */
+  routeExclusions?: VineExclusionZone[];
 };
 export type RelationLeaf = {
   relationId: string; t: number; base: Point; center: Point; angle: number;
@@ -54,6 +56,41 @@ const LEAF = 'M0,0 C-8,-5 -18,-21 -12,-33 C-9,-41 -3,-45 2,-49 C5,-39 18,-32 14,
 const VEIN = 'M0,0 C1,-15 0,-30 2,-46';
 const SIDE_VEINS = ['M1,-12 Q-5,-14 -11,-23','M1,-20 Q7,-22 12,-29','M1,-28 Q-5,-30 -9,-35','M1,-36 Q5,-37 7,-40'];
 
+function hangingArc(a: Point, b: Point, mid: Point): Cubic[] {
+  const control = sub(mul(mid, 2), mul(add(a, b), .5));
+  return [[a, mix(a, control, 2 / 3), mix(b, control, 2 / 3), b]];
+}
+
+function clearCoursePanels(input: VineInput, curves: Cubic[], mid: Point): Cubic[] {
+  const contains = (q: Point, r: { x: number; y: number; width: number; height: number }, padding = 0) =>
+    q.x >= r.x - padding && q.x <= r.x + r.width + padding && q.y >= r.y - padding && q.y <= r.y + r.height + padding;
+  // A graft is authoritative. A mismeasured panel containing it cannot be
+  // avoided without detaching that endpoint, so it is not a routing obstacle.
+  const panels = (input.routeExclusions ?? []).flatMap(zone => 'rect' in zone ? [zone.rect] : [])
+    .filter(r => r.width > 0 && r.height > 0 && !contains(input.start, r) && !contains(input.end, r));
+  if (!panels.length) return curves;
+  // Reserve tendrils and the 44px middle hit corridor down to interactive zoom.
+  // Only the non-interactive graft tips taper their clearance toward the stem.
+  const clearance = (t: number) => 8 + 76 * Math.min(1, t / .18, (1 - t) / .18);
+  if (!Array.from({ length: 241 }, (_, i) => i / 240).some(t => panels.some(r => contains(vinePoint(curves, t), r, clearance(t))))) return curves;
+  const arc = hangingArc(input.start, input.end, mid);
+  let upperY = mid.y;
+  for (let i = 1; i < 240; i++) {
+    const t = i / 240, q = vinePoint(arc, t), padding = clearance(t);
+    for (const r of panels) {
+      if (q.x < r.x - padding || q.x > r.x + r.width + padding) continue;
+      // A quadratic through its midpoint has y(t) = lerp(a,b,t) +
+      // 4t(1-t)(mid.y - mean(a.y,b.y)). Solve the upper clearance bound;
+      // x is independent of the chosen midpoint height.
+      const ceiling = r.y - padding - 8 - input.order * 18;
+      const limit = (input.start.y + input.end.y) / 2
+        + (ceiling - ((1 - t) * input.start.y + t * input.end.y)) / (4 * t * (1 - t));
+      upperY = Math.min(upperY, limit);
+    }
+  }
+  return hangingArc(input.start, input.end, p(mid.x, upperY));
+}
+
 /** The three routes reserve separate height bands, with unequal low points. No random state. */
 export function buildVine(input: VineInput): VineGeometry {
   if(!input.id || !Number.isInteger(input.order) || input.order<0 || input.order>3) throw new RangeError('A tree pair allows at most four authored lanes (0–3).');
@@ -69,10 +106,10 @@ export function buildVine(input: VineInput): VineGeometry {
   const reach=Math.min(105,span*.16), bridge=mul(along,Math.min(125,span*.19));
   // A clearance route is one continuous hanging arc through the reserved point.
   // Two separately steered halves created reverse hooks and a tight central bend.
-  const control = sub(mul(mid,2),mul(add(a,b),.5));
-  const curves: Cubic[]=input.midpoint
-    ? [[a,mix(a,control,2/3),mix(b,control,2/3),b]]
+  const preferred: Cubic[]=input.midpoint
+    ? hangingArc(a,b,mid)
     : [[a,add(a,mul(departure,reach)),sub(mid,bridge),mid],[mid,add(mid,bridge),sub(b,mul(arrival,reach)),b]];
+  const curves = clearCoursePanels(input, preferred, mid);
   const radius=(t:number)=>1.8+2.9*Math.pow(Math.abs(t-.5)*2,.8)+.3*Math.sin(t*11+order);
   const samples=Array.from({length:121},(_,i)=>{const t=i/120;return {q:vinePoint(curves,t),n:norm(direction(curves,t)),r:radius(t)}});
   const edge=(s:number)=>samples.map(v=>add(v.q,mul(v.n,s*v.r)));

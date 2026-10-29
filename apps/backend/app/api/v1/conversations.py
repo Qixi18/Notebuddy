@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -22,6 +22,7 @@ from app.db.models import (
 from app.schemas.api import (
     ConversationCreate,
     ConversationMessageCreate,
+    ConversationMessageHit,
     ConversationMessageRead,
     ConversationRead,
     ConversationTitleUpdate,
@@ -32,6 +33,7 @@ from app.services.conversations import (
     DEFAULT_CONVERSATION_TITLE,
     derive_conversation_title,
     persist_assistant_message,
+    search_course_messages,
 )
 from app.services.course_scope import material_in_course
 
@@ -97,6 +99,8 @@ def _message_read(db: Session, message: ConversationMessage, conversation_title:
         evidence=evidence,
         mode=_mode_from_evidence(message),
         sources=sources_from_evidence(db, message),
+        process=message.process,
+        suggestions=message.suggestions,
         conversation_title=conversation_title or DEFAULT_CONVERSATION_TITLE,
     )
 
@@ -199,6 +203,14 @@ def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[C
         ).order_by(ConversationMessage.created_at)
     ).all())
     return [_message_read(db, message, conversation.title) for message in messages]
+
+
+@router.get("/courses/{course_id}/conversations/search", response_model=list[ConversationMessageHit])
+def search_course_conversations(
+    course_id: str, q: str = Query(default="", max_length=120), db: Session = Depends(get_db),
+) -> list[dict]:
+    ensure_course(db, course_id)
+    return search_course_messages(db, course_id, q)
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=ConversationMessageRead, status_code=201)

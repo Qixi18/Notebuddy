@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
 import type { Conversation, Course } from '../../types'
+import { api } from '../../api'
 import { buildHistory, conversationTime, conversationTimeLabel } from '../conversation/conversationGroups'
 import {
   ConversationContextMenu,
@@ -265,16 +266,36 @@ export function ConversationList({ conversations, courses, conversationId, busy,
 }
 
 /** Ctrl+K 会话搜索命令面板 */
-export function ConversationSearch({ conversations, conversationId, onSelect, onClose }: {
+export function ConversationSearch({ conversations, conversationId, courseId, onSelect, onClose }: {
   conversations: Conversation[]
   conversationId?: string
+  courseId?: string
   onSelect: (id: string) => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
+  const [messageResults, setMessageResults] = useState<Awaited<ReturnType<typeof api.searchMessages>>>([])
+  const [messageSearchBusy, setMessageSearchBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
+
+  useEffect(() => {
+    const value = query.trim()
+    if (!courseId || value.length < 2) { setMessageResults([]); setMessageSearchBusy(false); return }
+    let active = true
+    setMessageSearchBusy(true)
+    const timer = window.setTimeout(() => {
+      void api.searchMessages(courseId, value).then((results) => {
+        if (active) setMessageResults(results)
+      }).catch(() => {
+        if (active) setMessageResults([])
+      }).finally(() => {
+        if (active) setMessageSearchBusy(false)
+      })
+    }, 180)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [courseId, query])
 
   const results = useMemo(() => {
     const sorted = [...conversations].sort((a, b) => conversationTime(b) - conversationTime(a))
@@ -303,8 +324,8 @@ export function ConversationSearch({ conversations, conversationId, onSelect, on
           maxLength={120}
           onKeyDown={(event) => {
             if (event.key === 'Escape') { onClose(); return }
-            if (event.key === 'Enter' && results[0]) {
-              onSelect(results[0].id)
+            if (event.key === 'Enter' && (messageResults[0] || results[0])) {
+              onSelect(messageResults[0]?.conversation_id ?? results[0].id)
               onClose()
             }
           }}
@@ -330,6 +351,23 @@ export function ConversationSearch({ conversations, conversationId, onSelect, on
               )
             })}
           </ul>
+        )}
+        {query.trim().length >= 2 && (
+          <section className="workspace-palette-messages" aria-label="消息内容匹配">
+            <strong>消息内容{messageSearchBusy ? ' · 搜索中…' : ''}</strong>
+            {messageResults.length === 0 && !messageSearchBusy
+              ? <p className="workspace-palette-empty">没有匹配的消息</p>
+              : <ul className="workspace-palette-list">
+                {messageResults.map((hit) => (
+                  <li key={hit.message_id}>
+                    <button type="button" onClick={() => { onSelect(hit.conversation_id); onClose() }}>
+                      <span>{hit.conversation_title} · {hit.message_role === 'user' ? '你' : 'AI'}</span>
+                      <small>{hit.snippet}</small>
+                    </button>
+                  </li>
+                ))}
+              </ul>}
+          </section>
         )}
         <p className="workspace-palette-hint">Enter 打开第一条 · Esc 关闭</p>
       </div>

@@ -7,7 +7,7 @@ import { notebookPath } from '../src/features/notebook/navigation'
 const tree = (course: string): CourseTree => ({ course_id: course, notebooks: [{
   id: `book-${course}`, course_id: course, title: '笔记', tree_slot: 0, order_revision: 0,
   chapters: [{ id: 'h-1', title: '正文', status: 'parsed', sections: [{
-    id: 'h-1', notebook_id: `book-${course}`, material_id: null, title: '同名标题', tree_slot: 0,
+    id: 'h-1', block_id: 'h-1', notebook_id: `book-${course}`, material_id: null, title: '同名标题', tree_slot: 0,
   }] }], historical_sections: [], removed_chapters: [],
 }] }) as CourseTree
 const relation: NotebookRelation = {

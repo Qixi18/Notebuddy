@@ -9,32 +9,39 @@ export function useNotebookRelationJobs(watchKey: string, settledVersion: number
   const [jobs, setJobs] = useState<Record<string, ForestJob>>({})
   const [error, setError] = useState<string>()
   const epochs = useRef<Record<string, number>>({})
+  const mounted = useRef(true)
   useEffect(() => {
-    let active = true
-    const discover = async () => {
-      if (document.visibilityState === 'hidden') return
-      await Promise.all(watchKey.split('|').filter(Boolean).map(async id => {
-        const epoch = (epochs.current[id] ?? 0) + 1
-        epochs.current[id] = epoch
-        try {
-          const job = await api.getLatestForestJob(id)
-          if (active && epochs.current[id] === epoch) {
-            setJobs(current => {
-              const next = { ...current }
-              if (job) next[id] = job
-              else delete next[id]
-              return next
-            })
-          }
-        } catch (cause) {
-          if (active) setError(cause instanceof Error ? cause.message : '关联任务读取失败')
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const discoverJobs = useCallback(async () => {
+    if (document.visibilityState === 'hidden') return
+    await Promise.all(watchKey.split('|').filter(Boolean).map(async id => {
+      const epoch = (epochs.current[id] ?? 0) + 1
+      epochs.current[id] = epoch
+      try {
+        const job = await api.getLatestForestJob(id)
+        if (mounted.current && epochs.current[id] === epoch) {
+          setJobs(current => {
+            const next = { ...current }
+            if (job) next[id] = job
+            else delete next[id]
+            return next
+          })
+          setError(undefined)
         }
-      }))
-    }
-    void discover()
-    document.addEventListener('visibilitychange', discover)
-    return () => { active = false; document.removeEventListener('visibilitychange', discover) }
-  }, [watchKey, settledVersion])
+      } catch (cause) {
+        if (mounted.current && epochs.current[id] === epoch) {
+          setError(cause instanceof Error ? cause.message : '关联任务读取失败')
+        }
+      }
+    }))
+  }, [watchKey])
+  useEffect(() => {
+    void discoverJobs()
+    document.addEventListener('visibilitychange', discoverJobs)
+    return () => { document.removeEventListener('visibilitychange', discoverJobs) }
+  }, [discoverJobs, settledVersion])
 
   const pendingKey = watchKey.split('|').filter(id => jobs[id]
     && ['pending', 'processing'].includes(jobs[id].status)).map(id => `${id}:${jobs[id].id}`).join('|')
@@ -54,8 +61,13 @@ export function useNotebookRelationJobs(watchKey: string, settledVersion: number
             ? { ...current, [courseId]: job } : current)
           setError(undefined)
           if (job.status === 'completed' || job.status === 'failed') {
-            await refresh()
-            if (active) await refreshDirectories(watchKey.split('|').filter(Boolean))
+            const rows = await refresh()
+            if (active) {
+              const changed = new Set([courseId, ...(rows ?? [])
+                .filter(row => row.source_course_id === courseId || row.target_course_id === courseId)
+                .flatMap(row => [row.source_course_id, row.target_course_id])])
+              await refreshDirectories(watchKey.split('|').filter(id => changed.has(id)))
+            }
           }
         } catch (cause) {
           if (active) setError(cause instanceof Error ? cause.message : '关联任务读取失败')
@@ -68,5 +80,5 @@ export function useNotebookRelationJobs(watchKey: string, settledVersion: number
     epochs.current[courseId] = (epochs.current[courseId] ?? 0) + 1
     setJobs(current => ({ ...current, [courseId]: job }))
   }, [])
-  return { jobs, error, track }
+  return { jobs, error, track, discoverJobs }
 }

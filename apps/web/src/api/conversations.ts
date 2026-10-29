@@ -8,8 +8,19 @@ export type ConversationOwnership = {
   noteTitle?: string | null
 }
 
+export type ConversationMessageHit = {
+  conversation_id: string
+  conversation_title: string
+  message_id: string
+  message_role: string
+  snippet: string
+  created_at: string
+}
+
 export const conversationApi = {
   listConversations: (courseId: string) => request<Conversation[]>(`/api/v1/courses/${courseId}/conversations`),
+  searchMessages: (courseId: string, query: string) =>
+    request<ConversationMessageHit[]>(`/api/v1/courses/${courseId}/conversations/search?q=${encodeURIComponent(query)}`),
   renameConversation: (conversationId: string, title: string) =>
     request<Conversation>(`/api/v1/conversations/${conversationId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },

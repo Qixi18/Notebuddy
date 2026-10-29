@@ -102,3 +102,66 @@ def test_pdf_document_ir_flows_into_notebook_generation_with_source_citations(
         )).all())
         assert citations
         assert all(citation.parse_run_id == parsed.run.id for citation in citations)
+
+
+def test_image_ocr_flows_into_notebook_generation_with_source_citations(
+    file_db, monkeypatch, tmp_path,
+):
+    from app.api.v1.generation import create_generation_job
+    from app.document_processing.engines.ocr import OcrLine, OcrResult
+    from app.document_processing.service import create_parse_run, execute_parse_run
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "notebook_generator", "offline-extractive")
+    monkeypatch.setenv("NOTEBOOK_DOCUMENT_PARSER", "native")
+    (tmp_path / "originals").mkdir()
+    image_path = tmp_path / "originals" / "limits.png"
+    from PIL import Image
+
+    Image.new("RGB", (640, 360), "white").save(image_path)
+    monkeypatch.setattr(worker, "SessionLocal", sessionmaker(
+        bind=file_db, autoflush=False, expire_on_commit=False,
+    ))
+    ocr = lambda _image, **_kwargs: OcrResult(lines=[
+        OcrLine("Chapter 1 Limits", confidence=.99),
+        OcrLine("A limit describes how a function approaches a value.", confidence=.99),
+        OcrLine("Left and right limits must agree for a limit to exist.", confidence=.99),
+    ], engine="test-ocr", version="1")
+
+    with Session(file_db, autoflush=False, expire_on_commit=False) as session:
+        course = make_course(session)
+        notebook = make_notebook(session, course)
+        asset = make_asset(session, notebook, name="limits.png", media_type="image", extension=".png")
+        asset.storage_key = "originals/limits.png"
+        asset.byte_size = image_path.stat().st_size
+        session.commit()
+
+        parse_run = create_parse_run(session, asset=asset)
+        parsed = execute_parse_run(
+            session, parse_run.id, source_path=image_path,
+            ocr_available=True, vision_available=False, ocr_recognize=ocr,
+        )
+        session.commit()
+        assert parsed.run.status == "completed"
+        assert parsed.ir.quality.generation_allowed is True
+        assert "Chapter 1 Limits" in parsed.ir.pages[0].text
+        assert parsed.ir.pages[0].extraction == "ocr"
+
+        created = create_generation_job(
+            notebook.id, NotebookGenerationCreate(asset_ids=[asset.id]), "image-ocr-e2e", session,
+        )
+        session.commit()
+        assert worker.claim_next_generation_job() == created["id"]
+        worker.process_generation_job(created["id"])
+
+        session.expire_all()
+        job = session.get(NotebookGenerationJob, created["id"])
+        notebook = session.get(Notebook, notebook.id)
+        assert job.status == "completed", job.error_message
+        assert notebook.document_revision == 1
+        assert "Limits" in str(load_document(notebook.document_json).content)
+        citations = list(session.scalars(select(NotebookBlockSource).where(
+            NotebookBlockSource.notebook_id == notebook.id,
+        )).all())
+        assert citations
+        assert all(citation.parse_run_id == parsed.run.id for citation in citations)

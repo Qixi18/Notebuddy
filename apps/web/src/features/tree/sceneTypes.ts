@@ -11,7 +11,6 @@ export type KnowledgeTreeView = {
   focusedCourseId?: string
   contents?: { courseId: string; notebookId?: string }
   revealedNoteId?: string
-  knownNotebookIds?: Record<string, string[]>
 }
 export type KnowledgeTreeSceneProps = {
   courses: ForestCourse[]

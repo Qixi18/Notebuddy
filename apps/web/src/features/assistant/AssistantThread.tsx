@@ -3,6 +3,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ConversationMessage } from '../../types'
 import { modeLabels, noEvidenceLabels } from './answerMeta'
 import { AgentSteps } from './AgentSteps'
+import { AgentThinking } from './AgentThinking'
+import { MessageSkillCards } from './AgentCards'
 import { AssistantMessageMarkdown } from './AssistantMessageContent'
 import { CitationText } from './CitationText'
 import { SourcesRow } from './SourcesRow'
@@ -65,7 +67,7 @@ async function copyText(text: string): Promise<boolean> {
 /** 追问建议：点一下只把话术填进输入框，由用户决定要不要发 */
 const FOLLOW_UPS = ['再展开讲讲', '能举个例子吗', '这和上一讲有什么关系'] as const
 
-function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, retryText, onFollowUp }: {
+function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, retryText, onFollowUp, skillCourseId, onSkillAsk }: {
   message: ConversationMessage
   personaName: string
   onFeedback: (messageId: string, category: 'helpful' | 'not_helpful') => Promise<boolean>
@@ -77,6 +79,8 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
   retryText?: string
   /** 追问 chips：只填草稿，不自动发送 */
   onFollowUp?: (prompt: string) => void
+  skillCourseId?: string
+  onSkillAsk?: (prompt: string) => void
 }) {
   const [activeNo, setActiveNo] = useState<number>()
   /* 每次点击角标都递增序号：同一个角标连点两次也要能重新定位（只靠 activeNo 不会触发副作用） */
@@ -121,6 +125,16 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
         <div className="workspace-msg-content">
           <CitationText content={message.content} sources={sources} onCite={handleCite} />
         </div>
+
+        {message.process ? <details className="message-process">
+          <summary>过程记录{message.process.steps.length ? ` · ${message.process.steps.length} 个步骤` : ''}</summary>
+          {message.process.thinking ? <pre className="agent-thinking-body agent-thinking-body-open">{message.process.thinking}</pre> : null}
+          <AgentSteps steps={message.process.steps.map((step) => ({
+            type: 'step' as const, tool: step.tool, detail: step.detail,
+            duration_ms: step.duration_ms, status: 'done' as const,
+          }))} />
+        </details> : null}
+        <MessageSkillCards suggestions={message.suggestions ?? []} courseId={skillCourseId} onAsk={onSkillAsk} />
 
         {message.status !== 'failed' && message.mode && sources.length === 0 && (
           <span className="workspace-msg-noevidence">
@@ -184,7 +198,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
 }
 
 /** 对话主线：欢迎态 / 用户气泡 / 回答卡（角标 + 依据行 + 反馈）/ agent 实时块 */
-export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, onFollowUp, agentRun, extras }: {
+export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, onFollowUp, agentRun, extras, skillCourseId, onSkillAsk }: {
   ready: boolean
   busy: boolean
   messages: ConversationMessage[]
@@ -203,6 +217,8 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
   agentRun?: AgentRunState | null
   /** 对话流末尾的附加内容（agent 产出的建议卡片等） */
   extras?: ReactNode
+  skillCourseId?: string
+  onSkillAsk?: (prompt: string) => void
 }) {
   const threadRef = useRef<HTMLDivElement>(null)
   const prevConversation = useRef<string | undefined>(undefined)
@@ -274,6 +290,8 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
             onRetry={onRetry}
             retryText={retryTextFor(index)}
             onFollowUp={onFollowUp}
+            skillCourseId={skillCourseId}
+            onSkillAsk={onSkillAsk}
           />
         ) : (
           <article className="workspace-msg workspace-msg-user" key={`${message.id}-${index}`}>
@@ -298,6 +316,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
               <p className="workspace-agent-aborted-note">这次回答已停止，下面是已收到的部分；可以直接继续提问。</p>
             ) : null}
             <AgentSteps steps={agentRun.steps} />
+            <AgentThinking thinking={agentRun.thinking} live={!agentRun.final && !agentRun.aborted} />
             {agentRun.notice ? <p className="workspace-agent-notice">{agentRun.notice}</p> : null}
             {agentRun.streamingText ? (
               <div className="workspace-agent-streaming">

@@ -27,7 +27,7 @@ from app.ai.agent_read_tools import (
 )
 from app.ai.agent_tool_types import AgentScope, ToolOutcome
 from app.db.model_utils import new_id
-from app.db.models import Notebook, NotebookEditSuggestion
+from app.db.models import Course, Notebook, NotebookEditSuggestion
 from app.knowledge.proposals import create_knowledge_proposal
 from app.notes.document import document_to_markdown, dump_document, load_document
 from app.notes.edits import EditRejected, apply_edits, count_ops
@@ -56,31 +56,50 @@ def build_tool_specs(
     scope: AgentScope,
     editable_notebook: bool,
     allow_web: bool = True,
+    allow_quiz: bool = False,
+    fixed_material_id: str | None = None,
 ) -> list[dict]:
+    search_scope_desc = (
+        "只检索本轮锁定的 Notebook 正文，不得访问课程其他笔记或课件。"
+        if scope == "note" else
+        "仅检索用户当前选中的课件，不得扩大到其他资料。"
+        if fixed_material_id else "检索当前课程的资料解析内容与学习笔记正文。"
+    )
+    search_properties = {"query": {"type": "string", "description": "检索关键词或短语"}}
+    if scope != "note" and not fixed_material_id:
+        search_properties["material_id"] = {"type": "string", "description": "可选：限定某份资料"}
+    skill_material_property = (
+        {"material_id": {"type": "string", "description": "可选：只针对指定课件"}}
+        if scope != "note" and not fixed_material_id else {}
+    )
     specs: list[dict] = [
         _spec(
             "search_course",
-            "检索当前课程的资料解析内容与学习笔记正文。回答需要课程依据时先调用它。",
-            {"query": {"type": "string", "description": "检索关键词或短语"},
-             "material_id": {"type": "string", "description": "可选：限定某份资料"}},
+            f"{search_scope_desc} 回答需要课程依据时先调用它。",
+            search_properties,
             ["query"],
         ),
-        _spec(
-            "read_notebook",
-            "读取一本课程笔记的完整正文（Markdown 视图）。检查用户写的内容时使用。",
-            {"notebook_id": {"type": "string", "description": "笔记 ID；当前打开的笔记可省略"}},
-            [],
-        ),
-        _spec("explain_term", "在课程资料与笔记中定位一个术语出现的原文摘录。",
-              {"term": {"type": "string", "description": "术语"}}, ["term"]),
+        _spec("explain_term", "在当前范围内定位一个术语出现的原文摘录。",
+              {"term": {"type": "string", "description": "术语"},
+               **({"material_id": {"type": "string", "description": "可选：限定某份资料"}}
+                  if scope != "note" and not fixed_material_id else {})}, ["term"]),
     ]
+    if scope == "note" or not fixed_material_id:
+        specs.append(_spec(
+            "read_notebook",
+            "读取当前锁定笔记的完整正文（Markdown 视图）。检查用户写的内容时使用。"
+            if scope == "note" else "读取一本课程笔记的完整正文（Markdown 视图）。检查用户写的内容时使用。",
+            {} if scope == "note" else {
+                "notebook_id": {"type": "string", "description": "笔记 ID；当前打开的笔记可省略"},
+            }, [],
+        ))
     if allow_web:
         specs.append(_spec(
             "web_search",
             "联网搜索课程外部的补充资料。课程依据不足时使用；结果必须标注为网络来源。",
             {"query": {"type": "string", "description": "搜索关键词"}}, ["query"],
         ))
-    if scope in ("course", "global"):
+    if scope in ("course", "global") and not fixed_material_id:
         specs.extend([
             _spec("list_course_notebooks", "列出当前课程全部笔记的标题、ID 与节数。", {}, []),
             _spec(
@@ -135,7 +154,163 @@ def build_tool_specs(
                 },
                 ["candidate_name", "candidate_summary", "rationale"],
             ))
+    if allow_quiz:
+        specs.extend([
+            _spec(
+                "generate_quiz",
+                "根据课程材料生成可作答并自动判分的自测题。用户明确要求出题或测验时调用，禁止直接在回答文本中列题。",
+                {
+                    **skill_material_property,
+                    "count": {"type": "integer", "description": "题目数量，1-5，默认 3"},
+                    "focus": {"type": "string", "description": "可选：出题重点"},
+                    "difficulty": {"type": "string", "description": "可选：用户指定的难度原话"},
+                }, [],
+            ),
+            _spec(
+                "generate_review_outline",
+                "根据课程材料整理复习提纲卡。用户明确要求复习提纲、整理或梳理时调用；不要写入笔记。",
+                {**skill_material_property, "focus": {"type": "string"}}, [],
+            ),
+            _spec(
+                "generate_concept_contrast",
+                "根据课程材料生成易混概念对比卡。用户明确要求概念辨析或比较时调用；不要写入笔记。",
+                {**skill_material_property, "focus": {"type": "string"}}, [],
+            ),
+        ])
     return specs
+
+
+def _learning_material(db: Session, *, course_id: str, material_id: str | None, notebook_id: str | None) -> str:
+    """优先遵守用户明确选中的资料，其次使用锁定 Notebook，再回退课程资料。"""
+    from app.services.skills import _skill_source
+
+    if material_id:
+        return _skill_source(db, course_id=course_id, material_id=material_id, notebook_id=None)
+    return _skill_source(db, course_id=course_id, material_id=None, notebook_id=notebook_id)
+
+
+def _search_course_scoped(
+    db: Session, *, course_id: str, arguments: dict[str, Any],
+    scope: AgentScope, locked_notebook_id: str | None, fixed_material_id: str | None,
+) -> ToolOutcome:
+    scoped = dict(arguments)
+    if fixed_material_id:
+        scoped["material_id"] = fixed_material_id
+    return _search_course(db, course_id=course_id, arguments=scoped,
+                          scope=scope, locked_notebook_id=locked_notebook_id)
+
+
+def _generate_quiz(
+    db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None,
+    scope: AgentScope, locked_notebook_id: str | None, fixed_material_id: str | None,
+) -> ToolOutcome:
+    from app.services.quiz import QuizSchemaError, create_quiz, generate_quiz_payload
+
+    if scope == "note" and not locked_notebook_id:
+        return ToolOutcome("笔记范围不可用", "当前锁定笔记不存在，已拒绝使用课程其他素材。")
+    material_id = None if scope == "note" else fixed_material_id or str(arguments.get("material_id") or "").strip() or None
+    notebook_id = locked_notebook_id if scope == "note" else None
+    source = _learning_material(db, course_id=course_id, material_id=material_id, notebook_id=notebook_id)
+    if not source.strip():
+        return ToolOutcome("没有可出题的材料", "当前课程没有可用的解析资料或笔记，暂时无法出题。")
+    try:
+        count = max(1, min(5, int(arguments.get("count") or 3)))
+    except (TypeError, ValueError):
+        count = 3
+    course = db.get(Course, course_id)
+    try:
+        payload = generate_quiz_payload(
+            source, count=count, focus=str(arguments.get("focus") or "")[:200],
+            course_name=course.name if course else "课程",
+            difficulty=str(arguments.get("difficulty") or "")[:30],
+        )
+    except QuizSchemaError as exc:
+        return ToolOutcome("出题未通过校验", f"题目未通过质量校验（{exc}），请如实告知用户并建议换个重点。")
+    except Exception as exc:
+        return ToolOutcome("出题失败", f"出题服务暂时不可用（{type(exc).__name__}），请稍后再试。")
+    quiz = create_quiz(
+        db, course_id=course_id, conversation_id=conversation_id, material_id=material_id,
+        title=payload["title"], items=payload["items"],
+    )
+    count_created = len(payload["items"])
+    return ToolOutcome(
+        f"生成了 {count_created} 道自测题《{quiz.title}》",
+        f"已生成自测卷《{quiz.title}》（{count_created} 题）。请简要介绍考查内容，用户可在前端卡片作答并查看讲评。",
+        suggestions=[{"type": "quiz", "id": quiz.id, "quiz_id": quiz.id, "title": quiz.title, "item_count": count_created}],
+    )
+
+
+def _generate_review_outline(
+    db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None,
+    scope: AgentScope, locked_notebook_id: str | None, fixed_material_id: str | None,
+) -> ToolOutcome:
+    from app.services.quiz import create_review_artifact
+    from app.services.skills import SkillSchemaError, generate_review_outline_payload
+
+    if scope == "note" and not locked_notebook_id:
+        return ToolOutcome("笔记范围不可用", "当前锁定笔记不存在，已拒绝使用课程其他素材。")
+    material_id = None if scope == "note" else fixed_material_id or str(arguments.get("material_id") or "").strip() or None
+    notebook_id = locked_notebook_id if scope == "note" else None
+    source = _learning_material(db, course_id=course_id, material_id=material_id, notebook_id=notebook_id)
+    if not source.strip():
+        return ToolOutcome("没有可整理的材料", "当前课程没有可用的解析资料或笔记，暂时无法整理提纲。")
+    course = db.get(Course, course_id)
+    try:
+        payload = generate_review_outline_payload(
+            source, course_name=course.name if course else "课程", focus=str(arguments.get("focus") or "")[:200],
+        )
+    except SkillSchemaError as exc:
+        return ToolOutcome("提纲未通过校验", f"提纲未通过质量校验（{exc}），请如实告知用户。")
+    except Exception as exc:
+        return ToolOutcome("提纲整理失败", f"提纲服务暂时不可用（{type(exc).__name__}），请稍后再试。")
+    artifact = create_review_artifact(
+        db, course_id=course_id, conversation_id=conversation_id,
+        kind="review_outline", title=payload["title"], payload=payload,
+    )
+    item_count = sum(len(module["items"]) for module in payload["modules"])
+    return ToolOutcome(
+        f"整理出 {len(payload['modules'])} 个复习模块",
+        f"已生成复习提纲《{payload['title']}》，可在卡片上查看与勾选。",
+        suggestions=[{"type": "review_outline", "id": artifact.id, "artifact_id": artifact.id,
+                      "title": payload["title"], "module_count": len(payload["modules"]),
+                      "item_count": item_count, "modules": payload["modules"]}],
+    )
+
+
+def _generate_concept_contrast(
+    db: Session, *, course_id: str, arguments: dict[str, Any], conversation_id: str | None,
+    scope: AgentScope, locked_notebook_id: str | None, fixed_material_id: str | None,
+) -> ToolOutcome:
+    from app.services.quiz import create_review_artifact
+    from app.services.skills import SkillSchemaError, generate_concept_contrast_payload
+
+    if scope == "note" and not locked_notebook_id:
+        return ToolOutcome("笔记范围不可用", "当前锁定笔记不存在，已拒绝使用课程其他素材。")
+    material_id = None if scope == "note" else fixed_material_id or str(arguments.get("material_id") or "").strip() or None
+    notebook_id = locked_notebook_id if scope == "note" else None
+    source = _learning_material(db, course_id=course_id, material_id=material_id, notebook_id=notebook_id)
+    if not source.strip():
+        return ToolOutcome("没有可辨析的材料", "当前课程没有可用的解析资料或笔记，暂时无法整理概念对比。")
+    course = db.get(Course, course_id)
+    try:
+        payload = generate_concept_contrast_payload(
+            source, course_name=course.name if course else "课程", focus=str(arguments.get("focus") or "")[:200],
+        )
+    except SkillSchemaError as exc:
+        return ToolOutcome("辨析未通过校验", f"概念辨析未通过质量校验（{exc}），请如实告知用户。")
+    except Exception as exc:
+        return ToolOutcome("概念辨析失败", f"辨析服务暂时不可用（{type(exc).__name__}），请稍后再试。")
+    title = "、".join(f"{pair['a']} vs {pair['b']}" for pair in payload["pairs"])[:300]
+    artifact = create_review_artifact(
+        db, course_id=course_id, conversation_id=conversation_id,
+        kind="concept_contrast", title=title, payload=payload,
+    )
+    return ToolOutcome(
+        f"辨析了 {len(payload['pairs'])} 组概念",
+        f"已生成概念对比卡：{title}。请简要说明核心区别，完整对比见卡片。",
+        suggestions=[{"type": "concept_contrast", "id": artifact.id, "artifact_id": artifact.id,
+                      "pair_count": len(payload["pairs"]), "pairs": payload["pairs"]}],
+    )
 
 
 def _web_search(db: Session, *, course_id: str, arguments: dict[str, Any], allow_web: bool = True) -> ToolOutcome:
@@ -267,19 +442,26 @@ _EXECUTORS = {
     "web_search": _web_search,
     "propose_notebook_edits": _propose_notebook_edits,
     "propose_knowledge_node": _propose_knowledge_node,
+    "generate_quiz": _generate_quiz,
+    "generate_review_outline": _generate_review_outline,
+    "generate_concept_contrast": _generate_concept_contrast,
 }
 
 _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
-    "search_course": ("course_id", "arguments"),
+    "search_course": ("course_id", "arguments", "scope", "locked_notebook_id", "fixed_material_id"),
     "read_notebook": ("course_id", "arguments", "scope", "locked_notebook_id"),
     "list_course_notebooks": ("course_id",),
     "search_forest": ("course_id", "arguments"),
     "get_source_coverage": ("course_id", "arguments"),
-    "explain_term": ("course_id", "arguments"),
+    "explain_term": ("course_id", "arguments", "scope", "locked_notebook_id", "fixed_material_id"),
     "web_search": ("course_id", "arguments", "allow_web"),
     "propose_notebook_edits": ("course_id", "arguments", "editable_notebook_id"),
     "propose_knowledge_node": ("course_id", "arguments"),
+    "generate_quiz": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),
+    "generate_review_outline": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),
+    "generate_concept_contrast": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),
 }
+_EXECUTORS["search_course"] = _search_course_scoped
 
 
 def execute_tool(
@@ -292,10 +474,26 @@ def execute_tool(
     locked_notebook_id: str | None = None,
     editable_notebook_id: str | None = None,
     allow_web: bool = True,
+    allow_quiz: bool = False,
+    conversation_id: str | None = None,
+    fixed_material_id: str | None = None,
 ) -> ToolOutcome:
+    if name in {"generate_quiz", "generate_review_outline", "generate_concept_contrast"} and not allow_quiz:
+        return ToolOutcome("学习技能未启用", "当前对话未启用测验与复习技能。")
     handler = _EXECUTORS.get(name)
     if handler is None:
         return ToolOutcome(f"未知工具 {name}", f"工具 {name} 不存在；可用工具见系统提示。")
+    allowed_names = {
+        spec["function"]["name"] for spec in build_tool_specs(
+            scope=scope,
+            editable_notebook=bool(editable_notebook_id),
+            allow_web=allow_web,
+            allow_quiz=allow_quiz,
+            fixed_material_id=fixed_material_id,
+        )
+    }
+    if name not in allowed_names:
+        return ToolOutcome("工具超出当前范围", f"当前提问范围不允许执行 {name}，已拒绝访问。")
     available: dict[str, Any] = {
         "course_id": course_id,
         "arguments": arguments,
@@ -303,6 +501,9 @@ def execute_tool(
         "locked_notebook_id": locked_notebook_id,
         "editable_notebook_id": editable_notebook_id,
         "allow_web": allow_web,
+        "allow_quiz": allow_quiz,
+        "conversation_id": conversation_id,
+        "fixed_material_id": fixed_material_id,
     }
     kwargs = {key: available[key] for key in _EXECUTOR_PARAMS.get(name, ())}
     try:

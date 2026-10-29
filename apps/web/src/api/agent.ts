@@ -18,6 +18,7 @@ export type {
   AgentScope,
   AgentStepEvent,
   AgentSuggestion,
+  AgentThinkingEvent,
   AgentStreamHandlers,
 } from './agentStream'
 
@@ -32,6 +33,7 @@ export type {
 function dispatchEvent(event: AgentEvent, handlers: AgentStreamHandlers): void {
   if (event.type === 'step') handlers.onStep?.(event)
   else if (event.type === 'delta') handlers.onDelta?.(event)
+  else if (event.type === 'thinking') handlers.onThinking?.(event)
   else if (event.type === 'notice') handlers.onNotice?.(event)
   else if (event.type === 'final') handlers.onFinal?.(event)
   else if (event.type === 'error') handlers.onError?.(event)
@@ -71,8 +73,22 @@ export async function streamAgentMessage(
     if (event.type === 'final') finalEvent = event
     if (event.type === 'error') errorMessage = event.message
   }
+  const IDLE_TIMEOUT_MS = 30_000
   for (;;) {
-    const { done, value } = await reader.read()
+    let idleTimer: ReturnType<typeof setTimeout> | undefined
+    const idle = new Promise<never>((_, reject) => {
+      idleTimer = setTimeout(() => reject(new ApiError('连接长时间没有响应，请重试', response.status)), IDLE_TIMEOUT_MS)
+    })
+    let chunk: Awaited<ReturnType<typeof reader.read>>
+    try {
+      chunk = await Promise.race([reader.read(), idle])
+    } catch (cause) {
+      void reader.cancel().catch(() => {})
+      throw cause
+    } finally {
+      clearTimeout(idleTimer)
+    }
+    const { done, value } = chunk
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const parsed = parseAgentStream(buffer)

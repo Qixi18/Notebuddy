@@ -108,7 +108,10 @@ export function MaterialsPage() {
   }
 
   async function restoreMaterial(id: string) {
-    try { await api.restoreMaterial(id); await refreshCurrentMaterials(); setMaterialActionError(undefined) }
+    try {
+      await api.restoreMaterial(id)
+      await refreshCurrentMaterials(); setMaterialActionError(undefined)
+    }
     catch (cause) { setMaterialActionError(cause instanceof Error ? cause.message : '资料恢复失败') }
   }
 

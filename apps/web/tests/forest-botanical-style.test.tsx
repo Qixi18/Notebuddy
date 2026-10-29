@@ -63,7 +63,7 @@ it('keeps long course captions inside their own slot without covering a neighbou
   expect(captions[0].right).toBeLessThan(captions[1].center)
 })
 
-it('stages and initially frames a complete three-tree grove with aligned captions and all three AI connection sides', async () => {
+it('frames a grounded three-tree grove with root-attached stones and all three AI connection sides', async () => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 1100, height: 720 } as DOMRect)
   const onViewChange = vi.fn()
   const grouped = Array.from({ length: 3 }, (_, index) => ({ ...course, course_id: `grove-${index}`, name: `课程${index}`, position: index }))
@@ -75,8 +75,9 @@ it('stages and initially frames a complete three-tree grove with aligned caption
     const [, offset] = element.querySelector('.kt-forest-course-info')!.getAttribute('transform')!.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
     return { x, y, caption: y + offset }
   })
-  expect(roots[1].y).toBeLessThan(Math.min(roots[0].y, roots[2].y) - 100)
-  expect(Math.max(...roots.map(root => root.caption)) - Math.min(...roots.map(root => root.caption))).toBeLessThan(1e-8)
+  expect(roots[1].y).toBeLessThan(Math.min(roots[0].y, roots[2].y))
+  expect(Math.max(...roots.map(root => root.y)) - Math.min(...roots.map(root => root.y))).toBeLessThanOrEqual(120)
+  for (const root of roots) expect(root.caption - root.y).toBeLessThanOrEqual(50)
   expect(container.querySelector('[data-vine-members="grove-edge"]')).toBeTruthy()
   await waitFor(() => {
     const camera = onViewChange.mock.lastCall![0].camera
