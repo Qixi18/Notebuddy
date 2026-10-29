@@ -569,6 +569,9 @@ class DocumentParseRun(Base):
     text_chars: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
     quality_status: Mapped[str] = mapped_column(String(20), default="failed", server_default="failed", nullable=False)
     quality_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}", nullable=False)
+    document_warnings_json: Mapped[str] = mapped_column(
+        Text, default="[]", server_default="[]", nullable=False,
+    )
     markdown_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     supersedes_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -586,6 +589,8 @@ class DocumentPage(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    # Domain-level PageIR.page_id; ``id`` remains the database primary key.
+    logical_page_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     parse_run_id: Mapped[str] = mapped_column(
         ForeignKey("document_parse_runs.id", ondelete="CASCADE"), nullable=False,
     )
@@ -629,6 +634,7 @@ class DocumentBlock(Base):
     table_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     figure_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     bbox_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     extraction: Mapped[str] = mapped_column(String(20), default="native_text", nullable=False)
     confidence: Mapped[float | None] = mapped_column(nullable=True)
     warnings_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]", nullable=False)

@@ -251,6 +251,7 @@ def execute_parse_run(
     run.text_chars = document.quality.text_chars
     run.quality_status = document.quality.status
     run.quality_json = json.dumps(document.quality.to_dict(), ensure_ascii=False)
+    run.document_warnings_json = json.dumps(document.warnings, ensure_ascii=False)
     run.markdown_text = _markdown
     run.finished_at = _now()
     run.error_code = run.error_message = None
@@ -290,6 +291,11 @@ def persist_existing_ir(
     run = create_parse_run(db, asset=asset, config=config, reparse=True)
     run.status = "running"
     run.started_at = _now()
+    document.document_id = asset.id
+    document.asset_id = asset.id
+    document.parse_run_id = run.id
+    if document.file_sha256 is None:
+        document.file_sha256 = asset.sha256
     states = engine_state()
     document.quality = assess(
         document, engines=states, doc_type=document.doc_type, notes=list(document.warnings),
@@ -306,6 +312,7 @@ def persist_existing_ir(
     run.text_chars = document.quality.text_chars
     run.quality_status = document.quality.status
     run.quality_json = json.dumps(document.quality.to_dict(), ensure_ascii=False)
+    run.document_warnings_json = json.dumps(document.warnings, ensure_ascii=False)
     run.markdown_text = render_markdown(document)
     run.finished_at = _now()
     run.error_code = run.error_message = None
@@ -332,6 +339,7 @@ def _replace_children(db: Session, run: DocumentParseRun, document: DocumentIR) 
     for page in document.pages:
         row = DocumentPage(
             id=new_id(), parse_run_id=run.id, page_number=page.page_number,
+            logical_page_id=page.page_id,
             width=page.width, height=page.height, rotation=page.rotation,
             render_key=page.render_key, extraction=page.extraction, status=page.status,
             text=page.text, confidence=page.confidence,
@@ -354,6 +362,8 @@ def _replace_children(db: Session, run: DocumentParseRun, document: DocumentIR) 
                 table_json=json.dumps(block.table.to_dict(), ensure_ascii=False) if block.table else None,
                 figure_json=json.dumps(block.figure.to_dict(), ensure_ascii=False) if block.figure else None,
                 bbox_json=json.dumps(block.bbox) if block.bbox else None,
+                source_json=(json.dumps(block.source.to_dict(), ensure_ascii=False)
+                             if block.source else None),
                 extraction=block.extraction, confidence=block.confidence,
                 warnings_json=json.dumps(block.warnings, ensure_ascii=False),
                 created_at=_now(),
@@ -440,13 +450,15 @@ def load_ir(db: Session, run: DocumentParseRun | str) -> DocumentIR:
         DocumentSection.parse_run_id == run.id,
     ).order_by(DocumentSection.order)).all())
 
+    asset = db.get(Asset, run.asset_id)
     blocks_by_page: dict[str, list[BlockIR]] = {}
     for row in block_rows:
         blocks_by_page.setdefault(row.page_id, []).append(
             _block_from_row(row, run.asset_id))
     pages = [
         PageIR(
-            page_id=row.id, page_number=row.page_number, width=row.width, height=row.height,
+            page_id=row.logical_page_id or f"p{row.page_number}",
+            page_number=row.page_number, width=row.width, height=row.height,
             rotation=row.rotation, render_key=row.render_key, extraction=row.extraction,
             status=row.status, text=row.text, confidence=row.confidence,
             warnings=_json_list(row.warnings_json),
@@ -467,12 +479,12 @@ def load_ir(db: Session, run: DocumentParseRun | str) -> DocumentIR:
     ]
     document = DocumentIR(
         document_id=run.document_id, asset_id=run.asset_id, parse_run_id=run.id,
-        doc_type=_doc_type(run), file_sha256=None,
+        doc_type=_doc_type(run), file_sha256=asset.sha256 if asset else None,
         parser_name=run.parser_name, parser_version=run.parser_version,
         config_version=run.config_version, page_count=run.page_count,
         pages=pages, sections=sections,
         quality=QualityReport.from_dict(_json_dict(run.quality_json)),
-        warnings=[], fingerprint=run.fingerprint,
+        warnings=_json_list(run.document_warnings_json), fingerprint=run.fingerprint,
     )
     return document
 
@@ -487,28 +499,27 @@ def _with_page(
     from app.document_processing.ir import SourceSpan
 
     block.page_number = page_number
-    block.source = SourceSpan(
-        asset_id=asset_id,
-        page_number=page_number,
-        bbox=block.bbox,
-        render_key=render_key,
-        location_label=block.source.location_label if block.source else None,
-    )
+    if block.source is None:
+        block.source = SourceSpan(
+            asset_id=asset_id, page_number=page_number, bbox=block.bbox,
+            render_key=render_key,
+        )
     return block
 
 
 def _block_from_row(row: DocumentBlock, asset_id: str) -> BlockIR:
-    table = TableData.from_dict(_json_dict(row.table_json))
-    figure = FigureData.from_dict(_json_dict(row.figure_json))
+    table = TableData.from_dict(_json_dict(row.table_json)) if row.table_json else None
+    figure = FigureData.from_dict(_json_dict(row.figure_json)) if row.figure_json else None
     bbox = _json_list(row.bbox_json)
     from app.document_processing.ir import SourceSpan
 
+    source = SourceSpan.from_dict(_json_dict(row.source_json))
     return BlockIR(
         block_id=row.block_id, page_number=0, order=row.order, global_order=row.global_order,
         type=row.block_type, level=row.level, text=row.text, latex=row.latex,
         table=table, figure=figure,
         bbox=[float(item) for item in bbox] if len(bbox) == 4 else None,
-        source=SourceSpan(asset_id=asset_id, page_number=0, bbox=None),
+        source=source,
         extraction=row.extraction, confidence=row.confidence,
         warnings=_json_list(row.warnings_json), parent_id=row.parent_block_id,
     )
@@ -528,18 +539,39 @@ def rebuild_views(db: Session, run_id: str) -> DocumentParseRun:
         raise DocumentProcessingError("解析版本不存在", code="parse_run_missing")
     document = load_ir(db, run)
     document.sections = document.sections or []
+    previous = list(db.scalars(select(DocumentChunk).where(
+        DocumentChunk.parse_run_id == run.id,
+    ).order_by(DocumentChunk.order)).all())
+    reusable: dict[tuple[str | None, str], list[tuple[str, str]]] = {}
+    for row in previous:
+        if not row.embedding_json or not row.embedding_model:
+            continue
+        key = (row.section_id, _normalized_chunk_hash(row.text))
+        reusable.setdefault(key, []).append((row.embedding_model, row.embedding_json))
     db.query(DocumentChunk).filter(DocumentChunk.parse_run_id == run.id).delete(
         synchronize_session=False)
     for chunk in build_chunks(document):
+        key = (chunk.section_id, _normalized_chunk_hash(chunk.text))
+        embedding = reusable.get(key, [])
+        embedding_model, embedding_json = embedding.pop(0) if embedding else (None, None)
         db.add(DocumentChunk(
             id=new_id(), parse_run_id=run.id, asset_id=run.asset_id,
             section_id=chunk.section_id, order=chunk.order, text=chunk.text,
             page_numbers_json=json.dumps(chunk.page_numbers),
-            block_ids_json=json.dumps(chunk.block_ids), created_at=_now(),
+            block_ids_json=json.dumps(chunk.block_ids),
+            embedding_json=embedding_json, embedding_model=embedding_model,
+            created_at=_now(),
         ))
     run.markdown_text = render_markdown(document)
     db.flush()
     return run
+
+
+def _normalized_chunk_hash(text: str) -> str:
+    import hashlib
+
+    normalized = " ".join((text or "").split()).casefold()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def page_render(db: Session, run: DocumentParseRun, page_number: int) -> Path | None:

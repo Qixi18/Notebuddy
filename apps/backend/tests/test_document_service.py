@@ -17,15 +17,17 @@ from app.db.models import (
     MaterialPage,
     PageBlock,
 )
+from app.document_processing.ir import BlockIR, FigureData, SectionIR, SourceSpan, TableData
 from app.document_processing.service import (
     create_parse_run,
     current_run,
     execute_parse_run,
     load_ir,
     page_render,
+    persist_existing_ir,
     rebuild_views,
 )
-from tests.notebook_fixtures import make_asset, make_course, make_material, make_notebook
+from tests.notebook_fixtures import make_asset, make_course, make_material, make_notebook, simple_ir
 
 pytest_plugins = ["tests.notebook_fixtures"]
 
@@ -165,6 +167,87 @@ def test_rebuild_views_is_idempotent(session, monkeypatch, tmp_path):
     assert session.query(DocumentChunk).filter_by(parse_run_id=run.id).count() == first_count
     loaded = load_ir(session, run.id)
     assert loaded.pages[0].blocks
+
+
+def test_document_ir_round_trip_preserves_canonical_fields(session):
+    course = make_course(session)
+    book = make_notebook(session, course)
+    asset = make_asset(session, book, sha="a" * 64)
+    ir = simple_ir(asset.id, "round-trip-run")
+    ir.warnings = ["文档级警告：存在低置信度页面"]
+    page = ir.pages[0]
+    page.page_id = "logical-page-cover"
+    page.warnings = ["页面方向经过自动校正"]
+    page.rotation = 90
+    page.width, page.height = 842, 595
+    original_block = page.blocks[0]
+    original_block.source = SourceSpan(
+        asset_id=asset.id, page_number=1, bbox=[0.1, 0.2, 0.8, 0.9],
+        render_key="derived/render/cover.png", location_label="封面标题区域",
+    )
+    original_block.warnings = ["标题 OCR 置信度偏低"]
+    table = BlockIR(
+        block_id="table-round-trip", page_number=1, order=30, global_order=30,
+        type="table", text="真值表",
+        table=TableData(rows=[["A", "B"], ["0", "1"]], header_rows=1),
+        source=SourceSpan(asset.id, 1, [0.1, 0.3, 0.9, 0.7], "render/table.png", "表格"),
+        extraction="mineru", confidence=0.84, warnings=["单元格边界需核对"],
+    )
+    figure = BlockIR(
+        block_id="figure-round-trip", page_number=1, order=31, global_order=31,
+        type="figure", text="电路图", latex="x^2 + y^2",
+        figure=FigureData(kind="circuit", description="待核验的电路", nodes=["A", "B"],
+                          edges=["A->B"], uncertain=True, image_key="derived/f.png"),
+        source=SourceSpan(asset.id, 1, [0.2, 0.4, 0.7, 0.8], None, "图 1"),
+        extraction="vision", confidence=0.51, warnings=["电路语义未经人工验证"],
+    )
+    page.blocks.extend([table, figure])
+    ir.sections = [SectionIR(
+        section_id="round-trip-section", order=0, title="内容", level=1,
+        page_start=1, page_end=1,
+        block_ids=[block.block_id for block in page.blocks],
+    )]
+
+    persisted = persist_existing_ir(session, asset=asset, document=ir).ir
+    loaded = load_ir(session, persisted.parse_run_id)
+
+    expected = persisted.to_dict()
+    actual = loaded.to_dict()
+    assert actual["pages"] == expected["pages"], [
+        {
+            "page": {
+                key: (epage[key], apage[key]) for key in epage
+                if epage[key] != apage[key]
+            },
+            "blocks": [
+                {key: (eblock[key], ablock[key]) for key in eblock
+                 if eblock[key] != ablock[key]}
+                for eblock, ablock in zip(epage["blocks"], apage["blocks"], strict=True)
+                if eblock != ablock
+            ],
+        }
+        for epage, apage in zip(expected["pages"], actual["pages"], strict=True)
+        if epage != apage
+    ]
+    assert actual == expected
+    assert loaded.compute_fingerprint() == persisted.fingerprint
+    assert loaded.pages[0].page_id == "logical-page-cover"
+
+
+def test_legacy_rows_without_new_metadata_remain_readable(session):
+    course = make_course(session)
+    book = make_notebook(session, course)
+    asset = make_asset(session, book)
+    run = persist_existing_ir(session, asset=asset, document=simple_ir(asset.id, "legacy")).run
+    page = session.query(DocumentPage).filter_by(parse_run_id=run.id).one()
+    block = session.query(DocumentBlock).filter_by(parse_run_id=run.id).first()
+    page.logical_page_id = None
+    block.source_json = None
+    session.flush()
+
+    loaded = load_ir(session, run.id)
+    assert loaded.pages[0].page_id == "p1"
+    assert loaded.pages[0].blocks[0].source.asset_id == asset.id
 
 
 def test_backfill_imports_legacy_material_pages(session):
