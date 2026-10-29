@@ -96,14 +96,31 @@ def append_source_figures(
                        attachment.stored_filename)
         node_id = f"ai-{uuid.uuid4().hex[:20]}"
         alt = str(figure.get("description") or "来源图片，内容需核对")[:200]
-        nodes.append({"type": "callout", "attrs": {
+        image_node = {"type": "callout", "attrs": {
             "blockId": node_id, "tone": "warning" if figure.get("uncertain") else "note",
             "title": "来源图片，内容需核对" if figure.get("uncertain") else "来源图片",
         }, "content": [{"type": "image", "attrs": {
             "assetId": attachment.asset_id, "src": f"/api/v1/assets/{attachment.asset_id}/content",
             "alt": alt,
-        }}]})
+        }}]}
         source_map[node_id] = [block.block_id, *related]
+        anchor = _figure_anchor_index(nodes, source_map, {block.block_id, *related})
+        # Insert beside a generated node that cites this validated evidence.
+        # If no generated node uses it, append as a predictable safe fallback.
+        nodes.insert(anchor + 1 if anchor is not None else len(nodes), image_node)
+
+
+def _figure_anchor_index(
+    nodes: list[dict[str, Any]], source_map: dict[str, list[str]], evidence_ids: set[str],
+) -> int | None:
+    matches: list[int] = []
+    for index, node in enumerate(nodes):
+        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        node_id = attrs.get("blockId")
+        cited = source_map.get(node_id, []) if isinstance(node_id, str) else []
+        if evidence_ids.intersection(cited):
+            matches.append(index)
+    return matches[-1] if matches else None
 
 
 def _group_overlapping_figures(candidates):

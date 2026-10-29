@@ -33,6 +33,27 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[character] as string))
 }
 
+type UploadProgressPhase = 'uploading' | 'parsing' | 'generating' | 'refreshing' | 'complete' | 'complete-protected' | 'failed'
+type UploadProgressErrorKind = 'upload' | 'parse' | 'generation' | 'refresh'
+type UploadProgressState = {
+  phase: UploadProgressPhase
+  batchId?: string
+  fileNames: string[]
+  message?: string
+  errorKind?: UploadProgressErrorKind
+}
+
+function uploadBatchFailureMessage(batch: NotebookUploadBatch): { message: string; errorKind: UploadProgressErrorKind } {
+  const parseFailures = batch.inputs.filter((input) => input.status === 'parse_failed').length
+  const generationFailures = batch.inputs.filter((input) => input.status === 'generation_failed').length
+  if (parseFailures && generationFailures) return {
+    message: `${parseFailures} 份资料解析失败，${generationFailures} 份笔记生成失败。可重试失败项。`, errorKind: 'parse',
+  }
+  if (parseFailures) return { message: `${parseFailures} 份资料解析失败，可重试。`, errorKind: 'parse' }
+  if (generationFailures) return { message: `${generationFailures} 份笔记生成失败，可重试。`, errorKind: 'generation' }
+  return { message: '部分资料未能处理完成，可重试失败项。', errorKind: 'parse' }
+}
+
 export function NotebookPage() {
   const { courseId, notebookId } = useParams<{ courseId: string; notebookId: string }>()
   return <NotebookPageBody key={`${courseId ?? ''}:${notebookId ?? ''}`} />
@@ -46,7 +67,7 @@ function NotebookPageBody() {
   const linkedAssetId = searchParams.get('asset')
   const uploadRequested = searchParams.get('upload') === '1'
   const linkedAssetPage = Number(searchParams.get('page') || 1)
-  const { course, materials, busy, uploadMaterial, refreshCurrentMaterials, setDocumentDirty } = useWorkspace()
+  const { course, materials, busy, documentDirty, uploadMaterial, refreshCurrentMaterials, setDocumentDirty } = useWorkspace()
 
   const [outline, setOutline] = useState<NotebookRead>()
   const [title, setTitle] = useState('')
@@ -85,14 +106,72 @@ function NotebookPageBody() {
   const [uploadBatchId, setUploadBatchId] = useState<string>()
   const [uploadBatch, setUploadBatch] = useState<NotebookUploadBatch | null>(null)
   const [generationError, setGenerationError] = useState<string>()
+  const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const sourceImageInput = useRef<HTMLInputElement>(null)
   const editorRef = useRef<NotebookEditorHandle>(null)
   const editorReadyRef = useRef(false)
   const pageActiveRef = useRef(true)
   const lastDeepLinkRef = useRef<string | undefined>(undefined)
+  const uploadCompletionStartedRef = useRef<string | undefined>(undefined)
+  const uploadProgressTimerRef = useRef<number | undefined>(undefined)
+  const uploadBatchGenerationJobIds = uploadBatch?.generation_jobs.map((job) => job.id).join('|') ?? ''
+  const documentDirtyRef = useRef(documentDirty)
+  documentDirtyRef.current = documentDirty
 
   const save = useNotebookSave({ courseId, notebookId })
+
+  const finishUploadProgress = useCallback((batchId: string, message?: string, protectedEdits = false) => {
+    setUploadProgress((current) => current?.batchId === batchId
+      ? { ...current, phase: protectedEdits ? 'complete-protected' : 'complete', ...(message ? { message } : {}) }
+      : current)
+    if (uploadProgressTimerRef.current) window.clearTimeout(uploadProgressTimerRef.current)
+    uploadProgressTimerRef.current = window.setTimeout(() => {
+      setUploadProgress((current) => current?.batchId === batchId ? null : current)
+    }, 1800)
+  }, [])
+
+  const refreshNotebookAfterUpload = useCallback(async (batchId: string) => {
+    if (!notebookId || !courseId) return
+    setUploadProgress((current) => current?.batchId === batchId ? { ...current, phase: 'refreshing' } : current)
+    if (documentDirtyRef.current || save.isDirty()) {
+      const message = '检测到未保存修改，已保留当前正文；保存后可重新载入最新内容。'
+      setNotice(`学习笔记已生成。${message}`)
+      finishUploadProgress(batchId, message, true)
+      return
+    }
+    try {
+      const latest = await api.getNotebookDocument(courseId, notebookId)
+      if (!pageActiveRef.current) return
+      if (documentDirtyRef.current || save.isDirty()) {
+        const message = '检测到未保存修改，已保留当前正文；保存后可重新载入最新内容。'
+        setNotice(`学习笔记已生成。${message}`)
+        finishUploadProgress(batchId, message, true)
+        return
+      }
+      if (latest.revision > save.revision) {
+        const normalized = normalizeDocument(latest.content)
+        editorRef.current?.replaceContent(normalized)
+        setContent(normalized)
+        setEditVersion((value) => value + 1)
+        setDocumentWarning(latest.warning ?? undefined)
+        save.reset(normalized, latest.revision, latest.updated_at)
+      }
+      finishUploadProgress(batchId, '正文已更新。')
+    } catch (cause) {
+      if (!pageActiveRef.current) return
+      setUploadProgress((current) => current?.batchId === batchId ? {
+        ...current,
+        phase: 'failed',
+        errorKind: 'refresh',
+        message: cause instanceof Error ? `笔记已生成，但正文载入失败：${cause.message}` : '笔记已生成，但正文载入失败。可重试载入。',
+      } : current)
+    }
+  }, [courseId, finishUploadProgress, notebookId, save.isDirty, save.reset, save.revision])
+
+  useEffect(() => () => {
+    if (uploadProgressTimerRef.current) window.clearTimeout(uploadProgressTimerRef.current)
+  }, [])
 
   const insertAI = useCallback((text: string, mode: 'after' | 'replace', anchor: SelectionAnchor | null, expectedRevision?: number, expectedEditVersion?: number) => {
     const handle = editorRef.current
@@ -212,9 +291,18 @@ function NotebookPageBody() {
     let active = true
     void api.listNotebookUploadBatches(notebookId).then((batches) => {
       if (!active || !batches.length) return
-      const current = batches.find((batch) => ['open', 'waiting_parse', 'parsing', 'generating', 'partial_failure'].includes(batch.status)) ?? batches[0]
+      const activeBatch = batches.find((batch) => ['open', 'waiting_parse', 'parsing', 'generating', 'partial_failure'].includes(batch.status))
+      const current = activeBatch ?? batches[0]
       setUploadBatch(current)
       setUploadBatchId(current.id)
+      if (activeBatch) {
+        if (activeBatch.status === 'partial_failure') {
+          const failure = uploadBatchFailureMessage(activeBatch)
+          setUploadProgress({ batchId: activeBatch.id, phase: 'failed', fileNames: [], ...failure })
+        } else {
+          setUploadProgress({ batchId: activeBatch.id, phase: activeBatch.status === 'generating' ? 'generating' : 'parsing', fileNames: [] })
+        }
+      }
     }).catch(() => undefined)
     return () => { active = false }
   }, [loaded, notebookId])
@@ -242,6 +330,39 @@ function NotebookPageBody() {
   }, [generationJob?.id, notebookId, uploadBatch?.status, uploadBatchId])
 
   useEffect(() => {
+    const batch = uploadBatch
+    if (!batch || !uploadProgress?.batchId || uploadProgress.batchId !== batch.id) return
+    if (batch.status === 'partial_failure') {
+      const failure = uploadBatchFailureMessage(batch)
+      setUploadProgress((current) => {
+        if (current?.batchId !== batch.id) return current
+        if (current.phase === 'failed' && current.errorKind === failure.errorKind && current.message === failure.message) return current
+        return { ...current, phase: 'failed', ...failure }
+      })
+    } else if (batch.status === 'generating') {
+      setUploadProgress((current) => current?.batchId === batch.id && current.phase !== 'generating'
+        ? { ...current, phase: 'generating', errorKind: undefined }
+        : current)
+    } else if (batch.status === 'completed') {
+      setUploadProgress((current) => current?.batchId === batch.id && current.phase !== 'refreshing' && current.phase !== 'complete' && current.phase !== 'complete-protected'
+        ? { ...current, phase: 'refreshing', errorKind: undefined }
+        : current)
+    } else if (['open', 'waiting_parse', 'parsing'].includes(batch.status)) {
+      setUploadProgress((current) => current?.batchId === batch.id && current.phase !== 'parsing'
+        ? { ...current, phase: 'parsing', errorKind: undefined }
+        : current)
+    }
+  }, [uploadBatch, uploadProgress?.batchId])
+
+  useEffect(() => {
+    const batch = uploadBatch
+    if (!batch || batch.status !== 'completed' || !uploadBatchId || batch.id !== uploadBatchId) return
+    if (uploadCompletionStartedRef.current === batch.id) return
+    uploadCompletionStartedRef.current = batch.id
+    void refreshNotebookAfterUpload(batch.id)
+  }, [refreshNotebookAfterUpload, uploadBatch, uploadBatchId])
+
+  useEffect(() => {
     if (!notebookId || assetResources.length === 0) return
     let active = true
     const refresh = () => {
@@ -265,8 +386,9 @@ function NotebookPageBody() {
         if (!active) return
         setGenerationJob(job)
         if (job.status === 'completed' && generationJob.status !== 'completed') {
+          const trackedByUploadBatch = uploadBatchGenerationJobIds.split('|').includes(job.id)
           if (save.isDirty()) {
-            setNotice('AI 补充内容已写入服务器。当前有未保存的本地编辑，已保留草稿；保存冲突面板可用于合并服务器版本。')
+            if (!trackedByUploadBatch) setNotice('AI 补充内容已写入服务器。当前有未保存的本地编辑，已保留草稿；保存冲突面板可用于合并服务器版本。')
             return
           }
           void api.getNotebookDocument(courseId!, notebookId).then((latest) => {
@@ -275,18 +397,24 @@ function NotebookPageBody() {
             editorRef.current?.replaceContent(normalized)
             setContent(normalized)
             save.reset(normalized, latest.revision, latest.updated_at)
-            setNotice('AI 补充内容已追加到正式正文。')
-          }).catch(() => setNotice('AI 已完成；正文刷新失败，请手动重新加载页面。'))
+            if (!trackedByUploadBatch) setNotice('AI 补充内容已追加到正式正文。')
+          }).catch(() => { if (!trackedByUploadBatch) setNotice('AI 已完成；正文刷新失败，请手动重新加载页面。') })
         }
       }).catch((cause: unknown) => {
         if (active) setGenerationError(cause instanceof Error ? cause.message : '生成状态读取失败')
       })
     }, 1500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [courseId, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision])
+  }, [courseId, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision, uploadBatchGenerationJobIds])
 
   const headings = useMemo(() => extractOutline(content), [content])
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
+  const generationStatusCoveredByToast = Boolean(
+    uploadProgress?.batchId && generationJob?.id && uploadBatchGenerationJobIds.split('|').includes(generationJob.id),
+  )
+  const sourceImages = useMemo(() => assetResources.filter(
+    (asset) => asset.role === 'source_material' && asset.media_type === 'image',
+  ), [assetResources])
 
   useEffect(() => {
     if (!loaded || !courseId || !notebookId) return
@@ -428,7 +556,9 @@ function NotebookPageBody() {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
     if (!files.length || !courseId || !notebookId) return
+    if (uploadProgressTimerRef.current) window.clearTimeout(uploadProgressTimerRef.current)
     setUploadError(undefined)
+    setUploadProgress({ phase: 'uploading', fileNames: files.map((file) => file.name) })
     try {
       const batchId = crypto.randomUUID()
       const results: PromiseSettledResult<unknown>[] = []
@@ -443,6 +573,7 @@ function NotebookPageBody() {
         }
       }
       const uploadFailures = results.filter((result) => result.status === 'rejected').length
+      const uploadedFiles = files.filter((_, index) => results[index]?.status === 'fulfilled')
       await refreshCurrentMaterials()
       setAllowDuplicateUploads(false)
       setOutline(await api.getNotebookById(courseId, notebookId))
@@ -451,13 +582,84 @@ function NotebookPageBody() {
         const batch = await api.closeNotebookUploadBatch(notebookId, batchId)
         setUploadBatchId(batchId)
         setUploadBatch(batch)
-        setNotice(uploadFailures
-          ? `${files.length - uploadFailures} 份资料已进入后台处理；${uploadFailures} 份上传失败。关闭页面后后台仍会继续。`
-          : `${files.length} 份资料已进入后台处理；解析完成后会自动追加正式正文。`)
+        setUploadProgress({
+          batchId,
+          phase: batch.status === 'generating' ? 'generating' : batch.status === 'partial_failure' ? 'failed' : 'parsing',
+          fileNames: uploadedFiles.map((file) => file.name),
+          ...(uploadFailures ? { message: `${uploadedFiles.length} 份资料已上传，${uploadFailures} 份上传失败。` } : {}),
+          ...(batch.status === 'partial_failure' ? uploadBatchFailureMessage(batch) : {}),
+        })
+        if (uploadFailures) setUploadError(`${uploadedFiles.length} 份资料已上传，${uploadFailures} 份上传失败。`)
       } else {
         setUploadError('所选资料均未成功上传。')
+        setUploadProgress({ phase: 'failed', fileNames: files.map((file) => file.name), errorKind: 'upload', message: '所选资料均未成功上传。请重新选择文件后重试。' })
       }
-    } catch (cause) { setUploadError(cause instanceof Error ? cause.message : '资料上传失败') }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '资料上传失败'
+      setUploadError(message)
+      setUploadProgress((current) => current?.phase === 'uploading'
+        ? { ...current, phase: 'failed', errorKind: 'upload', message }
+        : current)
+    }
+  }
+
+  async function retryUploadProgress() {
+    const progress = uploadProgress
+    if (!progress || generationBusy) return
+    if (progress.errorKind === 'upload' || !progress.batchId) {
+      setUploadProgress(null)
+      fileInput.current?.click()
+      return
+    }
+    if (progress.errorKind === 'refresh') {
+      uploadCompletionStartedRef.current = undefined
+      void refreshNotebookAfterUpload(progress.batchId)
+      return
+    }
+    const batch = uploadBatch?.id === progress.batchId ? uploadBatch : null
+    if (!batch || !notebookId) return
+    const failedInputs = batch.inputs.filter((input) => input.status === 'parse_failed' || input.status === 'generation_failed')
+    if (!failedInputs.length) return
+    setGenerationBusy(true)
+    setGenerationError(undefined)
+    setUploadProgress((current) => current?.batchId === batch.id
+      ? { ...current, phase: failedInputs.some((input) => input.status === 'parse_failed') ? 'parsing' : 'generating', errorKind: undefined, message: '正在重试失败项…' }
+      : current)
+    try {
+      const generationJobIds = new Set<string>()
+      for (const input of failedInputs) {
+        if (input.status === 'parse_failed') {
+          const material = bookMaterials.find((item) => item.asset_id === input.asset_id)
+          if (!material) throw new Error('找不到解析失败的资料，请从侧栏重新上传。')
+          if (material.status === 'failed') await api.retryMaterial(material.id)
+          else if (!['pending', 'processing'].includes(material.status)) await api.reparseMaterial(material.id)
+        } else if (input.generation_job_id) {
+          generationJobIds.add(input.generation_job_id)
+        } else {
+          throw new Error('找不到笔记生成任务，请从资料侧栏检查状态。')
+        }
+      }
+      for (const jobId of generationJobIds) {
+        const retriedJob = await api.retryNotebookGenerationJob(notebookId, jobId)
+        setGenerationJob(retriedJob)
+      }
+      await refreshCurrentMaterials()
+      const nextBatch = await api.getNotebookUploadBatch(notebookId, batch.id)
+      setUploadBatch(nextBatch)
+      setUploadProgress((current) => current?.batchId === batch.id ? {
+        ...current,
+        phase: nextBatch.status === 'generating' ? 'generating' : 'parsing',
+        errorKind: undefined,
+        message: '失败项已重新排队。',
+      } : current)
+    } catch (cause) {
+      setUploadProgress((current) => current?.batchId === batch.id ? {
+        ...current,
+        phase: 'failed',
+        errorKind: failedInputs.some((input) => input.status === 'parse_failed') ? 'parse' : 'generation',
+        message: cause instanceof Error ? cause.message : '重试失败，请从资料侧栏重试。',
+      } : current)
+    } finally { setGenerationBusy(false) }
   }
 
   async function handleUploadSourceImage(event: ChangeEvent<HTMLInputElement>) {
@@ -656,15 +858,20 @@ function NotebookPageBody() {
         <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
           <span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}
         </button>
+        <label className="notebook-document-duplicate-option">
+          <input type="checkbox" checked={allowDuplicateUploads}
+            onChange={(event) => setAllowDuplicateUploads(event.target.checked)} />
+          相同文件也作为新资料导入
+        </label>
         {uploadError && <p className="notebook-document-sidebar-error" role="alert">{uploadError}</p>}
         {assetUploadError && <p className="notebook-document-sidebar-error" role="alert">{assetUploadError}</p>}
         {generationError && <p className="notebook-document-sidebar-error" role="alert">{generationError}</p>}
-        {generationJob && ['pending', 'processing', 'cancel_requested'].includes(generationJob.status) && <p className="notebook-document-sidebar-empty" role="status">{generationJob.status === 'pending' ? '等待 AI 补充正文…' : generationJob.status === 'cancel_requested' ? '正在取消…' : 'AI 正在补充正文…'}</p>}
-        {generationJob?.status === 'failed' && <button className="notebook-document-import" type="button" disabled={generationBusy} onClick={() => {
+        {!generationStatusCoveredByToast && generationJob && ['pending', 'processing', 'cancel_requested'].includes(generationJob.status) && <p className="notebook-document-sidebar-empty" role="status">{generationJob.status === 'pending' ? '等待 AI 补充正文…' : generationJob.status === 'cancel_requested' ? '正在取消…' : 'AI 正在补充正文…'}</p>}
+        {!generationStatusCoveredByToast && generationJob?.status === 'failed' && <button className="notebook-document-import" type="button" disabled={generationBusy} onClick={() => {
           setGenerationBusy(true)
           void api.retryNotebookGenerationJob(notebookId!, generationJob.id).then(setGenerationJob).catch((cause: unknown) => setGenerationError(cause instanceof Error ? cause.message : '重试失败')).finally(() => setGenerationBusy(false))
         }}>重试 AI 整理</button>}
-        {generationJob?.status === 'completed' && <p className="notebook-document-sidebar-empty" role="status">AI 补充内容已写入正式正文</p>}
+        {!generationStatusCoveredByToast && generationJob?.status === 'completed' && <p className="notebook-document-sidebar-empty" role="status">AI 补充内容已写入正式正文</p>}
         <section className="notebook-document-sidebar-section notebook-document-materials-section">
           <button className="notebook-document-section-toggle" type="button" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}>
             <strong>课程资料</strong><span className={`notebook-document-section-chevron${resourcesOpen ? ' is-open' : ''}`} aria-hidden="true">›</span>
@@ -683,11 +890,32 @@ function NotebookPageBody() {
                   : <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void runMaterialOperation(material.id, 'reparse')}>重新解析</button>}
               </details>
             </li>)}</ul> : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}
+            {sourceImages.length > 0 && <div className="notebook-document-image-resources" aria-label="图片资源">
+              <strong>图片资源</strong>
+              {sourceImages.map((asset) => <div className="notebook-document-image-resource" key={asset.id}>
+                <span title={asset.original_name}>{asset.original_name}</span>
+                <button type="button" disabled={Boolean(materialBusyId)}
+                  onClick={() => void insertSourceAsset(asset)}>插入正文</button>
+                <button type="button" disabled={Boolean(materialBusyId)}
+                  aria-label={`移除${asset.original_name}`}
+                  onClick={() => setAssetRemoval(asset)}>移除</button>
+              </div>)}
+            </div>}
             {deletedBookMaterials.length > 0 && <details className="notebook-document-deleted-materials">
               <summary>可恢复资料 · {deletedBookMaterials.length}</summary>
               {deletedBookMaterials.map((material) => <div key={material.id}>
                 <span>{material.original_filename}</span><button type="button" disabled={Boolean(materialBusyId)}
                   onClick={() => void restoreBookMaterial(material.id)}>{materialBusyId === material.id ? '恢复中…' : '恢复'}</button>
+              </div>)}
+            </details>}
+            {detachedAssetResources.length > 0 && <details className="notebook-document-detached-assets">
+              <summary>可恢复资源 · {detachedAssetResources.length}</summary>
+              {detachedAssetResources.map((asset) => <div key={asset.id}>
+                <span>{asset.original_name}</span>
+                <button type="button" disabled={Boolean(materialBusyId)}
+                  onClick={() => void restoreNotebookAsset(asset)}>
+                  {materialBusyId === asset.id ? '恢复中…' : '恢复'}
+                </button>
               </div>)}
             </details>}
           </div>}
@@ -711,6 +939,36 @@ function NotebookPageBody() {
       </aside>
 
       <main className="notebook-document-canvas" aria-label="笔记正文">
+        {uploadProgress && <aside className={`notebook-document-progress-toast is-${uploadProgress.phase}`} role="status" aria-live="polite">
+          <span className="notebook-document-progress-indicator" aria-hidden="true">{['complete', 'complete-protected'].includes(uploadProgress.phase) ? '✓' : uploadProgress.phase === 'failed' ? '!' : ''}</span>
+          <div className="notebook-document-progress-copy">
+            <strong>{uploadProgress.phase === 'uploading' ? '正在上传资料'
+              : uploadProgress.phase === 'parsing' ? '解析文件中'
+                : uploadProgress.phase === 'generating' ? '正在生成学习笔记'
+                  : uploadProgress.phase === 'refreshing' ? '正在载入笔记正文'
+                    : uploadProgress.phase === 'complete' ? '学习笔记已更新'
+                      : uploadProgress.phase === 'complete-protected' ? '学习笔记已生成，已保留本地修改'
+                      : uploadProgress.errorKind === 'parse' ? '资料解析未完成'
+                        : uploadProgress.errorKind === 'generation' ? '学习笔记生成失败'
+                          : uploadProgress.errorKind === 'refresh' ? '正文载入失败' : '资料上传失败'}</strong>
+            <span>{uploadProgress.message ?? (uploadProgress.phase === 'uploading'
+              ? `${uploadProgress.fileNames.length} 份资料正在上传。`
+              : uploadProgress.phase === 'parsing'
+                ? uploadProgress.fileNames.length === 1 ? `${uploadProgress.fileNames[0]} · 解析完成后自动继续。` : '等待资料解析完成，随后自动生成笔记。'
+                : uploadProgress.phase === 'generating' ? '解析已完成，正在整理内容并写入 Notebook。'
+                  : uploadProgress.phase === 'refreshing' ? '生成已完成，正在读取最新正文。'
+                    : uploadProgress.phase === 'complete' ? '正文已载入，提示即将关闭。' : '请重试失败项。')}</span>
+            {!['complete', 'complete-protected'].includes(uploadProgress.phase) && <ol className="notebook-document-progress-steps" aria-label="处理步骤">
+              <li className={uploadProgress.phase === 'uploading' ? 'is-current' : 'is-complete'}>上传</li>
+              <li className={uploadProgress.phase === 'parsing' || (uploadProgress.phase === 'failed' && uploadProgress.errorKind === 'parse') ? 'is-current' : ['generating', 'refreshing', 'complete'].includes(uploadProgress.phase) || (uploadProgress.phase === 'failed' && uploadProgress.errorKind !== 'parse' && uploadProgress.errorKind !== 'upload') ? 'is-complete' : ''}>解析</li>
+              <li className={uploadProgress.phase === 'generating' || (uploadProgress.phase === 'failed' && uploadProgress.errorKind === 'generation') ? 'is-current' : ['refreshing', 'complete'].includes(uploadProgress.phase) || (uploadProgress.phase === 'failed' && uploadProgress.errorKind === 'refresh') ? 'is-complete' : ''}>生成笔记</li>
+            </ol>}
+          </div>
+          {uploadProgress.phase === 'failed' && <button className="notebook-document-progress-retry" type="button" disabled={generationBusy} onClick={() => void retryUploadProgress()}>
+            {generationBusy ? '重试中…' : uploadProgress.errorKind === 'upload' ? '重新选择文件' : uploadProgress.errorKind === 'refresh' ? '重试载入' : '重试失败项'}
+          </button>}
+          <button className="notebook-document-progress-close" type="button" aria-label="关闭处理提示；任务会继续" title="关闭提示，任务会继续" onClick={() => setUploadProgress(null)}>×</button>
+        </aside>}
         {!loaded ? <div className="notebook-document-loading" role="status">正在读取笔记正文…</div> : <article className="notebook-document-paper">
           <input className="notebook-document-title" value={title} onChange={(event) => { setTitle(event.target.value); setTitleError(undefined) }} onBlur={() => void renameTitle()} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} aria-label="笔记名称" maxLength={200} />
           <div className="notebook-document-meta">
