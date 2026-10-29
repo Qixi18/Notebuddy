@@ -287,6 +287,9 @@ function NotebookPageBody() {
 
   const headings = useMemo(() => extractOutline(content), [content])
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
+  const sourceImages = useMemo(() => assetResources.filter(
+    (asset) => asset.role === 'source_material' && asset.media_type === 'image',
+  ), [assetResources])
 
   useEffect(() => {
     if (!loaded || !courseId || !notebookId) return
@@ -656,6 +659,11 @@ function NotebookPageBody() {
         <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
           <span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}
         </button>
+        <label className="notebook-document-duplicate-option">
+          <input type="checkbox" checked={allowDuplicateUploads}
+            onChange={(event) => setAllowDuplicateUploads(event.target.checked)} />
+          相同文件也作为新资料导入
+        </label>
         {uploadError && <p className="notebook-document-sidebar-error" role="alert">{uploadError}</p>}
         {assetUploadError && <p className="notebook-document-sidebar-error" role="alert">{assetUploadError}</p>}
         {generationError && <p className="notebook-document-sidebar-error" role="alert">{generationError}</p>}
@@ -683,11 +691,32 @@ function NotebookPageBody() {
                   : <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void runMaterialOperation(material.id, 'reparse')}>重新解析</button>}
               </details>
             </li>)}</ul> : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}
+            {sourceImages.length > 0 && <div className="notebook-document-image-resources" aria-label="图片资源">
+              <strong>图片资源</strong>
+              {sourceImages.map((asset) => <div className="notebook-document-image-resource" key={asset.id}>
+                <span title={asset.original_name}>{asset.original_name}</span>
+                <button type="button" disabled={Boolean(materialBusyId)}
+                  onClick={() => void insertSourceAsset(asset)}>插入正文</button>
+                <button type="button" disabled={Boolean(materialBusyId)}
+                  aria-label={`移除${asset.original_name}`}
+                  onClick={() => setAssetRemoval(asset)}>移除</button>
+              </div>)}
+            </div>}
             {deletedBookMaterials.length > 0 && <details className="notebook-document-deleted-materials">
               <summary>可恢复资料 · {deletedBookMaterials.length}</summary>
               {deletedBookMaterials.map((material) => <div key={material.id}>
                 <span>{material.original_filename}</span><button type="button" disabled={Boolean(materialBusyId)}
                   onClick={() => void restoreBookMaterial(material.id)}>{materialBusyId === material.id ? '恢复中…' : '恢复'}</button>
+              </div>)}
+            </details>}
+            {detachedAssetResources.length > 0 && <details className="notebook-document-detached-assets">
+              <summary>可恢复资源 · {detachedAssetResources.length}</summary>
+              {detachedAssetResources.map((asset) => <div key={asset.id}>
+                <span>{asset.original_name}</span>
+                <button type="button" disabled={Boolean(materialBusyId)}
+                  onClick={() => void restoreNotebookAsset(asset)}>
+                  {materialBusyId === asset.id ? '恢复中…' : '恢复'}
+                </button>
               </div>)}
             </details>}
           </div>}

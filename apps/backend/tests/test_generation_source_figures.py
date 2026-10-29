@@ -75,6 +75,14 @@ def test_generation_copies_owned_figure_and_preserves_source_and_history(
         child.get("type") == "image" for child in node.get("content", [])
     )]
     assert len(wrappers) == 1
+    image_index = content["content"].index(wrappers[0])
+    assert image_index > 0
+    preceding = content["content"][image_index - 1]
+    preceding_source = session.scalar(select(NotebookBlockSource).where(
+        NotebookBlockSource.notebook_id == book.id,
+        NotebookBlockSource.block_id == preceding.get("attrs", {}).get("blockId"),
+    ))
+    assert preceding_source and preceding_source.document_block_id == row.id
     attrs = wrappers[0]["content"][0]["attrs"]
     assert attrs["src"] == f"/api/v1/assets/{attrs['assetId']}/content"
     link = session.scalar(select(NotebookBlockSource).where(

@@ -392,10 +392,15 @@
 .notebook-document-sidebar-directory .notebook-document-outline-item:not(.notebook-document-outline-h1) { padding-left: 20px; }
 .notebook-document-sidebar-directory .notebook-document-outline-h1 { margin: 2px 0 4px -11px; padding: 9px 12px; border-radius: 10px; background: #edf6ee; }
 .notebook-document-sidebar-directory .notebook-document-outline-h1::before { display: none; }
-.notebook-document-deleted-materials{margin-top:10px;border-top:1px solid var(--line,#e4e8e8);padding-top:8px;font-size:12px;color:var(--muted,#647276)}
-.notebook-document-deleted-materials summary{cursor:pointer}
-.notebook-document-deleted-materials>div{display:flex;justify-content:space-between;gap:8px;padding:7px 0}
-.notebook-document-deleted-materials button{border:0;background:none;color:var(--accent-strong,#27634e);cursor:pointer}
+.notebook-document-deleted-materials,.notebook-document-detached-assets{margin-top:10px;border-top:1px solid var(--line,#e4e8e8);padding-top:8px;font-size:12px;color:var(--muted,#647276)}
+.notebook-document-deleted-materials summary,.notebook-document-detached-assets summary{cursor:pointer}
+.notebook-document-deleted-materials>div,.notebook-document-detached-assets>div{display:flex;justify-content:space-between;gap:8px;padding:7px 0}
+.notebook-document-deleted-materials button,.notebook-document-detached-assets button{border:0;background:none;color:var(--accent-strong,#27634e);cursor:pointer}
+.notebook-document-image-resources{display:grid;gap:7px;margin-top:10px;border-top:1px solid #e4e8e8;padding-top:9px;color:#647276;font-size:12px}
+.notebook-document-image-resources>strong{color:#526b59;font-size:12px}
+.notebook-document-image-resource{display:flex;align-items:center;gap:5px;min-width:0;padding:4px 0}
+.notebook-document-image-resource>span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notebook-document-image-resource button{flex:none;border:0;background:none;color:#27634e;font-size:11px;cursor:pointer}
 @media(max-width:700px){.document-source-backdrop{padding:8px}.document-source-dialog{height:96vh;padding:14px;border-radius:12px}.document-source-body{grid-template-columns:96px minmax(0,1fr);gap:8px}.document-source-pages button{padding:7px 4px;font-size:11px}}
 
 /* Notebook reading workspace: keep the content page centered between the two docks. */
