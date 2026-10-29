@@ -14,8 +14,11 @@ import { detailInteraction } from './treeInteraction'
 import { placeLeafLabels } from './leafLabels'
 import { projectNotebookControls } from './notebookControls'
 import { useGrowthPlayback } from './growth/useGrowthPlayback'
+<<<<<<< HEAD
 import { playTreeGrowth } from './growth/paint'
 import { growthVisible } from './growth/visibility'
+=======
+>>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
 import './knowledge-tree.css'
 
 export type { KnowledgeTreeSceneProps, KnowledgeTreeView } from './sceneTypes'
@@ -110,6 +113,7 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   const growth = useGrowthPlayback(trees, visibleKey ? visibleKey.split('|') : [], courses.map(course => course.course_id))
   const growingBooks = growth.books
   const growingNotes = growth.sections
+<<<<<<< HEAD
   useEffect(() => {
     if (!growth.courses.size && !growth.books.size && !growth.sections.size) return
     const root = camera.sceneRef.current
@@ -139,6 +143,8 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
       root.classList.remove('kt-growth-managed')
     }
   }, [growth, camera.sceneRef])
+=======
+>>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
   useEffect(() => {
     if (!host.current) return
     const measure = () => {

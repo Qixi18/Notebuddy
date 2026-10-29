@@ -55,6 +55,7 @@ test('an explicit deep link suppresses bookmark restoration', async () => {
   expect(editor.focusBlock).not.toHaveBeenCalled()
 })
 
+<<<<<<< HEAD
 test('a bookmark for a deleted block does not focus or scroll another block', async () => {
   const editor = fakeEditor('still-live')
   vi.spyOn(api, 'getReadingPosition').mockResolvedValue(position({ block_id: 'already-deleted' }))
@@ -69,6 +70,8 @@ test('a bookmark for a deleted block does not focus or scroll another block', as
   expect(frame).not.toHaveBeenCalled()
 })
 
+=======
+>>>>>>> b1d87ea547afebb87e48c63ffee93792239fc846
 test('debounces a block bookmark and writes with the reading-position revision', async () => {
   vi.useFakeTimers()
   const editor = fakeEditor()
