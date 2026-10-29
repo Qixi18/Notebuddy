@@ -10,9 +10,11 @@ from app.api.v1.shared import ensure_course
 from app.db.database import get_db
 from app.db.models import (
     Asset,
+    AssetProcessingJob,
     Course,
     Material,
     Notebook,
+    NotebookGenerationJob,
     NotebookAsset,
     NotebookAttachment,
     NotebookCoverAsset,
@@ -54,6 +56,7 @@ from app.schemas.notebook import (
     BlockSourceRead,
     NotebookAttachmentRead,
     NotebookBindRequest,
+    NotebookBulkManageRequest,
     NotebookDocumentRead,
     NotebookDocumentUpdate,
     NotebookEditSuggestionRead,
@@ -75,6 +78,86 @@ from app.schemas.notebook import (
 )
 
 router = APIRouter()
+
+
+@router.post("/notebooks/bulk-manage")
+def bulk_manage_notebooks(payload: NotebookBulkManageRequest, db: Session = Depends(get_db)):
+    books = list(db.scalars(select(Notebook).where(
+        Notebook.id.in_(payload.notebook_ids), Notebook.deleted_at.is_(None)
+    )).all())
+    if len(books) != len(payload.notebook_ids):
+        raise HTTPException(404, "部分笔记不存在或已在回收站，请刷新列表后重试")
+
+    if payload.action == "delete":
+        active_jobs = db.scalar(select(func.count()).select_from(ProcessingJob).join(
+            Material, ProcessingJob.material_id == Material.id).where(
+            Material.notebook_id.in_(payload.notebook_ids),
+            ProcessingJob.status.in_(["pending", "processing"]))) or 0
+        active_jobs += db.scalar(select(func.count()).select_from(AssetProcessingJob).join(
+            Material, Material.asset_id == AssetProcessingJob.asset_id).where(
+            Material.notebook_id.in_(payload.notebook_ids),
+            AssetProcessingJob.status.in_(["pending", "processing"]))) or 0
+        active_jobs += db.scalar(select(func.count()).select_from(NotebookGenerationJob).where(
+            NotebookGenerationJob.notebook_id.in_(payload.notebook_ids),
+            NotebookGenerationJob.status.in_(["pending", "processing"]))) or 0
+        if active_jobs:
+            raise HTTPException(409, "所选笔记中仍有资料处理任务；完成或取消后再删除")
+        from datetime import UTC, datetime
+
+        from app.services.deletion import _checkpoint
+        _checkpoint()
+        deleted_at = datetime.now(UTC)
+        for book in books:
+            book.deleted_at = deleted_at
+            book.is_default = False
+        changed_courses = {book.course_id for book in books if book.course_id}
+        for course_id in changed_courses:
+            remaining = list(db.scalars(select(Notebook).where(
+                Notebook.course_id == course_id, Notebook.deleted_at.is_(None),
+                Notebook.id.not_in(payload.notebook_ids),
+            ).order_by(Notebook.display_order, Notebook.id)).all())
+            if remaining and not any(item.is_default for item in remaining):
+                remaining[0].is_default = True
+            db.execute(update(Course).where(Course.id == course_id).values(
+                notebook_order_revision=Course.notebook_order_revision + 1))
+        db.commit()
+        return {"action": "delete", "affected": len(books)}
+
+    target = ensure_course(db, payload.course_id) if payload.course_id else None
+    target_id = target.id if target else None
+    moving = [book for book in books if book.course_id != target_id]
+    if not moving:
+        return {"action": "move", "affected": 0}
+
+    source_courses = {book.course_id for book in moving if book.course_id}
+    defaults_leaving = {book.course_id for book in moving if book.course_id and book.is_default}
+    for course_id in source_courses | ({target_id} if target_id else set()):
+        db.execute(update(Course).where(Course.id == course_id).values(
+            notebook_order_revision=Course.notebook_order_revision + 1))
+
+    next_slot = (db.scalar(select(func.max(Notebook.tree_slot)).where(
+        Notebook.course_id == target_id, Notebook.deleted_at.is_(None))) or -1) + 1 if target_id else 0
+    for book in moving:
+        book.course_id = target_id
+        book.tree_slot = next_slot if target_id else 0
+        book.display_order = next_slot if target_id else 0
+        book.order_revision = (target.notebook_order_revision + 1) if target else 0
+        book.is_default = bool(target_id and next_slot == 0)
+        if target_id:
+            next_slot += 1
+        db.execute(update(NotebookSection).where(
+            NotebookSection.notebook_id == book.id,
+        ).values(course_id=target_id))
+
+    for course_id in defaults_leaving - ({target_id} if target_id else set()):
+        replacement = db.scalar(select(Notebook).where(
+            Notebook.course_id == course_id, Notebook.deleted_at.is_(None),
+            Notebook.id.not_in(payload.notebook_ids),
+        ).order_by(Notebook.display_order, Notebook.id))
+        if replacement:
+            replacement.is_default = True
+    db.commit()
+    return {"action": "move", "affected": len(moving)}
 
 
 def _ensure_document_image_ownership(db: Session, notebook_id: str, content: dict) -> None:
@@ -268,6 +351,26 @@ def rename_unbound_notebook(notebook_id: str, payload: NotebookTitleUpdate,
     db.commit()
     db.refresh(book)
     return _summary(book)
+
+
+@router.delete("/notebooks/unbound/{notebook_id}", status_code=204)
+def delete_unbound_notebook(notebook_id: str, db: Session = Depends(get_db)):
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.course_id is not None or book.deleted_at is not None:
+        raise HTTPException(404, "未分类笔记不存在")
+    active_jobs = db.scalar(select(func.count()).select_from(ProcessingJob).join(
+        Material, ProcessingJob.material_id == Material.id).where(
+        Material.notebook_id == notebook_id,
+        ProcessingJob.status.in_(["pending", "processing"]))) or 0
+    if active_jobs:
+        raise HTTPException(409, "笔记仍有资料处理任务，完成或取消后再删除")
+    from datetime import UTC, datetime
+
+    from app.services.deletion import _checkpoint
+    _checkpoint()
+    book.deleted_at = datetime.now(UTC)
+    book.is_default = False
+    db.commit()
 
 
 @router.get("/notebooks/unbound/{notebook_id}/document", response_model=NotebookDocumentRead)
@@ -618,10 +721,19 @@ def list_deleted_notebooks(db: Session = Depends(get_db)):
 @router.post("/notebooks/{notebook_id}/restore", response_model=NotebookSummary)
 def restore_deleted_notebook(notebook_id: str, payload: NotebookRestoreDeletedRequest,
                              db: Session = Depends(get_db)):
-    course = ensure_course(db, payload.course_id)
     book = db.get(Notebook, notebook_id)
     if book is None or book.deleted_at is None:
         raise HTTPException(404, "待恢复笔记不存在")
+    if payload.course_id is None:
+        book.course_id = None
+        book.tree_slot = 0
+        book.display_order = 0
+        book.order_revision = 0
+        book.is_default = False
+        book.deleted_at = None
+        db.commit(); db.refresh(book)
+        return _summary(book)
+    course = ensure_course(db, payload.course_id)
     slot = db.scalar(select(func.max(Notebook.tree_slot)).where(
         Notebook.course_id == course.id, Notebook.deleted_at.is_(None)))
     book.course_id = course.id

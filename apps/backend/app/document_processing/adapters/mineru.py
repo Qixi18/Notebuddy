@@ -13,8 +13,10 @@ import binascii
 import hashlib
 import importlib.metadata
 import importlib.util
+import logging
 import os
 import re
+import time
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,8 @@ from app.document_processing.ir import (
     TableData,
 )
 from app.document_processing.normalization.sections import build_sections
+
+logger = logging.getLogger(__name__)
 
 
 class MinerUUnavailable(RuntimeError):
@@ -114,6 +118,8 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
         raise ValueError("NOTEBOOK_MINERU_TIER 必须是 flash、basic、standard 或 advanced")
 
     _ensure_windows_vlm_utf8_locale(tier)
+    parse_started = time.perf_counter()
+    logger.info("mineru_parse_started parse_run_id=%s tier=%s", context.parse_run_id, tier)
     parsed = mineru_parse(
         path,
         tier=tier,
@@ -121,7 +127,16 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
         image_analysis=os.getenv("NOTEBOOK_MINERU_IMAGE_ANALYSIS", "true").strip().lower()
         in {"1", "true", "yes", "on"},
     )
+    logger.info(
+        "mineru_inference_finished parse_run_id=%s tier=%s elapsed_seconds=%.3f",
+        context.parse_run_id, tier, time.perf_counter() - parse_started,
+    )
+    render_started = time.perf_counter()
     pages_content = render(parsed.middle_json, RenderFormat.CONTENT_LIST_V2)
+    logger.info(
+        "mineru_render_finished parse_run_id=%s elapsed_seconds=%.3f",
+        context.parse_run_id, time.perf_counter() - render_started,
+    )
     page_infos = list(getattr(parsed.middle_json, "pages", []) or [])
     if context.doc_type == "image":
         from PIL import Image, ImageOps
@@ -131,7 +146,12 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
             source_pages = {1: pdf_text.RawPage(page_number=1, width=image.width,
                                                 height=image.height)}
     else:
+        source_started = time.perf_counter()
         source_document = pdf_text.extract_pdf(path)
+        logger.info(
+            "mineru_source_extract_finished parse_run_id=%s elapsed_seconds=%.3f",
+            context.parse_run_id, time.perf_counter() - source_started,
+        )
         source_pages = {page.page_number: page for page in source_document.pages}
     version = availability()["version"]
     run_prefix = context.parse_run_id[:8]
@@ -252,6 +272,10 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
     )
     document.sections = build_sections(document, document_title=context.title)
     document.page_count = len(pages)
+    logger.info(
+        "mineru_document_built parse_run_id=%s pages=%s total_elapsed_seconds=%.3f",
+        context.parse_run_id, document.page_count, time.perf_counter() - parse_started,
+    )
     return document
 
 

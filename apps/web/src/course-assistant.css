@@ -246,6 +246,19 @@
   grid-template-columns: 236px minmax(0, 1fr) var(--dock-w, 340px);
 }
 
+/* On the notebook page, align the assistant dock below the notebook toolbar. */
+.app-shell-with-assistant:has(> .app-main > .notebook-document-page) .assistant-dock {
+  top: 68px;
+  height: calc(100dvh - 68px);
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  .app-shell-with-assistant:has(> .app-main > .notebook-document-page) .assistant-dock {
+    top: 62px;
+    height: calc(100dvh - 62px);
+  }
+}
+
 .app-shell.app-shell-sidebar-collapsed.app-shell-with-assistant {
   grid-template-columns: 76px minmax(0, 1fr) var(--dock-w, 340px);
 }

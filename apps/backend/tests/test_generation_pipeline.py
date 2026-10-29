@@ -45,6 +45,27 @@ def test_model_table_cells_and_callout_inline_content_are_normalized():
     assert nodes[0]["content"][0]["content"][0]["content"][0]["type"] == "text"
 
 
+def test_model_standalone_raw_latex_is_promoted_to_block_math():
+    nodes = [{
+        "type": "paragraph", "attrs": {"blockId": "math-source-1"},
+        "content": [{
+            "type": "text",
+            "text": r"A \cup B = \{x \mid x \in A \text{或} x \in B\}. \tag{1.1}",
+        }],
+    }]
+
+    normalized = worker._normalize_model_blocks(nodes)
+
+    assert normalized == [{
+        "type": "blockMath",
+        "attrs": {
+            "latex": r"A \cup B = \{x \mid x \in A \text{或} x \in B\}. \tag{1.1}",
+            "blockId": "math-source-1",
+        },
+    }]
+    assert nodes[0]["type"] == "paragraph"
+
+
 @pytest.fixture()
 def file_db(tmp_path):
     engine = create_engine(f"sqlite:///{(tmp_path / 'test.db').as_posix()}",
@@ -111,6 +132,61 @@ def test_offline_generation_appends_document_with_sources(db, file_db, monkeypat
         NotebookSection.notebook_id == book.id)).all())
     assert sections
     assert notebook.document_json.count('"type":"image"') == 0
+
+
+def test_deepseek_source_repair_completes_before_atomic_notebook_append(
+    db, file_db, monkeypatch,
+):
+    _, book, asset = _setup(db)
+    created = _create_job(db, book, asset, "deepseek-source-repair")
+    job = db.get(NotebookGenerationJob, created["id"])
+    job.generator = "deepseek"
+    db.commit()
+
+    class FakeClient:
+        configured = True
+        calls = 0
+
+        def complete_json(self, messages, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                payload = json.loads(messages[-1]["content"])
+                source_id = payload["units"][0]["blocks"][0]["block_id"]
+                return {
+                    "nodes": [{
+                        "type": "paragraph", "attrs": {"blockId": "duplicate"},
+                        "content": [{"type": "text", "text": "根据资料整理的正文。"}],
+                    }, {
+                        "type": "paragraph", "attrs": {"blockId": "duplicate"},
+                        "content": [{"type": "text", "text": "根据资料整理的补充说明。"}],
+                    }],
+                    "sources": {"duplicate": [source_id]},
+                }
+            repaired_nodes = json.loads(messages[-2]["content"])["nodes"]
+            source_id = json.loads(messages[-1]["content"])["allowed_source_block_ids"][0]
+            return {"sources": {
+                node["attrs"]["blockId"]: [source_id] for node in repaired_nodes
+            }}
+
+    from app.generation import composer
+
+    client = FakeClient()
+    monkeypatch.setattr(composer, "DeepSeekClient", lambda: client)
+    _run_worker(monkeypatch, file_db, created["id"])
+
+    db.expire_all()
+    job = db.get(NotebookGenerationJob, created["id"])
+    notebook = db.get(Notebook, book.id)
+    content = load_document(notebook.document_json).content
+    sources = list(db.scalars(select(NotebookBlockSource).where(
+        NotebookBlockSource.notebook_id == book.id,
+    )).all())
+    assert client.calls == 2
+    assert job.status == "completed", job.error_message
+    assert notebook.document_revision == 1
+    assert "根据资料整理的正文" in json.dumps(content, ensure_ascii=False)
+    assert len({row.block_id for row in sources}) == 2
+    assert all(row.document_block_id for row in sources)
 
 
 def test_generation_rejects_insufficient_parse_quality(db):
@@ -259,6 +335,165 @@ def test_deepseek_output_without_sources_is_rejected():
         assert captured.value.code == "missing_sources"
     finally:
         composer.DeepSeekClient = original
+
+
+def test_deepseek_duplicate_block_id_triggers_source_mapping_repair(monkeypatch):
+    from app.generation.planner import build_plan
+    from tests.notebook_fixtures import simple_ir
+
+    document = simple_ir("asset-1", "run-12345678")
+    document.seal()
+    snapshot = {
+        "notebook_title": "测试", "current_outline": [], "batch_chars": 18000,
+        "sources": [{
+            "asset_id": "asset-1", "name": "资料", "parse_run_id": "run-12345678",
+            "sections": [{"section_id": "sec-1", "title": "第一章", "blocks": [
+                {"block_id": "b1", "type": "paragraph", "text": "内容"},
+            ]}],
+        }],
+    }
+    plan = build_plan(snapshot)
+    output_id = "duplicate"
+    response = {
+        "nodes": [{
+            "type": "paragraph", "attrs": {"blockId": output_id},
+            "content": [{"type": "text", "text": "基于资料的正文"}],
+        }, {
+            "type": "paragraph", "attrs": {"blockId": output_id},
+            "content": [{"type": "text", "text": "补充正文"}],
+        }],
+        "sources": {output_id: ["b1"]},
+    }
+
+    class FakeClient:
+        configured = True
+        calls = 0
+
+        def complete_json(self, messages, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return response
+            repaired_nodes = json.loads(messages[-2]["content"])["nodes"]
+            return {"sources": {
+                node["attrs"]["blockId"]: ["b1"] for node in repaired_nodes
+            }}
+
+    from app.generation import composer
+
+    monkeypatch.setattr(composer, "DeepSeekClient", lambda: FakeClient())
+    result = compose_deepseek(snapshot, plan, [plan["units"][0]["unit_id"]])
+    block_ids_out = [node["attrs"]["blockId"] for node in result.nodes]
+    assert len(set(block_ids_out)) == 2
+    assert block_ids_out[0] == output_id
+    assert block_ids_out[1] != output_id
+    assert all(result.source_map[block_id] == ["b1"] for block_id in block_ids_out)
+
+
+def test_deepseek_retries_once_after_invalid_json(monkeypatch):
+    from app.generation.planner import build_plan
+
+    snapshot = {
+        "notebook_title": "测试", "current_outline": [], "batch_chars": 18000,
+        "sources": [{"asset_id": "asset-1", "name": "资料", "parse_run_id": "run-1",
+                     "sections": [{"section_id": "sec-1", "title": "第一章",
+                                   "blocks": [{"block_id": "b1", "type": "paragraph", "text": "内容"}]}]}],
+    }
+    plan = build_plan(snapshot)
+    response = {
+        "nodes": [{"type": "paragraph", "attrs": {"blockId": "model-block"},
+                   "content": [{"type": "text", "text": "正文"}]}],
+        "sources": {"model-block": ["b1"]},
+    }
+
+    class FakeClient:
+        configured = True
+        calls = 0
+
+        def complete_json(self, messages, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise DeepSeekError("DeepSeek 返回内容不是有效 JSON", code="invalid_json")
+            assert "严格 JSON 对象" in messages[-1]["content"]
+            return response
+
+    from app.ai.deepseek import DeepSeekError
+    from app.generation import composer
+
+    client = FakeClient()
+    monkeypatch.setattr(composer, "DeepSeekClient", lambda: client)
+    result = compose_deepseek(snapshot, plan, [plan["units"][0]["unit_id"]])
+    assert client.calls == 2
+    assert result.source_map == {"model-block": ["b1"]}
+
+
+def test_deepseek_repairs_missing_sources_once_with_allowed_source_ids(monkeypatch):
+    from app.generation.planner import build_plan
+
+    snapshot = {
+        "notebook_title": "测试", "current_outline": [], "batch_chars": 18000,
+        "sources": [{"asset_id": "asset-1", "name": "资料", "parse_run_id": "run-1",
+                     "sections": [{"section_id": "sec-1", "title": "第一章",
+                                   "blocks": [{"block_id": "b1", "type": "paragraph", "text": "内容"}]}]}],
+    }
+    plan = build_plan(snapshot)
+    node = {"type": "paragraph", "attrs": {"blockId": "model-block"},
+            "content": [{"type": "text", "text": "正文"}]}
+
+    class FakeClient:
+        configured = True
+        calls = 0
+
+        def complete_json(self, messages, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return {"nodes": [node], "sources": {}}
+            payload = json.loads(messages[-1]["content"])
+            assert payload["allowed_source_block_ids"] == ["b1"]
+            assert "只修复正文节点的来源映射" in payload["instruction"]
+            return {"sources": {"model-block": ["b1"]}}
+
+    from app.generation import composer
+
+    client = FakeClient()
+    monkeypatch.setattr(composer, "DeepSeekClient", lambda: client)
+    result = compose_deepseek(snapshot, plan, [plan["units"][0]["unit_id"]])
+
+    assert client.calls == 2
+    assert result.source_map == {"model-block": ["b1"]}
+
+
+def test_deepseek_still_rejects_unverifiable_sources_after_repair(monkeypatch):
+    from app.generation.planner import build_plan
+
+    snapshot = {
+        "notebook_title": "测试", "current_outline": [], "batch_chars": 18000,
+        "sources": [{"asset_id": "asset-1", "name": "资料", "parse_run_id": "run-1",
+                     "sections": [{"section_id": "sec-1", "title": "第一章",
+                                   "blocks": [{"block_id": "b1", "type": "paragraph", "text": "内容"}]}]}],
+    }
+    plan = build_plan(snapshot)
+    node = {"type": "paragraph", "attrs": {"blockId": "model-block"},
+            "content": [{"type": "text", "text": "正文"}]}
+
+    class FakeClient:
+        configured = True
+        calls = 0
+
+        def complete_json(self, *_args, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return {"nodes": [node], "sources": {}}
+            return {"sources": {"model-block": ["not-an-input-block"]}}
+
+    from app.generation import composer
+
+    client = FakeClient()
+    monkeypatch.setattr(composer, "DeepSeekClient", lambda: client)
+    with pytest.raises(CompositionError) as captured:
+        compose_deepseek(snapshot, plan, [plan["units"][0]["unit_id"]])
+
+    assert captured.value.code == "invalid_sources"
+    assert client.calls == 2
 
 
 def _link_input(db, book, asset, job_id):

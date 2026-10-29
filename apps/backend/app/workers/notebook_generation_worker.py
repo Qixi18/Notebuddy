@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -296,12 +297,42 @@ def _reject_images(document: dict[str, Any]) -> None:
 
 
 def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Repair only unambiguous inline-to-paragraph model formatting."""
+    """Repair model formatting and promote standalone raw LaTeX to math nodes."""
     result = copy.deepcopy(nodes)
+
+    def promote_standalone_latex(node: dict[str, Any]) -> None:
+        if node.get("type") != "paragraph":
+            return
+        children = node.get("content")
+        if not isinstance(children, list) or not children or any(
+            not isinstance(child, dict) or child.get("type") != "text"
+            or child.get("marks") for child in children
+        ):
+            return
+        latex = "".join(child.get("text", "") for child in children).strip()
+        if not latex or "\\" not in latex or re.search(r"[，。；：！？]", latex):
+            return
+        without_text = re.sub(r"\\text\s*\{[^{}]*\}", "", latex)
+        if re.search(r"[\u3400-\u9fff]", without_text):
+            return
+        if not re.fullmatch(r"[-+A-Za-z0-9\s\\{}()[\].,^_=<>|:*\/!]+", without_text):
+            return
+        if not re.search(
+            r"\\(?:cup|cap|setminus|in|notin|subseteq?|supseteq?|mid|frac|sqrt|sum|prod|int|lim|"
+            r"cdot|times|leq?|geq?|ne|approx|equiv|to|Rightarrow|Leftrightarrow|mathbb|overline|tag)\b",
+            latex,
+        ):
+            return
+        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        node.clear()
+        node.update({"type": "blockMath", "attrs": {"latex": latex, **(
+            {"blockId": attrs["blockId"]} if isinstance(attrs.get("blockId"), str) else {}
+        )}})
 
     def visit(node: Any) -> None:
         if not isinstance(node, dict):
             return
+        promote_standalone_latex(node)
         kind = node.get("type")
         children = node.get("content")
         if kind == "callout":

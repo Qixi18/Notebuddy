@@ -81,9 +81,24 @@ class NotebookMoveRequest(BaseModel):
     course_id: str = Field(min_length=1, max_length=36)
 
 
+class NotebookBulkManageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    notebook_ids: list[str] = Field(min_length=1, max_length=500)
+    action: Literal["move", "delete"]
+    course_id: str | None = Field(default=None, min_length=1, max_length=36)
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if self.action == "move" and self.course_id == "":
+            raise ValueError("目标课程无效")
+        if len(set(self.notebook_ids)) != len(self.notebook_ids):
+            raise ValueError("笔记列表包含重复项目")
+        return self
+
+
 class NotebookRestoreDeletedRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    course_id: str = Field(min_length=1, max_length=36)
+    course_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class DocumentBlock(BaseModel):

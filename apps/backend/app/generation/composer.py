@@ -295,6 +295,19 @@ SYSTEM_PROMPT = (
     "6) 输出应是有教学顺序的完整讲解：定义、前提、推导/方法、例题、易错点。"
 )
 
+JSON_REPAIR_PROMPT = (
+    "请重新生成上一请求要求的完整结果，并仅输出严格 JSON 对象，禁止 Markdown 代码围栏或解释。"
+    "为确保输出完整，正文保持精炼；顶层结构必须包含 nodes 数组和 sources 对象，"
+    "每个节点都必须有唯一 attrs.blockId，且 sources 必须用相同 blockId 映射到至少一个输入原文块 ID。"
+)
+
+SOURCE_REPAIR_PROMPT = (
+    "只修复正文节点的来源映射，不改写节点内容，也不要新增节点。"
+    "仅输出 JSON 对象 {\"sources\":{\"节点 blockId\":[\"输入原文块 ID\"]}}。"
+    "只为有明确依据的节点添加映射，引用只能来自允许原文块 ID；不得猜测、勉强匹配或虚构 ID。"
+    "没有来源依据的节点返回空数组，本地校验会拒绝写入。"
+)
+
 
 def compose_deepseek(
     snapshot: dict[str, Any], plan: dict[str, Any], unit_ids: list[str],
@@ -335,42 +348,116 @@ def compose_deepseek(
     ]
     try:
         result = client.complete_json(messages, max_tokens=8_000)
-    except DeepSeekError as exc:
-        raise CompositionError(f"模型生成失败：{exc}", code="model_failed") from exc
+        json_repair_used = False
+    except DeepSeekError as first_error:
+        # Repair malformed/truncated JSON once while preserving the original
+        # evidence payload.  A second failure remains visible to the user.
+        if first_error.code != "invalid_json":
+            raise CompositionError(f"模型生成失败：{first_error}", code="model_failed") from first_error
+        repair_messages = [
+            *messages,
+            {"role": "assistant", "content": "上一次模型输出无法解析为 JSON。"},
+            {"role": "user", "content": JSON_REPAIR_PROMPT},
+        ]
+        try:
+            result = client.complete_json(repair_messages, max_tokens=8_000)
+            json_repair_used = True
+        except DeepSeekError as exc:
+            raise CompositionError(f"模型生成失败（JSON 修复重试后仍无效）：{exc}", code="model_failed") from exc
+    try:
+        return _composition_from_deepseek_result(result, allowed_ids)
+    except CompositionError as exc:
+        if json_repair_used or exc.code not in {"missing_sources", "invalid_sources"}:
+            raise
+        source_error = exc
+
     nodes = result.get("nodes") or result.get("blocks") or []
-    sources = result.get("sources") or {}
-    if not isinstance(nodes, list) or not nodes:
-        raise CompositionError("模型没有返回可追加的正文节点", code="empty_generation")
-    if not isinstance(sources, dict):
-        raise CompositionError("模型输出缺少 sources 来源映射", code="missing_sources")
-    cleaned: list[dict[str, Any]] = []
-    source_map: dict[str, list[str]] = {}
+    if not isinstance(nodes, list):
+        raise CompositionError("模型没有返回可修复的正文节点", code="empty_generation")
+    # First pass assigns unique IDs to duplicate/missing model IDs. Reuse that
+    # normalized list for the source-only retry so the mapping keys are stable.
+    normalized_nodes, _aliases = _normalize_model_node_ids(nodes)
+    repair_messages = [
+        *messages,
+        {"role": "assistant", "content": json.dumps({"nodes": normalized_nodes}, ensure_ascii=False)},
+        {"role": "user", "content": json.dumps({
+            "instruction": SOURCE_REPAIR_PROMPT,
+            "allowed_source_block_ids": sorted(allowed_ids),
+            "validation_error": str(source_error),
+        }, ensure_ascii=False)},
+    ]
+    try:
+        repaired = client.complete_json(repair_messages, max_tokens=4_000)
+    except DeepSeekError as exc:
+        raise CompositionError(f"模型来源映射修复失败：{exc}", code="missing_sources") from exc
+    repaired_sources = repaired.get("sources")
+    if not isinstance(repaired_sources, dict):
+        raise CompositionError("模型来源映射修复响应缺少 sources 对象", code="missing_sources")
+    return _composition_from_deepseek_result(
+        {"nodes": normalized_nodes, "sources": repaired_sources}, allowed_ids,
+    )
+
+
+def _normalize_model_node_ids(
+    nodes: list[Any],
+) -> tuple[list[dict[str, Any]], dict[str, str | None]]:
+    normalized: list[dict[str, Any]] = []
+    aliases: dict[str, str | None] = {}
     seen: set[str] = set()
-    for node in nodes:
-        if not isinstance(node, dict):
+    for raw in nodes:
+        if not isinstance(raw, dict):
             continue
+        node = raw
         attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
-        block_id = attrs.get("blockId")
-        if not isinstance(block_id, str) or not block_id.strip() or block_id in seen:
+        original_id = attrs.get("blockId")
+        block_id = original_id
+        duplicate_id = isinstance(block_id, str) and block_id in seen
+        if not isinstance(block_id, str) or not block_id.strip() or duplicate_id:
             block_id = _block_id()
             attrs["blockId"] = block_id
             node["attrs"] = attrs
         seen.add(block_id)
-        ids = sources.get(block_id) or sources.get(attrs.get("blockId"))
+        aliases[block_id] = original_id if isinstance(original_id, str) and not duplicate_id else None
+        normalized.append(node)
+    return normalized, aliases
+
+
+def _composition_from_deepseek_result(
+    result: dict[str, Any], allowed_ids: set[str],
+) -> Composition:
+    nodes = result.get("nodes") or result.get("blocks") or []
+    sources = result.get("sources")
+    if sources is None:
+        sources = {}
+    if not isinstance(nodes, list) or not nodes:
+        raise CompositionError("模型没有返回可追加的正文节点", code="empty_generation")
+    if not isinstance(sources, dict):
+        raise CompositionError("模型输出缺少 sources 来源映射", code="missing_sources")
+    cleaned, source_aliases = _normalize_model_node_ids(nodes)
+    source_map: dict[str, list[str]] = {}
+    for node in cleaned:
+        attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+        block_id = attrs.get("blockId")
+        original_id = source_aliases.get(block_id)
+        ids = sources.get(original_id) if isinstance(original_id, str) else None
+        ids = ids or sources.get(block_id)
         if not isinstance(ids, list) or not ids:
             raise CompositionError(
                 f"模型输出节点 {block_id} 没有来源映射；已拒绝写入，避免无法追溯",
                 code="missing_sources",
+            )
+        if not all(isinstance(item, str) and item for item in ids):
+            raise CompositionError(
+                f"模型输出节点 {block_id} 的来源映射格式无效", code="missing_sources",
             )
         invalid = [item for item in ids if item not in allowed_ids]
         if invalid:
             raise CompositionError(
                 f"模型输出引用了不存在的原文块：{invalid[:3]}", code="invalid_sources",
             )
-        source_map[block_id] = list(dict.fromkeys(str(item) for item in ids))
-        cleaned.append(node)
+        source_map[block_id] = list(dict.fromkeys(ids))
     if not cleaned:
         raise CompositionError("模型返回的节点均不可用", code="empty_generation")
     return Composition(
-        nodes=cleaned, source_map=source_map, generator="deepseek", generator_version="2",
+        nodes=cleaned, source_map=source_map, generator="deepseek", generator_version="3",
     )

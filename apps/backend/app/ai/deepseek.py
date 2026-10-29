@@ -12,15 +12,19 @@ from app.core.config import Settings, settings
 class DeepSeekError(RuntimeError):
     """Raised when the configured DeepSeek provider cannot return a result."""
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self, message: str, *, status_code: int | None = None, code: str = "provider_error",
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
 
 
 class DeepSeekClient:
     def __init__(self, provider_settings: Settings = settings) -> None:
         self.settings = provider_settings
         self.last_usage: dict[str, int] | None = None
+        self.last_finish_reason: str | None = None
 
     @property
     def configured(self) -> bool:
@@ -36,6 +40,7 @@ class DeepSeekClient:
     ) -> str:
         if not self.configured:
             raise DeepSeekError("DEEPSEEK_API_KEY 未配置")
+        self.last_finish_reason = None
 
         payload: dict[str, Any] = {
             "model": self.settings.deepseek_model,
@@ -59,6 +64,9 @@ class DeepSeekClient:
             )
             response.raise_for_status()
             body = response.json()
+            choices = body.get("choices") or []
+            finish_reason = choices[0].get("finish_reason") if choices and isinstance(choices[0], dict) else None
+            self.last_finish_reason = finish_reason if isinstance(finish_reason, str) else None
             usage = body.get("usage")
             self.last_usage = {
                 key: int(usage[key])
@@ -71,12 +79,14 @@ class DeepSeekClient:
             return content.strip()
         except httpx.HTTPStatusError as exc:
             self.last_usage = None
+            self.last_finish_reason = None
             raise DeepSeekError(
                 f"DeepSeek 调用失败：HTTP {exc.response.status_code}",
                 status_code=exc.response.status_code,
             ) from exc
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             self.last_usage = None
+            self.last_finish_reason = None
             raise DeepSeekError(f"DeepSeek 调用失败：{type(exc).__name__}") from exc
 
     def complete_json(
@@ -89,9 +99,12 @@ class DeepSeekClient:
         try:
             decoded = json.loads(content)
         except json.JSONDecodeError as exc:
-            raise DeepSeekError("DeepSeek 返回内容不是有效 JSON") from exc
+            reason = "，可能因输出长度限制而被截断" if self.last_finish_reason == "length" else ""
+            raise DeepSeekError(
+                f"DeepSeek 返回内容不是有效 JSON{reason}", code="invalid_json",
+            ) from exc
         if not isinstance(decoded, dict):
-            raise DeepSeekError("DeepSeek JSON 输出不是对象")
+            raise DeepSeekError("DeepSeek JSON 输出不是对象", code="invalid_json")
         return decoded
 
     def chat_stream(

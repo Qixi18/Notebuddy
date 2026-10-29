@@ -142,3 +142,32 @@ def test_chat_stream_maps_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DeepSeekError, match="HTTP 500"):
         list(client.chat_stream([{"role": "user", "content": "问题"}]))
     assert client.last_usage is None
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "message"),
+    [("length", "输出长度限制"), ("stop", "不是有效 JSON")],
+)
+def test_complete_json_marks_invalid_output_and_truncation(
+    monkeypatch: pytest.MonkeyPatch, finish_reason: str, message: str,
+) -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [{"finish_reason": finish_reason,
+                             "message": {"content": '{"nodes": ['}}],
+            }
+
+    def fake_post(*_args: object, **_kwargs: object) -> Response:
+        return Response()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = DeepSeekClient(_test_settings())
+
+    with pytest.raises(DeepSeekError, match=message) as captured:
+        client.complete_json([{"role": "user", "content": "生成"}])
+
+    assert captured.value.code == "invalid_json"

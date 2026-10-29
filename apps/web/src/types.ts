@@ -345,8 +345,8 @@ export type NotebookRead = Omit<Notebook, 'chapters' | 'historical_sections' | '
   id: string; tree_slot: number; chapters: ChapterRead[]
   historical_sections: SectionRead[]; removed_chapters: ChapterRead[]
 }
-export type NotebookSummary = {
-  id: string; course_id: string; title: string; tree_slot: number
+  export type NotebookSummary = {
+    id: string; course_id: string; title: string; tree_slot: number
   display_order: number; order_revision: number; is_default: boolean
     created_at: string; updated_at: string; cover_url?: string | null
 }

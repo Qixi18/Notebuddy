@@ -2,7 +2,7 @@ import { Extension, Node, mergeAttributes, type AnyExtension } from '@tiptap/cor
 import Image from '@tiptap/extension-image'
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
-import Mathematics from '@tiptap/extension-mathematics'
+import { BlockMath, InlineMath } from '@tiptap/extension-mathematics'
 import StarterKit from '@tiptap/starter-kit'
 import { Placeholder } from '@tiptap/extensions'
 import { ReactNodeViewRenderer } from '@tiptap/react'
@@ -32,6 +32,7 @@ const BLOCK_TYPES = [
   'blockquote',
   'codeBlock',
   'table',
+  'blockMath',
 ]
 
 export const NotebookBlockIds = Extension.create({
@@ -250,7 +251,8 @@ export function buildExtensions(): AnyExtension[] {
     TableHeader,
     TableCell,
     NotebookImage,
-    Mathematics.configure({ katexOptions: { throwOnError: false, strict: false } }),
+    BlockMath.configure({ katexOptions: { displayMode: true, throwOnError: false, strict: false } }),
+    InlineMath.configure({ katexOptions: { displayMode: false, throwOnError: false, strict: false } }),
     Placeholder.configure({
       placeholder: ({ node }) => {
         if (node.type.name === 'heading') return '输入标题'

@@ -3,14 +3,14 @@ import { Link } from 'react-router-dom'
 
 import { api } from '../api'
 import type { Course } from '../types'
-import type { NotebookSummary } from '../types'
+import type { DeletedNotebookSummary } from '../api/courses'
 
 export function RecycleBinPage() {
   const [courses, setCourses] = useState<Course[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [restoringId, setRestoringId] = useState<string>()
-  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([])
+  const [notebooks, setNotebooks] = useState<DeletedNotebookSummary[]>([])
 
   async function load() {
     setLoading(true)
@@ -41,8 +41,8 @@ export function RecycleBinPage() {
     }
   }
 
-  async function handleRestoreNotebook(notebook: NotebookSummary) {
-    if (restoringId || !notebook.course_id) return
+  async function handleRestoreNotebook(notebook: DeletedNotebookSummary) {
+    if (restoringId) return
     setRestoringId(notebook.id); setError(undefined)
     try { await api.restoreDeletedNotebook(notebook.id, notebook.course_id); await load() }
     catch (cause) { setError(cause instanceof Error ? cause.message : '笔记恢复失败') }
@@ -79,7 +79,7 @@ export function RecycleBinPage() {
           <p>在课程页移除课程后，它会出现在这里。</p>
         </div>
       ) : null}
-      {!loading && notebooks.length > 0 && <section className="deleted-course-list" aria-label="已删除笔记"><h2>已删除笔记</h2>{notebooks.map((notebook) => <div className="deleted-course-row" key={notebook.id}><span>{notebook.title}</span><button className="ghost-button" type="button" disabled={Boolean(restoringId)} onClick={() => void handleRestoreNotebook(notebook)}>{restoringId === notebook.id ? '正在恢复…' : '恢复到课程'}</button></div>)}</section>}
+      {!loading && notebooks.length > 0 && <section className="deleted-course-list" aria-label="已删除笔记"><h2>已删除笔记</h2>{notebooks.map((notebook) => <div className="deleted-course-row" key={notebook.id}><span>{notebook.title}</span><button className="ghost-button" type="button" disabled={Boolean(restoringId)} onClick={() => void handleRestoreNotebook(notebook)}>{restoringId === notebook.id ? '正在恢复…' : notebook.course_id ? '恢复到课程' : '恢复到未分类'}</button></div>)}</section>}
     </section>
   )
 }

@@ -59,8 +59,10 @@ function NotebookPageBody() {
   const [titleError, setTitleError] = useState<string>()
   const [resourcesOpen, setResourcesOpen] = useState(true)
   const [directoryOpen, setDirectoryOpen] = useState(true)
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false)
   const [activeBlockId, setActiveBlockId] = useState<string>()
   const [titleSaving, setTitleSaving] = useState(false)
+  const [lastTitleSavedAt, setLastTitleSavedAt] = useState<string>()
   const [selection, setSelection] = useState<SelectionAnchor | null>(null)
   const [editVersion, setEditVersion] = useState(0)
   const [draftFound, setDraftFound] = useState<NotebookDraft | null>(null)
@@ -416,6 +418,7 @@ function NotebookPageBody() {
       const renamed = await api.renameNotebook(courseId, notebookId, nextTitle)
       setOutline(renamed)
       setTitle((current) => current === nextTitle ? renamed.title : current)
+      setLastTitleSavedAt(new Date().toISOString())
     } catch (cause) {
       setTitleError(cause instanceof Error ? cause.message : '笔记名称保存失败')
     } finally { setTitleSaving(false) }
@@ -592,11 +595,14 @@ function NotebookPageBody() {
     : save.state === 'error' || titleError ? 'error'
       : save.state === 'saving' || titleSaving ? 'saving'
         : save.state === 'unsaved' || titleDirty ? 'unsaved' : 'saved'
+  const lastEditedAt = [save.lastSavedAt, lastTitleSavedAt]
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => serverDate(right).getTime() - serverDate(left).getTime())[0]
   const saveLabel = displaySaveState === 'conflict' ? '有冲突'
     : displaySaveState === 'error' ? titleError ? '名称保存失败' : '保存失败'
       : displaySaveState === 'saving' ? titleSaving ? '名称保存中…' : '保存中…'
         : displaySaveState === 'unsaved' ? titleDirty ? '名称待保存' : '待保存'
-          : `已保存${save.lastSavedAt ? ` ${clock(save.lastSavedAt)}` : ''}`
+          : `已保存${lastEditedAt ? ` ${clock(lastEditedAt)}` : ''}`
 
   return <div className="notebook-document-page">
     <header className="notebook-document-topbar">
@@ -617,17 +623,14 @@ function NotebookPageBody() {
         <button className="notebook-document-ai-button" type="button" onClick={() => openAssistant()} aria-label="打开 AI 助手">
           <span aria-hidden="true">✦</span> AI 助手
         </button>
-        <details className="notebook-document-more">
-          <summary aria-label="更多操作">更多</summary>
-          <div>
-            <button type="button" onClick={() => void save.saveNow()}>立即保存</button>
-            <button type="button" onClick={() => setHistoryOpen(true)}>历史版本</button>
-            <button type="button" onClick={exportMarkdown}>导出 Markdown</button>
-            <button type="button" onClick={exportPdf}>导出 PDF</button>
-            <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href).then(() => setNotice('链接已复制。'))}>复制链接</button>
-            <button type="button" onClick={() => { setResourcesOpen(true); document.querySelector('.notebook-document-resource-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}>查看本篇资料</button>
-          </div>
-        </details>
+        <div className="notebook-document-quick-actions" role="group" aria-label="笔记操作">
+          <button type="button" onClick={() => void save.saveNow()}>立即保存</button>
+          <button type="button" onClick={() => setHistoryOpen(true)}>历史版本</button>
+          <button type="button" onClick={exportMarkdown}>导出 Markdown</button>
+          <button type="button" onClick={exportPdf}>导出 PDF</button>
+          <button type="button" onClick={() => void navigator.clipboard.writeText(window.location.href).then(() => setNotice('链接已复制。'))}>复制链接</button>
+          <button type="button" onClick={() => { setResourcesOpen(true); document.querySelector('.notebook-document-resource-list')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }}>查看本篇资料</button>
+        </div>
       </div>
     </header>
 
@@ -645,84 +648,41 @@ function NotebookPageBody() {
     {documentWarning && <div className="notebook-document-banner" role="alert">{documentWarning}</div>}
     {imageError && <div className="notebook-document-banner is-error" role="alert">{imageError}<button type="button" onClick={() => setImageError(undefined)}>关闭</button></div>}
 
-    <div className="notebook-document-workspace">
+    <div className={`notebook-document-workspace${leftPanelCollapsed ? ' is-left-panel-collapsed' : ''}`}>
       <aside className="notebook-document-sidebar" aria-label="资料与目录">
-        <div className="notebook-document-sidebar-heading">资料与目录</div>
+        <div className="notebook-document-sidebar-heading"><span>资料与目录</span><button type="button" aria-label={leftPanelCollapsed ? '展开资料与目录' : '收起资料与目录'} aria-expanded={!leftPanelCollapsed} onClick={() => setLeftPanelCollapsed((value) => !value)}>{leftPanelCollapsed ? '»' : '«'}</button></div>
         <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" multiple onChange={(event) => void handleUploadMaterial(event)} aria-label="选择课程资料" />
         <input ref={sourceImageInput} className="notebook-document-file-input" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={(event) => void handleUploadSourceImage(event)} aria-label="选择原始图片资料" />
         <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
           <span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}
         </button>
-        <button className="notebook-document-upload is-secondary" type="button" onClick={() => sourceImageInput.current?.click()}>
-          <span aria-hidden="true">▧</span>添加 PNG/JPG 图片资料
-        </button>
-        <label className="notebook-document-duplicate-option">
-          <input type="checkbox" checked={allowDuplicateUploads} onChange={(event) => setAllowDuplicateUploads(event.target.checked)} />
-          相同文件也作为新资料导入
-        </label>
         {uploadError && <p className="notebook-document-sidebar-error" role="alert">{uploadError}</p>}
         {assetUploadError && <p className="notebook-document-sidebar-error" role="alert">{assetUploadError}</p>}
         {generationError && <p className="notebook-document-sidebar-error" role="alert">{generationError}</p>}
-        {uploadBatch && <div className="notebook-document-sidebar-empty" role="status">
-          <strong>{uploadBatch.status === 'open' ? '等待本批上传完成…' : uploadBatch.status === 'parsing' || uploadBatch.status === 'waiting_parse' ? '资料正在后台解析…' : uploadBatch.status === 'generating' ? 'AI 正在追加正式正文…' : uploadBatch.status === 'partial_failure' ? '部分资料处理失败，可检查失败项并重试。' : '本批资料已处理完成。'}</strong>
-          {uploadBatch.inputs.filter((item) => item.error_message).map((item) => {
-            const material = bookMaterials.find((row) => row.asset_id === item.asset_id)
-            return <div key={item.asset_id}><small>{item.asset_id.slice(0, 8)}：{item.error_message}</small>
-              {item.status === 'parse_failed' && material && <button type="button" onClick={() => void api.retryMaterial(material.id).catch((cause: unknown) => setUploadError(cause instanceof Error ? cause.message : '解析重试失败'))}>重试解析</button>}
-            </div>
-          })}
-        </div>}
         {generationJob && ['pending', 'processing', 'cancel_requested'].includes(generationJob.status) && <p className="notebook-document-sidebar-empty" role="status">{generationJob.status === 'pending' ? '等待 AI 补充正文…' : generationJob.status === 'cancel_requested' ? '正在取消…' : 'AI 正在补充正文…'}</p>}
         {generationJob?.status === 'failed' && <button className="notebook-document-import" type="button" disabled={generationBusy} onClick={() => {
           setGenerationBusy(true)
           void api.retryNotebookGenerationJob(notebookId!, generationJob.id).then(setGenerationJob).catch((cause: unknown) => setGenerationError(cause instanceof Error ? cause.message : '重试失败')).finally(() => setGenerationBusy(false))
         }}>重试 AI 整理</button>}
         {generationJob?.status === 'completed' && <p className="notebook-document-sidebar-empty" role="status">AI 补充内容已写入正式正文</p>}
-        <section className="notebook-document-sidebar-section">
-          <div className="notebook-document-section-toggle is-static">本篇资源 <small>{assetResources.length}</small></div>
-          <div className="notebook-document-resource-list">
-            {assetResources.length ? assetResources.map((asset) => <div className="notebook-document-resource-item" key={asset.id}>
-              <span title={asset.original_name}>{asset.original_name}</span>
-              <small>{asset.state === 'ready' ? asset.role === 'source_material' ? '原始资料' : '正文资源' : asset.state}</small>
-              {asset.role === 'source_material' && <button type="button" disabled={asset.state !== 'ready'}
-                onClick={() => { const next = new URLSearchParams(searchParams); next.set('asset', asset.id); next.set('page', '1'); setSearchParams(next) }}>查看来源</button>}
-              {asset.role === 'source_material' && <details className="notebook-document-material-actions"><summary aria-label={`管理${asset.original_name}`}>更多</summary>
-                <button type="button" disabled={Boolean(materialBusyId)} onClick={() => setAssetRemoval(asset)}>从本篇移除</button>
-              </details>}
-              {asset.media_type === 'image' && asset.state === 'ready' && <button type="button" onClick={() => void insertSourceAsset(asset)}>插入正文</button>}
-              {asset.media_type === 'image' && asset.role === 'source_material' && assetJobs[asset.id] && <small className="notebook-document-resource-status">OCR：{assetJobs[asset.id].status === 'completed' ? '完成' : assetJobs[asset.id].status === 'completed_with_warnings' ? '有告警' : assetJobs[asset.id].status === 'failed' ? `失败 · ${assetJobs[asset.id].error_message ?? ''}` : assetJobs[asset.id].status === 'processing' ? '处理中' : '排队中'}</small>}
-              {asset.media_type === 'image' && asset.role === 'source_material' && assetJobs[asset.id]?.status === 'failed' && <button type="button" onClick={() => void api.retryAssetParse(asset.id).then((job) => setAssetJobs((current) => ({ ...current, [asset.id]: job }))).catch((cause: unknown) => setAssetUploadError(cause instanceof Error ? cause.message : '重试图片解析失败'))}>重试 OCR</button>}
-            </div>) : <p className="notebook-document-sidebar-empty">暂时没有已登记的统一资源</p>}
-            {detachedAssetResources.length > 0 && <details className="notebook-document-deleted-materials">
-              <summary>可恢复资源 · {detachedAssetResources.length}</summary>
-              {detachedAssetResources.map((asset) => <div key={asset.id}>
-                <span>{asset.original_name}</span>
-                <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void restoreNotebookAsset(asset)}>
-                  {materialBusyId === asset.id ? '恢复中…' : '恢复'}
-                </button>
-              </div>)}
-            </details>}
-          </div>
-        </section>
-        <section className="notebook-document-sidebar-section">
+        <section className="notebook-document-sidebar-section notebook-document-materials-section">
           <button className="notebook-document-section-toggle" type="button" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}>
-            <span className={resourcesOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>课程资料 <small>{bookMaterials.length}</small>
+            <strong>课程资料</strong><span className={`notebook-document-section-chevron${resourcesOpen ? ' is-open' : ''}`} aria-hidden="true">›</span>
           </button>
           {resourcesOpen && <div className="notebook-document-section-body">
             {materialActionError && <p className="notebook-document-sidebar-error" role="alert">{materialActionError}</p>}
-            {bookMaterials.length ? bookMaterials.map((material) => <div className="notebook-document-material-row" key={material.id}>
+            {bookMaterials.length ? <ul className="notebook-document-material-list">{bookMaterials.map((material) => <li className="notebook-document-material-row" key={material.id}>
               <Link className="notebook-document-material"
                 to={`/courses/${courseId}/notebooks/${notebookId}${material.asset_id ? `?asset=${encodeURIComponent(material.asset_id)}` : ''}`} title={material.original_filename}>
-                <span className="notebook-document-file-icon" aria-hidden="true">{material.original_filename.toLowerCase().endsWith('.pdf') ? 'PDF' : material.original_filename.toLowerCase().endsWith('.pptx') ? 'PPT' : 'DOC'}</span>
-                <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? `已整理 · ${material.page_count} 页` : material.status === 'failed' ? `处理失败${material.document_warning ? ` · ${material.document_warning}` : ''}` : '正在整理'}</small></span>
+                <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? '已整理' : material.status === 'failed' ? `处理失败${material.document_warning ? ` · ${material.document_warning}` : ''}` : '正在整理'}</small></span>
               </Link>
-              <details className="notebook-document-material-actions"><summary aria-label={`管理${material.original_filename}`}>更多</summary>
+              <details className="notebook-document-material-actions"><summary aria-label={`管理${material.original_filename}`}>⋯</summary>
                 <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void prepareMaterialRemoval(material)}>移除资料</button>
                 {material.status === 'failed'
                   ? <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void runMaterialOperation(material.id, 'retry')}>重试解析</button>
                   : <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void runMaterialOperation(material.id, 'reparse')}>重新解析</button>}
               </details>
-            </div>) : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}
+            </li>)}</ul> : <p className="notebook-document-sidebar-empty">尚未上传资料</p>}
             {deletedBookMaterials.length > 0 && <details className="notebook-document-deleted-materials">
               <summary>可恢复资料 · {deletedBookMaterials.length}</summary>
               {deletedBookMaterials.map((material) => <div key={material.id}>
@@ -734,7 +694,7 @@ function NotebookPageBody() {
         </section>
         <section className="notebook-document-sidebar-section notebook-document-sidebar-directory">
           <button className="notebook-document-section-toggle" type="button" aria-expanded={directoryOpen} onClick={() => setDirectoryOpen((value) => !value)}>
-            <span className={directoryOpen ? 'is-open' : ''} aria-hidden="true">⌄</span>笔记目录 <small>{headings.length ? `${headings.length} 个标题` : '随标题更新'}</small>
+            <strong>笔记目录</strong><small>{headings.length ? `${headings.length} 个标题` : '随标题更新'}</small><span className={`notebook-document-section-chevron${directoryOpen ? ' is-open' : ''}`} aria-hidden="true">›</span>
           </button>
           {directoryOpen && <nav className="notebook-document-section-body" aria-label="笔记目录">
             {headings.length ? headings.map((heading) => <button
@@ -751,12 +711,11 @@ function NotebookPageBody() {
       </aside>
 
       <main className="notebook-document-canvas" aria-label="笔记正文">
-        <div className="notebook-document-breadcrumb"><span>课程笔记</span><span aria-hidden="true">›</span><span>{course?.name ?? '课程'}</span><span aria-hidden="true">›</span><span>{outline?.title ?? '笔记'}</span></div>
         {!loaded ? <div className="notebook-document-loading" role="status">正在读取笔记正文…</div> : <article className="notebook-document-paper">
           <input className="notebook-document-title" value={title} onChange={(event) => { setTitle(event.target.value); setTitleError(undefined) }} onBlur={() => void renameTitle()} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} aria-label="笔记名称" maxLength={200} />
           <div className="notebook-document-meta">
             <span>{course?.name ?? '课程'} · {bookMaterials.length} 份资料 · 约 {wordCount.toLocaleString('zh-CN')} 字</span>
-            {save.lastSavedAt && <span>最后编辑 {clock(save.lastSavedAt)}</span>}
+            {lastEditedAt && <span title={serverDate(lastEditedAt).toLocaleString('zh-CN')}>最后编辑 {clock(lastEditedAt)}</span>}
           </div>
           {titleError && <p className="notebook-document-error" role="alert">{titleError}</p>}
           <NotebookEditor

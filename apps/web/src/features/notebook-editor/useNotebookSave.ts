@@ -88,7 +88,9 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
       }
       if (!mountedRef.current) return true
       setRevision(saved.revision)
-      setLastSavedAt(saved.updated_at)
+      // Display when this editor confirmed the successful save. The loaded
+      // document still uses the server timestamp until a local save succeeds.
+      setLastSavedAt(new Date().toISOString())
       setState(stillDirty ? 'unsaved' : 'saved')
       onDirtyChangeRef.current?.(stillDirty)
       if (stillDirty) {

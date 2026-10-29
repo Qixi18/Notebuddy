@@ -21,12 +21,16 @@ export function normalizeDocument(content: DocNode | null | undefined): DocNode 
   if (!content || content.type !== 'doc') return emptyDocument()
   const used = new Set<string>()
   const walk = (node: DocNode, topLevel: boolean): DocNode => {
-    const copy: DocNode = { ...node }
-    if (Array.isArray(node.content)) copy.content = node.content.map((child) => walk(child, false))
-    if (topLevel && !['horizontalRule', 'text', 'image', 'blockMath'].includes(node.type)) {
-      const attrs = { ...(node.attrs ?? {}) }
+    const latex = topLevel ? standaloneLatex(node) : null
+    const normalizedNode: DocNode = latex
+      ? { type: 'blockMath', attrs: { latex, ...(node.attrs?.blockId ? { blockId: node.attrs.blockId } : {}) } }
+      : node
+    const copy: DocNode = { ...normalizedNode }
+    if (Array.isArray(normalizedNode.content)) copy.content = normalizedNode.content.map((child) => walk(child, false))
+    if (topLevel && !['horizontalRule', 'text', 'image'].includes(copy.type)) {
+      const attrs = { ...(copy.attrs ?? {}) }
       if (typeof attrs.blockId !== 'string' || !attrs.blockId || used.has(attrs.blockId)) {
-        attrs.blockId = newBlockId(node.type)
+        attrs.blockId = newBlockId(copy.type)
       }
       used.add(attrs.blockId as string)
       copy.attrs = attrs
@@ -34,6 +38,20 @@ export function normalizeDocument(content: DocNode | null | undefined): DocNode 
     return copy
   }
   return { ...content, content: (content.content ?? []).map((child) => walk(child, true)) }
+}
+
+/** Convert a clearly standalone raw-LaTeX paragraph into the editor's math node. */
+function standaloneLatex(node: DocNode): string | null {
+  if (node.type !== 'paragraph' || !node.content?.length) return null
+  if (node.content.some((child) => child.type !== 'text' || child.marks?.length)) return null
+  const latex = node.content.map((child) => child.text ?? '').join('').trim()
+  if (!latex || !latex.includes('\\') || /[，。；：！？]/.test(latex)) return null
+
+  const withoutText = latex.replace(/\\text\s*\{[^{}]*\}/g, '')
+  if (/[\u3400-\u9fff]/.test(withoutText)) return null
+  if (!/^[-+A-Za-z0-9\s\\{}()[\].,^_=<>|:*\/!]+$/.test(withoutText)) return null
+  if (!/\\(?:cup|cap|setminus|in|notin|subseteq?|supseteq?|mid|frac|sqrt|sum|prod|int|lim|cdot|times|leq?|geq?|ne|approx|equiv|to|Rightarrow|Leftrightarrow|mathbb|overline|tag)\b/.test(latex)) return null
+  return latex
 }
 
 export function extractOutline(doc: DocNode): OutlineItem[] {

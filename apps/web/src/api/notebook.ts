@@ -30,6 +30,7 @@ export const notebookApi = {
   renameUnboundNotebook: (notebookId: string, title: string) => request<UnboundNotebookSummary>(`/api/v1/notebooks/unbound/${notebookId}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }),
   }),
+  deleteUnboundNotebook: (notebookId: string) => request<void>(`/api/v1/notebooks/unbound/${notebookId}`, { method: 'DELETE' }),
   getUnboundNotebookDocument: (notebookId: string) => request<NotebookDocumentResponse>(`/api/v1/notebooks/unbound/${notebookId}/document`),
   saveUnboundNotebookDocument: (notebookId: string, content: DocNode, expectedRevision: number) => request<NotebookDocumentResponse>(`/api/v1/notebooks/unbound/${notebookId}/document`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -51,6 +52,10 @@ export const notebookApi = {
   moveNotebook: (notebookId: string, courseId: string) => request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/move`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ course_id: courseId }),
   }),
+  bulkManageNotebooks: (notebookIds: string[], action: 'move' | 'delete', courseId?: string | null) => request<{ action: 'move' | 'delete'; affected: number }>('/api/v1/notebooks/bulk-manage', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notebook_ids: notebookIds, action, course_id: courseId ?? null }),
+  }),
   uploadNotebookCover: (notebookId: string, file: File) => {
     const body = new FormData(); body.append('file', file)
     return request<{ cover_url: string }>(`/api/v1/notebooks/${notebookId}/cover`, { method: 'PUT', body })
@@ -58,7 +63,7 @@ export const notebookApi = {
   deleteNotebookCover: (notebookId: string) => request<void>(`/api/v1/notebooks/${notebookId}/cover`, { method: 'DELETE' }),
   deleteNotebook: (courseId: string, notebookId: string) => request<void>(`/api/v1/courses/${courseId}/notebooks/${notebookId}`, { method: 'DELETE' }),
   listDeletedNotebooks: () => request<NotebookSummary[]>('/api/v1/notebooks/deleted'),
-  restoreDeletedNotebook: (notebookId: string, courseId: string) => request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/restore`, {
+  restoreDeletedNotebook: (notebookId: string, courseId: string | null) => request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/restore`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ course_id: courseId }),
   }),
   unbindNotebook: (notebookId: string) => request<UnboundNotebookSummary>(`/api/v1/notebooks/${notebookId}/unbind`, { method: 'POST' }),

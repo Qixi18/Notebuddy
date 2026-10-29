@@ -14,14 +14,22 @@
 .notebook-document-save-status > span { width: 8px; height: 8px; border-radius: 50%; background: #70a17c; }
 .notebook-document-save-unsaved > span, .notebook-document-save-saving > span { background: #cba965; }
 .notebook-document-save-error > span { background: #b76554; }
-.notebook-document-more { position: relative; }
-.notebook-document-more summary { min-width: 75px; padding: 9px 16px; border-radius: 8px; background: #f1f5f0; color: #41604a; text-align: center; font-size: 13px; cursor: pointer; list-style: none; }
-.notebook-document-more summary::-webkit-details-marker { display: none; }
-.notebook-document-more > div { position: absolute; top: 42px; right: 0; z-index: 5; min-width: 170px; display: grid; padding: 7px; border: 1px solid #dfe8df; border-radius: 10px; background: #fff; box-shadow: 0 12px 28px #20382b17; }
-.notebook-document-more a, .notebook-document-more button { padding: 9px 10px; border: 0; border-radius: 6px; background: transparent; color: #304d39; text-align: left; font-size: 13px; }
-.notebook-document-more a:hover, .notebook-document-more button:hover { background: #f1f6f0; }
-.notebook-document-workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100dvh - 72px); }
+.notebook-document-quick-actions { min-width: 0; display: flex; align-items: center; gap: 3px; }
+.notebook-document-quick-actions button { flex: none; padding: 8px 9px; border: 0; border-radius: 7px; background: transparent; color: #3e5a47; font-size: 12px !important; white-space: nowrap; transition: background .16s ease, color .16s ease; }
+.notebook-document-quick-actions button:hover { background: #edf4ed; color: #205a3b; }
+.notebook-document-quick-actions button:active { background: #e4eee4; }
+.notebook-document-workspace { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: calc(100dvh - 72px); min-height: 0; overflow: hidden; }
 .notebook-document-sidebar { min-width: 0; min-height: calc(100dvh - 72px); padding: 27px 20px 34px; border-right: 1px solid #e5ebe5; background: #fbfcfa; }
+.notebook-document-sidebar { min-height: 0; overflow: auto; }
+.notebook-document-canvas { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.notebook-document-topbar { position: sticky; top: 0; z-index: 20; }
+.notebook-document-workspace.is-left-panel-collapsed { grid-template-columns: 58px minmax(0, 1fr); }
+.notebook-document-workspace.is-left-panel-collapsed .notebook-document-sidebar { padding: 14px 8px; }
+.notebook-document-workspace.is-left-panel-collapsed .notebook-document-sidebar-heading { justify-content: center; margin: 0; }
+.notebook-document-workspace.is-left-panel-collapsed .notebook-document-sidebar-heading > span,
+.notebook-document-workspace.is-left-panel-collapsed .notebook-document-sidebar > :not(.notebook-document-sidebar-heading) { display: none; }
+.notebook-document-sidebar-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notebook-document-sidebar-heading button { width: 30px; height: 30px; border: 1px solid #e2ebe2; border-radius: 8px; background: #fff; color: #42634d; cursor: pointer; }
 .notebook-document-sidebar-heading { margin: 0 4px 19px; color: #829087; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 .notebook-document-file-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .notebook-document-upload { width: 100%; min-height: 50px; display: flex; align-items: center; gap: 12px; padding: 0 18px; border: 0; border-radius: 10px; background: #2f5d45; color: #fff; text-align: left; font-weight: 650 !important; }
@@ -50,7 +58,7 @@
 .notebook-document-canvas { min-width: 0; padding: 28px clamp(18px, 3vw, 48px) 48px; background: #f7f9f6; }
 .notebook-document-breadcrumb { max-width: 1200px; display: flex; align-items: center; gap: 12px; margin: 0 auto 15px; color: #87968b; font-size: 12px; }
 .notebook-document-breadcrumb > span:last-child { color: #506355; }
-.notebook-document-paper { min-height: calc(100dvh - 160px); max-width: 940px; margin: 0 auto; padding: 54px clamp(35px, 6vw, 92px) 100px; border-radius: 14px; background: #fff; box-shadow: 0 12px 28px #20382b0d; }
+.notebook-document-paper { min-height: calc(100% - 20px); max-width: min(1200px, 100%); margin: 0 auto; padding: 54px clamp(35px, 6vw, 92px) 100px; border-radius: 14px; background: #fff; box-shadow: 0 12px 28px #20382b0d; }
 .notebook-document-title { width: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: #24322a; font-family: var(--nb-sans) !important; font-size: clamp(32px, 3vw, 42px) !important; font-weight: 700 !important; line-height: 1.3; }
 .app-shell-garden .notebook-document-page :is(.notebook-document-title, .notebook-document-block) { background: transparent; }
 .notebook-document-title:focus-visible, .notebook-document-block:focus-visible { outline: 2px solid #72927a; outline-offset: 4px; border-radius: 3px; }
@@ -88,7 +96,7 @@
 .notebook-document-source-note p { max-height: 190px; overflow: auto; margin: 12px 0; white-space: pre-wrap; color: #43594a; font-size: 13px; line-height: 1.7; }
 .notebook-document-source-note button { padding: 7px 12px; border: 1px solid #b6cfb9; border-radius: 7px; background: #fff; color: #2f5d45; font-size: 12px !important; }
 @media (max-width: 1080px) { .notebook-document-workspace { grid-template-columns: 250px minmax(0, 1fr); } .notebook-document-paper { padding-inline: clamp(30px, 5vw, 70px); } }
-@media (max-width: 760px) { .notebook-document-topbar { height: 62px; padding: 0 15px; gap: 9px; } .notebook-document-top-course { max-width: 90px; } .notebook-document-top-title { max-width: 140px; } .notebook-document-top-separator { display: none; } .notebook-document-save-status { font-size: 11px; } .notebook-document-top-actions { gap: 10px; } .notebook-document-workspace { display: block; } .notebook-document-sidebar { min-height: 0; padding: 18px 16px; border-right: 0; border-bottom: 1px solid #e5ebe5; } .notebook-document-sidebar-heading { display: none; } .notebook-document-upload { min-height: 44px; } .notebook-document-sidebar-section { padding: 15px 0; } .notebook-document-section-body { max-height: 180px; overflow: auto; } .notebook-document-canvas { padding: 18px 12px 35px; } .notebook-document-paper { min-height: 65dvh; padding: 30px 28px 80px; } .notebook-document-editbar { position: static; } }
+@media (max-width: 760px) { .notebook-document-workspace, .notebook-document-workspace.is-left-panel-collapsed { display: block; height: auto; min-height: calc(100dvh - 62px); overflow: visible; } .notebook-document-sidebar { max-height: 38dvh; } .notebook-document-canvas { overflow: visible; } .notebook-document-workspace.is-left-panel-collapsed .notebook-document-sidebar { width: 100%; max-height: 52px; } .notebook-document-workspace.is-left-panel-collapsed .notebook-document-sidebar > :not(.notebook-document-sidebar-heading) { display: none; } }
 @media (max-width: 460px) { .notebook-document-top-course, .notebook-document-top-chevron { display: none; } .notebook-document-top-title { max-width: 115px; } }
 @media (prefers-reduced-motion: reduce) { .notebook-document-page * { scroll-behavior: auto !important; transition: none !important; } }
 
@@ -96,6 +104,8 @@
 .app-shell-with-assistant .notebook-document-workspace { grid-template-columns: 264px minmax(0, 1fr); }
 .app-shell-with-assistant .notebook-document-canvas { padding-inline: clamp(12px, 2vw, 28px); }
 .app-shell-with-assistant .notebook-document-paper { padding-inline: clamp(22px, 3.2vw, 48px); }
+.app-shell-with-assistant .notebook-document-workspace.is-left-panel-collapsed { grid-template-columns: 58px minmax(0, 1fr); }
+.app-shell-with-assistant .notebook-document-paper { max-width: 940px; }
 
 /* ===== 富文本编辑器与设计稿补充样式 ===== */
 .notebook-document-history-actions { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 9px; background: #f4f7f3; }
@@ -159,8 +169,8 @@
 .nb-prosemirror .selectedCell::after { position: absolute; inset: 0; content: ""; background: #d8ebd9aa; pointer-events: none; }
 .nb-prosemirror .selectedCell { position: relative; }
 .nb-prosemirror .katex { font-size: 1.06em; }
-.nb-prosemirror [data-type="inlineMath"] { display: inline-block; padding: 0 .1em; }
-.nb-prosemirror [data-type="blockMath"] { display: block; overflow-x: auto; margin: .7em 0; padding: .5em 0; text-align: center; }
+.nb-prosemirror [data-type="inline-math"] { display: inline-block; padding: 0 .1em; vertical-align: middle; }
+.nb-prosemirror [data-type="block-math"] { display: block; overflow-x: auto; margin: .7em 0; padding: .5em 0; text-align: center; }
 .nb-prosemirror .ProseMirror-gapcursor::after { border-top-color: #3c7555; }
 .nb-prosemirror p.is-editor-empty:first-child::before, .nb-prosemirror .is-empty::before { height: 0; float: left; color: #a9b7ac; content: attr(data-placeholder); pointer-events: none; }
 .nb-editor .ProseMirror-focused { outline: none; }
@@ -346,8 +356,251 @@
 .notebook-document-material-actions button{display:block;width:150px;border:0;background:var(--surface,#fff);padding:8px 10px;text-align:left;color:inherit;cursor:pointer}
 .notebook-document-material-actions button:hover{background:var(--surface-muted,#f1f4f4)}
 .notebook-document-material-actions button:disabled{opacity:.55;cursor:wait}
+
+/* Compact reading navigation for notebook materials and headings. */
+.notebook-document-sidebar-section { padding: 22px 0; }
+.notebook-document-section-toggle { min-height: 34px; gap: 10px; color: #345541; font-size: 14px !important; font-weight: 650; }
+.notebook-document-section-toggle small { color: #718779; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.notebook-document-section-body { gap: 6px; padding-top: 12px; }
+.notebook-document-material-row { align-items: center; gap: 8px; }
+.notebook-document-material { min-height: 64px; gap: 12px; padding: 10px 12px; border: 1px solid #e2ebe2; border-radius: 12px; background: #f5f8f3; color: #294333; transition: background .15s ease, border-color .15s ease; }
+.notebook-document-material:hover { border-color: #b8cfbd; background: #edf4eb; }
+.notebook-document-material:focus-visible, .notebook-document-outline-item:focus-visible, .notebook-document-section-toggle:focus-visible, .notebook-document-material-actions summary:focus-visible { outline: 2px solid #39795b; outline-offset: 2px; }
+.notebook-document-file-icon { width: 38px; height: 38px; border-radius: 9px; background: #e1ede0; color: #3f7353; font-size: 12px; font-weight: 750; letter-spacing: .02em; }
+.notebook-document-material > span:last-child { gap: 3px; }
+.notebook-document-material strong { font-size: 13px; line-height: 1.35; }
+.notebook-document-material small { color: #647e6b; font-size: 11px; }
+.notebook-document-material-actions summary { padding: 8px 4px; color: #55715d; }
+.notebook-document-sidebar-directory .notebook-document-section-body { gap: 2px; }
+.notebook-document-outline-item { min-height: 38px; padding: 8px 12px; border-radius: 9px; color: #526b59; line-height: 1.45; transition: background .15s ease, color .15s ease; }
+.notebook-document-outline-h1 { margin-top: 3px; color: #2d4c39; font-size: 13px !important; }
+.notebook-document-outline-h2 { padding-left: 25px; font-size: 12px !important; }
+.notebook-document-outline-item.is-active { background: #e5f0e4; color: #225c3b; font-weight: 650; }
+@media (max-width: 760px) { .notebook-document-sidebar-section { padding: 15px 0; } .notebook-document-section-body { max-height: 220px; } }
+.notebook-document-sidebar-section { padding: 16px 0; }
+.notebook-document-section-toggle { min-height: 58px; gap: 12px; padding: 7px 9px; border-radius: 12px; color: #183b2a; }
+.notebook-document-section-toggle:hover { background: #f1f7f1; }
+.notebook-document-section-toggle strong { font-size: 15px; font-weight: 700; }
+.notebook-document-section-toggle small { color: #6f8176; font-size: 12px; }
+.notebook-document-section-toggle .notebook-document-section-icon { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border-radius: 11px; background: #eaf4eb; color: #288453; font-size: 21px; }
+.notebook-document-section-toggle .notebook-document-section-chevron { width: 34px; height: 34px; display: grid; place-items: center; margin-left: 5px; border-radius: 50%; background: #edf5ee; color: #286345; font-size: 23px; line-height: 1; transform: rotate(0); transition: transform .16s ease, background .16s ease; }
+.notebook-document-section-toggle .notebook-document-section-chevron.is-open { transform: rotate(90deg); }
+.notebook-document-section-body { padding: 5px 0 0 48px; gap: 3px; }
+.notebook-document-sidebar-directory .notebook-document-section-body { position: relative; margin-left: 7px; padding-left: 19px; border-left: 2px solid #e4ece6; }
+.notebook-document-sidebar-directory .notebook-document-outline-item { position: relative; min-height: 36px; padding-block: 6px; }
+.notebook-document-sidebar-directory .notebook-document-outline-item::before { position: absolute; top: 50%; left: -20px; width: 12px; height: 1px; background: #dce6df; content: ''; }
+.notebook-document-sidebar-directory .notebook-document-outline-item:not(.notebook-document-outline-h1) { padding-left: 20px; }
+.notebook-document-sidebar-directory .notebook-document-outline-h1 { margin: 2px 0 4px -11px; padding: 9px 12px; border-radius: 10px; background: #edf6ee; }
+.notebook-document-sidebar-directory .notebook-document-outline-h1::before { display: none; }
 .notebook-document-deleted-materials{margin-top:10px;border-top:1px solid var(--line,#e4e8e8);padding-top:8px;font-size:12px;color:var(--muted,#647276)}
 .notebook-document-deleted-materials summary{cursor:pointer}
 .notebook-document-deleted-materials>div{display:flex;justify-content:space-between;gap:8px;padding:7px 0}
 .notebook-document-deleted-materials button{border:0;background:none;color:var(--accent-strong,#27634e);cursor:pointer}
 @media(max-width:700px){.document-source-backdrop{padding:8px}.document-source-dialog{height:96vh;padding:14px;border-radius:12px}.document-source-body{grid-template-columns:96px minmax(0,1fr);gap:8px}.document-source-pages button{padding:7px 4px;font-size:11px}}
+
+/* Notebook reading workspace: keep the content page centered between the two docks. */
+.notebook-document-page {
+  min-height: calc(100dvh - var(--app-header-height, 0px));
+  background: #f4f8f5;
+}
+.notebook-document-topbar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 100;
+  height: 68px;
+  gap: 13px;
+  padding-inline: clamp(18px, 2vw, 34px);
+  background: rgba(255, 255, 255, .94);
+  backdrop-filter: blur(14px);
+}
+.notebook-document-workspace { margin-top: 68px; }
+.notebook-document-workspace { height: calc(100dvh - 68px); }
+.notebook-document-top-actions { gap: 8px; }
+.notebook-document-quick-actions { overflow-x: auto; scrollbar-width: thin; scrollbar-color: #cbd9ce transparent; }
+.notebook-document-top-title { color: #193b2a; }
+.notebook-document-workspace {
+  grid-template-columns: minmax(238px, 18.7vw) minmax(0, 1fr);
+  height: calc(100dvh - 68px);
+  background: #f2f7f3;
+}
+.notebook-document-sidebar {
+  padding: 22px clamp(14px, 1.35vw, 24px) 30px;
+  border-right-color: #e4ece6;
+  background: linear-gradient(180deg, #fbfdfb, #f8fbf8 72%, #f4f8f4);
+}
+.notebook-document-sidebar-heading {
+  margin-bottom: 16px;
+  color: #253d2e;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.notebook-document-upload {
+  min-height: 48px;
+  border-radius: 11px;
+  background: #26704f;
+  box-shadow: 0 5px 12px #1b5a3c1a;
+  transition: background .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.notebook-document-upload:hover { background: #1e6043; box-shadow: 0 7px 16px #1b5a3c25; }
+.notebook-document-upload:active { transform: translateY(1px); }
+.notebook-document-sidebar-section { padding: 12px 0 16px; }
+.notebook-document-sidebar-directory { padding-top: 12px; }
+.notebook-document-section-toggle { min-height: 50px; }
+.notebook-document-section-toggle .notebook-document-section-icon { width: 36px; height: 36px; }
+.notebook-document-material-list { list-style: none; margin: 0; padding: 0; }
+.notebook-document-material-list .notebook-document-material-row { min-height: 50px; gap: 4px; border-bottom: 1px solid #e6ede7; }
+.notebook-document-material-list .notebook-document-material-row:last-child { border-bottom: 0; }
+.notebook-document-material-list .notebook-document-material { min-height: 50px; padding: 7px 9px; border: 0; border-radius: 7px; background: transparent; }
+.notebook-document-material-list .notebook-document-material:hover { background: #edf5ef; }
+.notebook-document-material-list .notebook-document-material > span { min-width: 0; }
+.notebook-document-material-list .notebook-document-material-actions summary { padding-inline: 4px; }
+.notebook-document-materials-section {
+  margin: 8px 0 18px;
+  padding: 10px 12px 12px;
+  border: 1px solid #dfe8e1;
+  border-radius: 17px;
+  background: #fff;
+}
+.notebook-document-materials-section .notebook-document-section-toggle {
+  min-height: 42px;
+  padding: 0 5px;
+}
+.notebook-document-materials-section .notebook-document-section-toggle strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+.notebook-document-materials-section .notebook-document-section-chevron {
+  margin-left: auto;
+  background: transparent;
+  color: #41584a;
+}
+.notebook-document-materials-section .notebook-document-section-body { padding: 4px 0 0; }
+.notebook-document-materials-section .notebook-document-material-row { min-height: 56px; }
+.notebook-document-materials-section .notebook-document-material { min-height: 56px; padding: 7px 5px; }
+.notebook-document-materials-section .notebook-document-material strong { color: #263b2d; font-size: 14px; font-weight: 550; }
+.notebook-document-materials-section .notebook-document-material small { color: #829087; font-size: 11px; }
+.notebook-document-materials-section .notebook-document-material-actions summary {
+  min-width: 30px;
+  padding: 6px 4px;
+  color: #556a5b;
+  text-align: center;
+  font-size: 20px;
+  line-height: 1;
+}
+.notebook-document-sidebar-directory {
+  margin: 0 0 18px;
+  padding: 10px 12px 12px;
+  border: 1px solid #dfe8e1;
+  border-radius: 17px;
+  background: #fff;
+}
+.notebook-document-sidebar-directory .notebook-document-section-toggle {
+  min-height: 42px;
+  padding: 0 5px;
+}
+.notebook-document-sidebar-directory .notebook-document-section-toggle strong {
+  font-size: 15px;
+  font-weight: 650;
+}
+.notebook-document-sidebar-directory .notebook-document-section-toggle small {
+  margin-left: auto;
+  color: #829087;
+}
+.notebook-document-sidebar-directory .notebook-document-section-chevron {
+  margin-left: 0;
+  background: transparent;
+  color: #41584a;
+}
+.notebook-document-sidebar-directory .notebook-document-section-body {
+  gap: 2px;
+  margin: 0;
+  padding: 4px 0 0;
+  border-left: 0;
+}
+.notebook-document-sidebar-directory .notebook-document-outline-item {
+  min-height: 38px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: #52685a;
+  font-size: 12px !important;
+  font-weight: 450 !important;
+}
+.notebook-document-sidebar-directory .notebook-document-outline-item::before { display: none; }
+.notebook-document-sidebar-directory .notebook-document-outline-h1 {
+  padding-left: 10px;
+  color: #284e39;
+  font-weight: 650 !important;
+}
+.notebook-document-sidebar-directory .notebook-document-outline-item:not(.notebook-document-outline-h1) { padding-left: 22px; }
+.notebook-document-sidebar-directory .notebook-document-outline-item:hover { background: #f1f7f2; }
+.notebook-document-sidebar-directory .notebook-document-outline-item.is-active { background: #edf6ee; color: #205b3d; font-weight: 650 !important; }
+.notebook-document-canvas {
+  padding: 16px clamp(12px, 1.3vw, 22px) 24px;
+  background: #f2f7f3;
+}
+.notebook-document-paper {
+  width: 100%;
+  max-width: none;
+  min-height: 100%;
+  padding: 18px clamp(26px, 2.7vw, 48px) 88px;
+  border: 1px solid #edf1ed;
+  border-radius: 16px;
+  box-shadow: 0 10px 34px #2447320b;
+}
+.notebook-document-title {
+  color: #123f2b;
+  font-size: clamp(30px, 2.55vw, 42px) !important;
+  letter-spacing: -.035em;
+}
+.notebook-document-meta { margin: 12px 0 28px; color: #89958c; font-size: 13px; }
+.nb-prosemirror {
+  color: #3c4a40;
+  font-size: 16px;
+  line-height: 1.85;
+}
+.nb-prosemirror h1, .nb-prosemirror h2, .nb-prosemirror h3 { color: #173f2b; letter-spacing: -.018em; }
+.nb-prosemirror h1 { margin-top: 1.8em; }
+.nb-prosemirror h2 { margin-top: 1.55em; }
+.nb-prosemirror p { margin: .68em 0; }
+.notebook-document-page :is(button, a, summary, input):focus-visible {
+  outline: 2px solid #39795b;
+  outline-offset: 3px;
+}
+.app-shell-with-assistant .notebook-document-workspace {
+  grid-template-columns: minmax(220px, 17.5vw) minmax(0, 1fr);
+}
+.app-shell-with-assistant .notebook-document-sidebar { padding-inline: clamp(12px, 1.1vw, 19px); }
+.app-shell-with-assistant .notebook-document-canvas { padding-inline: clamp(10px, 1vw, 18px); }
+.app-shell-with-assistant .notebook-document-paper {
+  max-width: none;
+  padding-inline: clamp(20px, 2.05vw, 36px);
+}
+.app-shell-with-assistant .notebook-document-workspace.is-left-panel-collapsed {
+  grid-template-columns: 58px minmax(0, 1fr);
+}
+@media (max-width: 1120px) {
+  .notebook-document-topbar { gap: 8px; padding-inline: 12px; }
+  .notebook-document-top-actions { gap: 5px; }
+  .notebook-document-quick-actions { max-width: 48vw; }
+  .notebook-document-quick-actions button { padding-inline: 6px; font-size: 11px !important; }
+  .notebook-document-save-status { font-size: 11px; }
+  .notebook-document-workspace,
+  .app-shell-with-assistant .notebook-document-workspace {
+    grid-template-columns: 238px minmax(0, 1fr);
+  }
+  .notebook-document-paper { padding-inline: clamp(24px, 3.4vw, 42px); }
+}
+@media (max-width: 760px) {
+  .notebook-document-topbar { inset-inline: 0; height: 62px; gap: 9px; padding-inline: 14px; }
+  .notebook-document-workspace { margin-top: 62px; height: auto; }
+  .notebook-document-top-actions { max-width: 68vw; }
+  .notebook-document-quick-actions { max-width: 46vw; }
+  .notebook-document-workspace,
+  .app-shell-with-assistant .notebook-document-workspace { height: auto; }
+  .notebook-document-sidebar { padding: 14px 16px; }
+  .notebook-document-canvas { padding: 12px; }
+  .notebook-document-paper { padding: 18px 22px 64px; }
+}
