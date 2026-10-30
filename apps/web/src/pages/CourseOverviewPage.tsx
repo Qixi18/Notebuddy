@@ -7,6 +7,7 @@ import { CourseKnowledgeStructure } from './CourseKnowledgeStructure'
 import { api } from '../api'
 import type { CourseOverview } from '../types'
 import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
+import './CourseOverviewPage.css'
 
 type CourseTab = 'overview' | 'structure'
 
@@ -18,11 +19,14 @@ export function CourseOverviewPage() {
   const [overview, setOverview] = useState<CourseOverview>()
   const [rootOpen, setRootOpen] = useState(false)
   const [bookError, setBookError] = useState<string>()
+  const [overviewLoading, setOverviewLoading] = useState(true)
+  const [overviewReload, setOverviewReload] = useState(0)
   useEffect(() => {
     let active = true
-    void api.getCourseOverview(courseId).then(value => { if (active) setOverview(value) }).catch((cause: unknown) => { if (active) setBookError(cause instanceof Error ? cause.message : '课程概览读取失败') })
+    setOverview(undefined); setBookError(undefined); setOverviewLoading(true); setRootOpen(false)
+    void api.getCourseOverview(courseId).then(value => { if (active) setOverview(value) }).catch((cause: unknown) => { if (active) setBookError(cause instanceof Error ? cause.message : '课程概览读取失败') }).finally(() => { if (active) setOverviewLoading(false) })
     return () => { active = false }
-  }, [courseId])
+  }, [courseId, overviewReload])
 
   if (coursesLoading) return <div className="page-loading" role="status">正在读取课程…</div>
   if (!course) {
@@ -60,7 +64,7 @@ export function CourseOverviewPage() {
         <div className="course-workspace-actions">
           <Link className="secondary-button link-button" to={`/forest?course=${courseId}`}>在知识森林中查看</Link>
           <button className="secondary-button" type="button" onClick={() => navigate('/', { state: { openCreateCourse: true } })}>＋ 新建课程</button>
-          <button className="primary-button" type="button" onClick={() => notebooks[0]
+          <button className="primary-button" type="button" disabled={overviewLoading} onClick={() => notebooks[0]
             ? navigate(`/courses/${courseId}/notebooks/${notebooks[0].id}?upload=1`)
             : setRootOpen(true)}>上传课程资料</button>
         </div>
@@ -83,7 +87,12 @@ export function CourseOverviewPage() {
           </div>
 
           <div className="course-entry-list">
-            <section aria-label="本课程笔记本"><h2>笔记本</h2>{notebooks.map(book => <Link className="course-entry-row" key={book.id} to={`/courses/${courseId}/notebooks/${book.id}`}>{book.title} · 继续阅读</Link>)}<button className="text-button" onClick={() => setRootOpen(true)}>新建或扩充笔记本</button>{bookError && <p role="alert">{bookError}</p>}</section>
+            <section className="course-notebook-panel" aria-label="本课程笔记本">
+              <header><h2>笔记本</h2><button className="secondary-button" type="button" disabled={overviewLoading} onClick={() => setRootOpen(true)}>新建或扩充笔记本</button></header>
+              {overviewLoading && <p role="status">正在读取笔记本…</p>}
+              {notebooks.map(book => <Link className="course-entry-row" key={book.id} to={`/courses/${courseId}/notebooks/${book.id}`}>{book.title} · 继续阅读</Link>)}
+              {bookError && <div className="course-overview-error"><p role="alert">{bookError}</p><button className="secondary-button" type="button" onClick={() => setOverviewReload(value => value + 1)}>重新读取课程概览</button></div>}
+            </section>
             <Link className="course-entry-row" to={notebooks[0] ? `/courses/${courseId}/notebooks/${notebooks[0].id}` : '#'} onClick={(event) => {
               if (!notebooks[0]) { event.preventDefault(); setRootOpen(true) }
             }}>

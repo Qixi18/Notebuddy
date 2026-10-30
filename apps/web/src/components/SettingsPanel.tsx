@@ -71,6 +71,17 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           {status && draft && (
             <>
               <section className="settings-section">
+                <div className="settings-section-heading"><span>文档处理</span><small>用于新上传的资料</small></div>
+                <label>默认文档处理路线
+                  <select aria-label="默认文档处理路线" value={draft.NOTEBOOK_DOCUMENT_PROCESSING_ROUTE}
+                    disabled={saving} onChange={event => update('NOTEBOOK_DOCUMENT_PROCESSING_ROUTE', event.target.value)}>
+                    <option value="standard">标准处理</option>
+                    <option value="llm">全程 AI</option>
+                  </select>
+                </label>
+                <p className="settings-hint">标准处理使用本地解析，再生成笔记。全程 AI 通过当前模型读取页面、组织笔记和知识联系，会增加 API 用量。切换仅影响新上传，已有任务和重试保持原路线。</p>
+              </section>
+              <section className="settings-section">
                 <div className="settings-section-heading">
                   <span>能力状态</span>
                   <small>密钥仅显示掩码</small>

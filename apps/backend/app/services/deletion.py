@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.checkpoint import create_checkpoint
 from app.db.models import (
+    Asset,
     AssetProcessingJob,
     Course,
     DocumentBlock,
@@ -17,12 +19,18 @@ from app.db.models import (
     DocumentParseRun,
     ForestJob,
     Material,
+    Note,
     Notebook,
+    NotebookAsset,
+    NotebookAttachment,
     NotebookBlockSource,
     NotebookGenerationJob,
+    NotebookRevisionAsset,
     NotebookSection,
     ProcessingJob,
 )
+from app.notes.assets import AssetUnavailable, storage_path
+from app.notes.attachments import AttachmentRejected, attachment_path
 from app.notes.notebook import bump_order_revision
 from app.services.course_scope import material_course_id
 
@@ -120,3 +128,95 @@ def soft_delete_course(db: Session, course: Course) -> dict:
     course.deleted_at = datetime.now(UTC)
     db.commit()
     return preview
+
+
+def permanently_delete_course(db: Session, course: Course) -> None:
+    """Purge a deleted course; its soft-deleted notebooks were already detached."""
+    if course.deleted_at is None:
+        raise DeletionConflict("只能彻底删除回收站中的课程")
+    if impact_preview(db, course_id=course.id)["active_jobs"]:
+        raise DeletionConflict("课程仍有运行中的任务")
+    _checkpoint()
+    try:
+        db.delete(course)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise DeletionConflict("课程仍被其他数据引用，暂时无法彻底删除") from exc
+
+
+def permanently_delete_notebook(db: Session, notebook: Notebook) -> None:
+    """Purge a deleted notebook and files belonging exclusively to it."""
+    if notebook.deleted_at is None:
+        raise DeletionConflict("只能彻底删除回收站中的笔记")
+    active = db.scalar(select(func.count(NotebookGenerationJob.id)).where(
+        NotebookGenerationJob.notebook_id == notebook.id,
+        NotebookGenerationJob.status.in_(("pending", "processing", "cancel_requested")),
+    )) or 0
+    asset_ids = set(db.scalars(select(NotebookAsset.asset_id).where(
+        NotebookAsset.notebook_id == notebook.id,
+    )).all())
+    asset_ids.update(db.scalars(select(Material.asset_id).where(
+        Material.notebook_id == notebook.id, Material.asset_id.is_not(None),
+    )).all())
+    asset_ids.update(db.scalars(select(NotebookAttachment.asset_id).where(
+        NotebookAttachment.notebook_id == notebook.id,
+        NotebookAttachment.asset_id.is_not(None),
+    )).all())
+    material_ids = list(db.scalars(select(Material.id).where(Material.notebook_id == notebook.id)).all())
+    processing_active = db.scalar(select(func.count(ProcessingJob.id)).where(
+        ProcessingJob.material_id.in_(material_ids),
+        ProcessingJob.status.in_(("pending", "processing", "cancel_requested")),
+    )) if material_ids else 0
+    if active or processing_active or (asset_ids and db.scalar(select(func.count(AssetProcessingJob.id)).where(
+        AssetProcessingJob.asset_id.in_(asset_ids),
+        AssetProcessingJob.status.in_(("pending", "processing", "cancel_requested")),
+    ))):
+        raise DeletionConflict("笔记仍有运行中的任务")
+    _checkpoint()
+    # The legacy Note table has a nullable notebook FK without ON DELETE.
+    db.execute(update(Note).where(Note.notebook_id == notebook.id).values(notebook_id=None))
+    try:
+        files = []
+        for attachment in db.scalars(select(NotebookAttachment).where(
+            NotebookAttachment.notebook_id == notebook.id,
+        )).all():
+            if attachment.asset_id is None:
+                try:
+                    files.append(attachment_path(attachment))
+                except AttachmentRejected:
+                    pass
+        # Revision pins use RESTRICT against owner links, so remove them first.
+        for pin in db.scalars(select(NotebookRevisionAsset).where(
+            NotebookRevisionAsset.notebook_id == notebook.id,
+        )).all():
+            db.delete(pin)
+        db.flush()
+        for material in db.scalars(select(Material).where(Material.notebook_id == notebook.id)).all():
+            db.delete(material)
+        db.flush()
+        db.delete(notebook)
+        db.flush()
+        for asset_id in asset_ids:
+            if db.scalar(select(NotebookAsset.id).where(NotebookAsset.asset_id == asset_id).limit(1)):
+                continue
+            if db.scalar(select(Material.id).where(Material.asset_id == asset_id).limit(1)):
+                continue
+            if db.scalar(select(NotebookAttachment.id).where(
+                NotebookAttachment.asset_id == asset_id,
+            ).limit(1)):
+                continue
+            asset = db.get(Asset, asset_id)
+            if asset is None:
+                continue
+            try:
+                files.append(storage_path(asset))
+            except AssetUnavailable:
+                pass
+            db.delete(asset)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise DeletionConflict("笔记仍被其他数据引用，暂时无法彻底删除") from exc
+    for path in files:
+        path.unlink(missing_ok=True)

@@ -59,6 +59,7 @@ from app.schemas.notebook import (
     NotebookBulkManageRequest,
     NotebookDocumentRead,
     NotebookDocumentUpdate,
+    NotebookEditSuggestionBatchReview,
     NotebookEditSuggestionRead,
     NotebookEditSuggestionReview,
     NotebookMoveRequest,
@@ -76,6 +77,7 @@ from app.schemas.notebook import (
     ReadingPositionUpdate,
     UnboundNotebookSummary,
 )
+from app.services.deletion import DeletionConflict, permanently_delete_notebook
 
 router = APIRouter()
 
@@ -298,6 +300,8 @@ def delete_notebook_relation(notebook_id: str, relation_id: str,
         relation.source_notebook_id, relation.target_notebook_id,
     ):
         raise HTTPException(404, "笔记关系不存在")
+    from app.forest.suppressions import suppress
+    suppress(db, relation)
     db.delete(relation)
     db.commit()
 
@@ -311,6 +315,7 @@ def _summary(book: Notebook) -> dict:
             "tree_slot": book.tree_slot, "display_order": book.display_order,
             "order_revision": book.order_revision, "is_default": book.is_default,
             "created_at": book.created_at, "updated_at": book.updated_at,
+            "deleted_at": book.deleted_at,
             "cover_url": _cover_url(book)}
 
 
@@ -496,6 +501,9 @@ def bind_notebook(notebook_id: str, payload: NotebookBindRequest, db: Session = 
     db.execute(update(NotebookSection).where(
         NotebookSection.notebook_id == notebook_id,
     ).values(course_id=course.id))
+    from app.forest.notebook_relations import enqueue_notebook_relations
+
+    enqueue_notebook_relations(db, course.id, notebook_id=book.id)
     bound_book = book
     db.commit()
     db.refresh(bound_book)
@@ -748,6 +756,17 @@ def restore_deleted_notebook(notebook_id: str, payload: NotebookRestoreDeletedRe
     return _summary(book)
 
 
+@router.delete("/notebooks/{notebook_id}/permanent", status_code=204)
+def purge_deleted_notebook(notebook_id: str, db: Session = Depends(get_db)) -> None:
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is None:
+        raise HTTPException(404, "回收站中没有这篇笔记")
+    try:
+        permanently_delete_notebook(db, book)
+    except DeletionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.get("/courses/{course_id}/notebooks/{notebook_id}", response_model=NotebookRead)
 def get_named_notebook(course_id: str, notebook_id: str, db: Session = Depends(get_db)):
     book = ensure_notebook(db, course_id, notebook_id)
@@ -792,6 +811,7 @@ def put_notebook_document(course_id: str, notebook_id: str, payload: NotebookDoc
         next_revision, stored = write_document(
             db, book, content, expected_revision=payload.expected_revision,
             origin="autosave", legacy_compatible=payload.blocks is not None,
+            refresh_relations=True,
         )
     except DocumentConflict as exc:
         db.rollback()
@@ -839,6 +859,38 @@ def list_edit_suggestions(notebook_id: str, status: str | None = "pending",
                 "status": row.status, "created_at": row.created_at,
                 "reviewed_at": row.reviewed_at,
             })
+    return result
+
+
+@router.get("/courses/{course_id}/notebook-edit-suggestions",
+            response_model=list[NotebookEditSuggestionRead])
+def list_course_edit_suggestions(course_id: str, status: str | None = "pending",
+                                 db: Session = Depends(get_db)):
+    """列出课程内待审核的 Notebook 正文建议，供答疑页集中处理。"""
+    ensure_course(db, course_id)
+    rows = db.execute(
+        select(NotebookEditSuggestion, Notebook.title)
+        .join(Notebook, Notebook.id == NotebookEditSuggestion.notebook_id)
+        .where(Notebook.course_id == course_id, Notebook.deleted_at.is_(None),
+               *([NotebookEditSuggestion.status == status] if status else []))
+        .order_by(NotebookEditSuggestion.created_at.desc())
+        .limit(200)
+    ).all()
+    result = []
+    for row, notebook_title in rows:
+        try:
+            operations = json.loads(row.ops_json)
+            proposed = load_document(row.proposed_document_json)
+            proposed_content = proposed.content if proposed.warning is None else None
+        except (TypeError, ValueError):
+            operations, proposed_content = [], None
+        result.append({
+            "id": row.id, "notebook_id": row.notebook_id, "notebook_title": notebook_title,
+            "base_revision": row.base_revision, "rationale": row.rationale,
+            "operations": operations if isinstance(operations, list) else [],
+            "proposed_content": proposed_content, "status": row.status,
+            "created_at": row.created_at, "reviewed_at": row.reviewed_at,
+        })
     return result
 
 
@@ -908,6 +960,7 @@ def review_edit_suggestion(notebook_id: str, suggestion_id: str,
         next_revision, content = write_document(
             db, book, proposed_content,
             expected_revision=payload.expected_revision, origin="ai_suggestion",
+            refresh_relations=True,
         )
     except DocumentConflict as exc:
         db.rollback()
@@ -918,6 +971,83 @@ def review_edit_suggestion(notebook_id: str, suggestion_id: str,
     return {"schema_version": 2, "content": content,
             "blocks": document_to_blocks(content),
             "revision": next_revision, "updated_at": book.updated_at}
+
+
+@router.post("/courses/{course_id}/notebook-edit-suggestions/apply-all")
+def apply_course_edit_suggestions(course_id: str, payload: NotebookEditSuggestionBatchReview,
+                                  db: Session = Depends(get_db)):
+    """Apply selected pending Notebook suggestions atomically, one revision per Notebook."""
+    ensure_course(db, course_id)
+    if len(set(payload.suggestion_ids)) != len(payload.suggestion_ids):
+        raise HTTPException(422, "修改建议编号不能重复")
+    rows = db.execute(
+        select(NotebookEditSuggestion, Notebook)
+        .join(Notebook, Notebook.id == NotebookEditSuggestion.notebook_id)
+        .where(NotebookEditSuggestion.id.in_(payload.suggestion_ids),
+               Notebook.course_id == course_id, Notebook.deleted_at.is_(None))
+        .order_by(NotebookEditSuggestion.created_at, NotebookEditSuggestion.id)
+    ).all()
+    if len(rows) != len(payload.suggestion_ids):
+        raise HTTPException(404, "部分修改建议不存在或不属于当前课程")
+    grouped: dict[str, tuple[Notebook, list[NotebookEditSuggestion]]] = {}
+    for suggestion, book in rows:
+        grouped.setdefault(book.id, (book, []))[1].append(suggestion)
+    now = utc_now()
+    try:
+        stale = [suggestion for _, suggestions in grouped.values() for suggestion in suggestions
+                 if suggestion.status != "pending"]
+        if stale:
+            raise HTTPException(409, "部分修改建议已处理，请刷新列表")
+        mismatched = [suggestion for book, suggestions in grouped.values() for suggestion in suggestions
+                      if suggestion.base_revision != book.document_revision]
+        if mismatched:
+            for suggestion in mismatched:
+                suggestion.status = "stale"
+                suggestion.reviewed_at = now
+            db.commit()
+            raise HTTPException(409, "部分笔记正文已变化，对应建议已失效；请刷新后重新生成")
+        claimed = db.execute(update(NotebookEditSuggestion).where(
+            NotebookEditSuggestion.id.in_(payload.suggestion_ids),
+            NotebookEditSuggestion.status == "pending",
+        ).values(status="applying"))
+        if claimed.rowcount != len(payload.suggestion_ids):
+            db.rollback()
+            raise HTTPException(409, "部分修改建议刚被其他请求处理，请刷新列表")
+        results = []
+        for book, suggestions in grouped.values():
+            stored = load_document(book.document_json)
+            if stored.warning:
+                raise ValueError(f"Notebook《{book.title}》正文无法解析，不能应用修改建议")
+            content = stored.content
+            for suggestion in suggestions:
+                operations = json.loads(suggestion.ops_json)
+                if not isinstance(operations, list) or not operations:
+                    raise ValueError("修改建议缺少有效操作")
+                content = apply_edits(content, operations)
+            _ensure_document_image_ownership(db, book.id, content)
+            expected_revision = book.document_revision
+            next_revision, _ = write_document(
+                db, book, content, expected_revision=expected_revision,
+                origin="ai_suggestion", refresh_relations=True,
+            )
+            for suggestion in suggestions:
+                suggestion.status = "accepted"
+                suggestion.reviewed_at = now
+            results.append({"notebook_id": book.id, "revision": next_revision,
+                            "suggestion_count": len(suggestions)})
+        from app.forest.notebook_relations import enqueue_notebook_relations
+
+        enqueue_notebook_relations(db, course_id)
+        db.commit()
+        return {"updated": sum(item["suggestion_count"] for item in results), "notebooks": results}
+    except HTTPException:
+        raise
+    except (TypeError, ValueError, EditRejected, DocumentValidationError) as exc:
+        db.rollback()
+        raise HTTPException(422, f"修改建议无法合并：{exc}") from exc
+    except DocumentConflict as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/notebooks/{notebook_id}/blocks/{block_id}/sources",
@@ -973,6 +1103,7 @@ def restore_notebook_revision(course_id: str, notebook_id: str, revision: int,
         next_revision, content = write_document(
             db, book, stored.content,
             expected_revision=payload.expected_revision, origin="restore",
+            refresh_relations=True,
         )
     except DocumentConflict as exc:
         db.rollback()

@@ -17,6 +17,8 @@ _TEST_DATA_DIR = Path(tempfile.gettempdir()) / f"notebuddy-tests-{os.getpid()}"
 _TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
 os.environ["NOTEBOOK_DATA_DIR"] = str(_TEST_DATA_DIR)
 os.environ.setdefault("NOTEBOOK_GENERATOR", "offline-extractive")
+os.environ.setdefault("NOTEBOOK_DOCUMENT_PARSER", "native")
+os.environ.setdefault("NOTEBOOK_DOCUMENT_PROCESSING_ROUTE", "standard")
 # Never let a test call a paid provider by accident.
 os.environ.setdefault("DEEPSEEK_API_KEY", "")
 os.environ.setdefault("TAVILY_API_KEY", "")

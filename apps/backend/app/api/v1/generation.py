@@ -50,6 +50,7 @@ def _job_read(db: Session, job: NotebookGenerationJob) -> dict:
         "created_at": job.created_at, "updated_at": job.updated_at,
         "finished_at": job.finished_at, "generator": job.generator,
         "parse_run_ids": parse_run_ids, "plan": plan,
+        "processing_route": json.loads(job.input_snapshot_json).get('processing_route', 'standard'),
     }
 
 
@@ -143,13 +144,13 @@ def create_generation_job(
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
     now = datetime.now(UTC)
-    generator = settings.notebook_generator
+    generator = 'deepseek' if snapshot.get('processing_route') == 'llm' else settings.notebook_generator
     job = NotebookGenerationJob(
         id=new_id(), notebook_id=notebook_id, idempotency_key=key,
         request_fingerprint=request_fingerprint,
         status="pending", base_document_revision=notebook.document_revision,
         input_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
-        model=settings.deepseek_model if generator == "deepseek" else generator,
+        model=(snapshot.get('provider', {}).get('model') or settings.deepseek_model) if generator == "deepseek" else generator,
         prompt_version=PROMPT_VERSION, schema_version=2, attempt_count=0,
         generator=generator, generator_version="1",
         parse_run_ids_json=json.dumps(

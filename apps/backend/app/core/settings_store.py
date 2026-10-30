@@ -36,6 +36,7 @@ EDITABLE_KEYS: frozenset[str] = frozenset(
         "EMBEDDING_BASE_URL",
         "EMBEDDING_MODEL",
         "NOTEBOOK_MAX_UPLOAD_MB",
+        "NOTEBOOK_DOCUMENT_PROCESSING_ROUTE",
     }
 )
 
@@ -144,6 +145,7 @@ def build_status() -> dict[str, object]:
             "data_dir": str(settings.data_dir),
             "database": str(settings.data_dir / "notebook.sqlite3"),
             "max_upload_mb": current_upload_mb(),
+            "processing_route": settings.document_processing_route,
         },
         "limits": {
             "allowed_extensions": list(settings.allowed_extensions),
@@ -196,6 +198,8 @@ def _sanitize(key: str, value: object) -> str:
             raise SettingsWriteError("上传上限必须是整数") from exc
         if not 1 <= size <= 2048:
             raise SettingsWriteError("上传上限需在 1 到 2048 MB 之间")
+    if key == "NOTEBOOK_DOCUMENT_PROCESSING_ROUTE" and cleaned not in {"standard", "llm"}:
+        raise SettingsWriteError("处理路线仅支持 standard 或 llm")
     if key.endswith("_BASE_URL") and cleaned and not cleaned.startswith(("http://", "https://")):
         raise SettingsWriteError("服务地址必须以 http:// 或 https:// 开头")
     return cleaned
@@ -354,4 +358,6 @@ def _apply_to_process(sanitized: dict[str, str]) -> None:
         settings.embedding_model = sanitized["EMBEDDING_MODEL"] or None
     if "NOTEBOOK_MAX_UPLOAD_MB" in sanitized:
         settings.max_upload_bytes = int(sanitized["NOTEBOOK_MAX_UPLOAD_MB"]) * 1024 * 1024
+    if "NOTEBOOK_DOCUMENT_PROCESSING_ROUTE" in sanitized:
+        settings.document_processing_route = sanitized["NOTEBOOK_DOCUMENT_PROCESSING_ROUTE"]
 

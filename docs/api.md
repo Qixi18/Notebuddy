@@ -1,4 +1,36 @@
+# API 路由现状（2026-10-30 源码核对）
+
+前缀为 `/api/v1`，路由模块以 `apps/backend/app/api/v1/routes.py` 实际注册为准。此处的主路径/兼容分类不意味着兼容 API 已废弃，也不代表每个响应字段均已完成文档化。
+
+| 类别 | 方法/路径 | 用途与边界 |
+|---|---|---|
+| 当前主路径 | `GET/PUT /courses/{course_id}/notebooks/{notebook_id}/document`；无绑定 Notebook 对应 `/notebooks/unbound/{notebook_id}/document` | 读写 Notebook JSON 正文；PUT 校验预期 revision，冲突不覆盖 |
+| 当前主路径 | `POST /notebooks/{notebook_id}/assets`、`/upload-batches/{batch_id}`、`/complete` | 登记资源、查询/完成持久上传批次 |
+| 当前主路径 | `GET /notebooks/{notebook_id}/revisions`、`/revisions/{revision}`；`POST .../restore` | 正文版本查询与受 revision 保护的恢复 |
+| 当前主路径 | `POST /courses/{course_id}/notebooks/{notebook_id}/attachments`、`POST /notebooks/{notebook_id}/attachments` | Notebook 正文附件上传；注意它与来源资料 Asset 上传不同 |
+| 当前主路径 | `GET /assets/{asset_id}/document`、`/document/runs/{run_id}` | 读取当前或指定 DocumentIR/解析版本 |
+| 当前主路径 | `/notebooks/{notebook_id}/generation-jobs` 及 job 查询、重试、取消 | 持久生成任务；基准 revision 和输入快照用于安全合并 |
+| 当前/兼容能力 | `GET /courses/{course_id}/knowledge-graph`、`GET /courses/{course_id}/knowledge-structure`、`GET /courses/{course_id}/knowledge-proposals`、`GET /courses/{course_id}/knowledge-changes`、`POST /knowledge-proposals/{proposal_id}/review` | `knowledge.py` 仍注册；图和结构从 NotebookSection 派生，提案 API 保留课程知识提案工作流 |
+| 当前主路径 | `/agent`、`/conversations`、`/forest`、`/quiz` 等模块 | 会话/Agent、森林、测验等接口；服务端校验课程或 Notebook 范围 |
+| 保留兼容 | `/courses/{course_id}/materials`、`/materials/{material_id}/...`、旧 `/notes/...` | 传统资料/Note 兼容接口仍由已注册模块提供；不构成新正文源，不应仅凭新 Notebook 流程将其称为已撤销 |
+| 历史/撤销 | 本轮未发现并逐项证明的撤销路由 | 不作废弃清单推断；需有代码与调用方证据后再列 |
+
+以下历史分阶段内容含仍注册的当前/兼容 API，也含已演进的旧设计描述，不能整段视为已废弃。`knowledge` 模块仍提供课程 KnowledgeProposal 查询与审核；但前端 `api/notes.ts` 仍请求 `/courses/{course_id}/note-suggestions` 与 `/notes/{note_id}/suggestions`，本轮在 `apps/backend/app/api/v1/` 未找到相应路由，属于待确认的前后端不一致，不能记为已提供或已验收接口。它们不改变 Notebook 正文以 `document_json` 为唯一权威源的契约。当前路由是 `config, courses, materials, jobs, knowledge, notebook, generation, assistant, conversations, agent, feedback, backup, terms, forest, forest_imports, quiz`。详细参数请对照路由 schema；此页分组尚未逐端点补全权限、响应字段和自动测试覆盖。
+
 # API 契约
+
+## 双路线文件处理（2026-10-30）
+
+以下地址均以 `/api/v1` 为前缀：
+
+- `PATCH /settings` 接受字符串键 `NOTEBOOK_DOCUMENT_PROCESSING_ROUTE`，值为 `standard` 或 `llm`。`GET /settings` 在 `storage.processing_route` 返回当前默认值。保存继续使用现有白名单、口令及原子写盘规则。
+- `GET /config/capabilities` 增加 `default_processing_route` 和 `processing_routes`，分别提供两条路线的 `max_upload_bytes`、`max_pages`。
+- `POST /courses/{course_id}/materials`、`/notebooks/{notebook_id}/files`、`/notebooks/{notebook_id}/assets` 的 multipart 表单均接受可选 `processing_route`。显式值优先，省略时使用新上传的设置默认值；后续同批文件省略值时沿用批次首个文件的路线，显式不匹配返回 409。
+- Material、Asset、上传批次与生成任务响应增加 `processing_route`；批次的输入增加 `phase`、`completed_pages`、`total_pages`。批次同时返回 `relation_jobs`（id/status/error_message），正文完成与关系分析完成分别呈现。
+- `POST /assets/{asset_id}/processing-route` 接受 JSON `{"processing_route":"llm"}`，为已有原件创建新读取任务，返回 asset_id/processing_route/job_id。活动任务存在时返回 409；保留旧成功读取版本，不自动重写已生成正文。
+- `POST /assets/{asset_id}/cancel-processing` 取消活动读取，成功返回 `{"cancelled":true}`；已成功页面保留，常规重试沿用原路线并继续读取。当前模型请求结束/超时后停止写入结果；生成阶段仍使用已有的 generation-jobs cancel 接口。
+
+旧持久记录迁移为 `standard`。模型配置、来源版本及路线在任务快照中冻结，密钥不进入快照；后续切换设置不改动活动或重试任务。
 
 三条并行开发线的调用顺序、共享约束和业务数据存储位置见 [后端调用与业务数据存储契约](backend-data-contract.md)。本页记录各接口的详细行为。
 

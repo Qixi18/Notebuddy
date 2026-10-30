@@ -1,0 +1,32 @@
+.nb-prosemirror [data-type="inline-math"].inline-math-error,
+.nb-prosemirror [data-type="block-math"].block-math-error {
+  border-radius: 3px;
+  outline: 1px solid #d89a93;
+  outline-offset: 2px;
+  color: #a52b24;
+  background: #fff3f1;
+  overflow-wrap: anywhere;
+}
+
+.nb-prosemirror .katex-error {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 .16em;
+  border-bottom: 1px dashed currentColor;
+  border-radius: 2px;
+  color: #a52b24;
+  background: #fff3f1;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.nb-prosemirror [data-type="inline-math"]:has(.katex-error),
+.nb-prosemirror [data-type="block-math"]:has(.katex-error) {
+  border-radius: 3px;
+  outline: 1px solid #d89a93;
+  outline-offset: 2px;
+}
+
+.nb-prosemirror [data-type="block-math"] .katex-error {
+  text-align: left;
+}

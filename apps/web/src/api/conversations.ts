@@ -8,8 +8,20 @@ export type ConversationOwnership = {
   noteTitle?: string | null
 }
 
+/** P6 消息全文搜索的命中项：snippet 已按关键词截窗，前端负责高亮渲染 */
+export type ConversationMessageHit = {
+  conversation_id: string
+  conversation_title: string
+  message_id: string
+  message_role: string
+  snippet: string
+  created_at: string
+}
+
 export const conversationApi = {
   listConversations: (courseId: string) => request<Conversation[]>(`/api/v1/courses/${courseId}/conversations`),
+  searchMessages: (courseId: string, q: string) =>
+    request<ConversationMessageHit[]>(`/api/v1/courses/${courseId}/conversations/search?q=${encodeURIComponent(q)}`),
   renameConversation: (conversationId: string, title: string) =>
     request<Conversation>(`/api/v1/conversations/${conversationId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -32,9 +44,9 @@ export const conversationApi = {
     })
   },
   listConversationMessages: (conversationId: string) => request<ConversationMessage[]>(`/api/v1/conversations/${conversationId}/messages`),
-  sendConversationMessage: (conversationId: string, payload: { question: string; teacher_persona?: string; material_id?: string; page_number?: number; learning_goal?: string; allow_web?: boolean; idempotency_key?: string; scope?: 'course' | 'global' | 'note'; note_id?: string | null; note_title?: string | null }) =>
+  sendConversationMessage: (conversationId: string, payload: { question: string; teacher_persona?: 'vodyanitsa'; material_id?: string; page_number?: number; learning_goal?: string; allow_web?: boolean; idempotency_key?: string; scope?: 'course' | 'global' | 'note'; note_id?: string | null; note_title?: string | null }) =>
     request<ConversationMessage>(`/api/v1/conversations/${conversationId}/messages`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ teacher_persona: 'elf', ...payload }),
+      body: JSON.stringify({ teacher_persona: 'vodyanitsa', ...payload }),
     }),
 }

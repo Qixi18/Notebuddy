@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
-import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent } from '../../api/agent'
-import type { TeacherCharacterId } from '../../components/TeacherCharacter'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent } from '../../api/agent'
 import type { Conversation, ConversationMessage } from '../../types'
-import { teacherPersonaMeta } from '../persona/personas'
+import { TEACHER_PERSONA, teacherPersonaMeta } from '../persona/personas'
 
 /**
  * 答疑的唯一状态源。
@@ -27,10 +26,15 @@ export type AskScope = {
   targetTitle?: string
 }
 
-/** agent 执行中的实时状态：步骤时间线 + 流式文本 + 最终事件 */
+/** agent 执行时间线的一行：wire 事件 + 本地掐表（running→done 的耗时由前端记，wire 不带时间戳） */
+export type AgentRunStep = AgentStepEvent & { startedAt?: number; durationMs?: number }
+
+/** agent 执行中的实时状态：思考流 + 步骤时间线 + 流式文本 + 最终事件 */
 export type AgentRunState = {
-  steps: AgentStepEvent[]
+  steps: AgentRunStep[]
   streamingText: string
+  /** 思维链累计文本（所有轮次拼接）；仅展示用，不持久化 */
+  thinking: string
   notice?: string
   final?: AgentFinalEvent
   /** 用户主动中断：保留已收到的正文，实时块改渲染成「已中断」而不是一直「执行中」 */
@@ -42,6 +46,12 @@ export type AgentAskOptions = {
   materialId?: string
   readingContext?: AgentReadingContext
   notebookContext?: AgentNotebookContext
+  /** P4 发现开关：只有答疑页传 true；悬浮坞不传即行为不变 */
+  allowNoteDiscovery?: boolean
+  /** P10 出题开关：只有答疑页传 true */
+  allowQuiz?: boolean
+  /** P9 学习模式：答疑页可切「引导我」；悬浮坞不传即 direct */
+  learningMode?: 'direct' | 'guided'
 }
 
 export type ConversationState = {
@@ -58,7 +68,19 @@ export type ConversationState = {
   error?: string
   /** agent 执行中的实时状态；非 agent 提问时为 null */
   agentRun: AgentRunState | null
-  selectConversation: (id: string) => Promise<void>
+  /**
+   * 本会话累计的 agent 产出建议，**按产生它的助手消息 id 分桶**：
+   * 渲染时挂回对应那轮回答的下方（该是哪轮就是哪轮），而不是全部堆在对话底部。
+   * 会话级而非单次提问级：继续提问不清空——agentRun 是单次提问的临时状态，
+   * 挂在它上面的卡片会随下一次提问陪葬（v6 用户反馈 bug）。
+   * 只有换会话/换课程/删会话才重置；刷新页面后仍会丢失（建议未持久化，属已知边界）。
+   */
+  agentSuggestionsByMessage: Record<string, AgentSuggestion[]>
+  /** 搜索命中消息带来的定位目标：历史加载完后由线程滚动高亮，消费后清除（P6） */
+  pendingMessageId?: string
+  selectConversation: (id: string, pendingMessageId?: string) => Promise<void>
+  /** 线程完成定位高亮后调用，清掉定位目标 */
+  consumePendingMessage: () => void
   /** 重命名会话（右键菜单）；成功更新本地列表标题，返回是否成功 */
   renameConversation: (id: string, title: string) => Promise<boolean>
   /** 删除整段会话（右键菜单）；删的是当前会话时切换到剩余最近一条，或清空等待下次新建 */
@@ -90,13 +112,10 @@ function greetingMessage(conversationId: string | undefined, content: string): C
   }
 }
 
-export function useConversation(
-  courseId?: string,
-  teacherPersona: TeacherCharacterId = 'elf',
-): ConversationState {
+export function useConversation(courseId?: string): ConversationState {
   const courseRef = useRef(courseId)
   courseRef.current = courseId
-  const greeting = teacherPersonaMeta(teacherPersona).greeting
+  const greeting = teacherPersonaMeta().greeting
 
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [conversationId, setConversationId] = useState<string>()
@@ -105,6 +124,34 @@ export function useConversation(
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string>()
   const [agentRun, setAgentRun] = useState<AgentRunState | null>(null)
+  const [agentSuggestionsByMessage, setAgentSuggestionsByMessage] = useState<Record<string, AgentSuggestion[]>>({})
+
+  /* 历史消息携带的建议（随消息落库）→ 种入分桶：刷新/重进会话后技能卡可还原。
+      与实时路径的桶合并时按建议 id 去重，两路来源互不覆盖。 */
+  const seedSuggestionsFromMessages = useCallback((loaded: ConversationMessage[]) => {
+    setAgentSuggestionsByMessage((current) => {
+      let changed = false
+      const next = { ...current }
+      for (const message of loaded) {
+        const suggestions = message.suggestions
+        if (!suggestions?.length) continue
+        const existing = next[message.id]
+        if (!existing) {
+          next[message.id] = suggestions
+          changed = true
+          continue
+        }
+        const seen = new Set(existing.map((item) => item.id))
+        const fresh = suggestions.filter((item) => !seen.has(item.id))
+        if (fresh.length) {
+          next[message.id] = [...existing, ...fresh]
+          changed = true
+        }
+      }
+      return changed ? next : current
+    })
+  }, [])
+  const [pendingMessageId, setPendingMessageId] = useState<string>()
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
   const historyRequestRef = useRef(0)
@@ -123,11 +170,15 @@ export function useConversation(
   useEffect(() => {
     let active = true
     const request = ++historyRequestRef.current
+    abortRef.current?.abort()
+    abortRef.current = null
     setConversations([])
     setConversationId(undefined)
     setHistory([])
     setError(undefined)
     setAgentRun(null)
+    setAgentSuggestionsByMessage({})
+    setPendingMessageId(undefined)
     setReady(false)
     creatingRef.current = null
     if (!courseId) {
@@ -143,6 +194,7 @@ export function useConversation(
       const loaded = await api.listConversationMessages(next[0].id)
       if (!active || historyRequestRef.current !== request) return
       setHistory(loaded)
+    seedSuggestionsFromMessages(loaded)
       setReady(true)
     }).catch((cause: unknown) => {
       if (!active || historyRequestRef.current !== request) return
@@ -152,16 +204,25 @@ export function useConversation(
     return () => { active = false }
   }, [courseId])
 
-  const selectConversation = useCallback(async (id: string) => {
+  const selectConversation = useCallback(async (id: string, pendingMessageId?: string) => {
     const request = ++historyRequestRef.current
     const requestCourseId = courseRef.current
+    /* 切会话先中止进行中的回答（v6 P1）：旧流的 final 会被本请求的门丢弃，留着只会产生
+       僵尸实时块与 busy 错位；abort 后旧流的收尾分支会因请求门失效而不再触碰状态 */
+    abortRef.current?.abort()
+    abortRef.current = null
+    setAgentRun(null)
+    setAgentSuggestionsByMessage({})
     setConversationId(id)
+    /* P6：带消息命中的跳转记录定位目标；普通切换传 undefined 顺带清掉遗留目标 */
+    setPendingMessageId(pendingMessageId)
     setHistory([])
     setBusy(true)
     setError(undefined)
     try {
       const loaded = await api.listConversationMessages(id)
       if (historyRequestRef.current === request && courseRef.current === requestCourseId) setHistory(loaded)
+      seedSuggestionsFromMessages(loaded)
     } catch (cause) {
       if (historyRequestRef.current === request && courseRef.current === requestCourseId) {
         setError(cause instanceof Error ? cause.message : '会话读取失败')
@@ -173,6 +234,9 @@ export function useConversation(
       }
     }
   }, [])
+
+  /* 线程完成滚动高亮后消费定位目标 */
+  const consumePendingMessage = useCallback(() => setPendingMessageId(undefined), [])
 
   const renameConversation = useCallback(async (id: string, title: string): Promise<boolean> => {
     const trimmed = title.trim()
@@ -217,6 +281,12 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
+    /* 新会话同样中止进行中的回答（v6 P1），与 selectConversation 同一套清理 */
+    abortRef.current?.abort()
+    abortRef.current = null
+    setAgentRun(null)
+    setAgentSuggestionsByMessage({})
+    setPendingMessageId(undefined)
     try {
       const created = await api.createConversation(requestCourseId, '新对话', ownership)
       if (courseRef.current !== requestCourseId) return
@@ -268,12 +338,14 @@ export function useConversation(
       : scope.kind === 'note'
         ? { scope: 'note' as const, noteId: scope.targetId ?? null, noteTitle: scope.targetTitle ?? null }
         : { scope: 'course' as const }
+    let localUserId = ''
     try {
       const targetId = await ensureConversation(ownership)
       if (!targetId || courseRef.current !== requestCourseId) return false
       const askedAt = Date.now()
+      localUserId = `local-user-${askedAt}`
       setHistory((current) => [...current, {
-        id: `local-user-${askedAt}`,
+        id: localUserId,
         conversation_id: targetId,
         role: 'user',
         content: question,
@@ -288,7 +360,7 @@ export function useConversation(
       }])
       const answer = await api.sendConversationMessage(targetId, {
         question,
-        teacher_persona: teacherPersona,
+        teacher_persona: TEACHER_PERSONA.id,
         /* 刻意不传 learning_goal：留空后由后端 discipline.infer_context 按问题关键词
            推断（怎么做→解决练习、区别→比较方法…）。此前界面恒定发送「理解概念」，
            会把这条推断分支短路掉，反而更差。 */
@@ -301,14 +373,14 @@ export function useConversation(
       if (courseRef.current !== requestCourseId) return true
       setHistory((current) => [...current, answer])
       // 首条问题后端已把标题从「新对话」改写；据此刷新历史列表。
-      // 归属（scope/note 快照）只在首轮生效，故按本次发送的范围同步列表字段；
-      // 非首轮后端会忽略 scope，此处同步的值与列表已有值一致，不会改分组。
-      if (answer.conversation_title) {
-        const renamed = answer.conversation_title
+      // 归属（scope/note 快照）是会话级属性：后端只在首条消息落库时锁定，
+      // 后续轮次忽略 scope，所以这里也只允许首轮按本次发送的范围同步列表字段。
+      const firstTurn = !history.some((message) => message.role === 'user')
+      if (firstTurn || answer.conversation_title) {
         setConversations((current) => current.map((item) => {
           if (item.id !== targetId) return item
-          const next = { ...item, title: renamed }
-          if (ownership?.scope) {
+          const next = { ...item, title: answer.conversation_title ?? item.title }
+          if (firstTurn && ownership?.scope) {
             next.scope = ownership.scope
             next.default_scope = ownership.scope
             next.note_id = ownership.scope === 'note' ? (ownership.noteId ?? null) : null
@@ -321,13 +393,16 @@ export function useConversation(
     } catch (cause) {
       if (courseRef.current === requestCourseId) {
         setError(cause instanceof Error ? cause.message : '问答请求失败')
+        /* 乐观插入的本地提问气泡随失败回滚（v6 P5）：服务端没有这条消息，
+            留着会与刷新后的历史不一致 */
+        setHistory((current) => current.filter((message) => message.id !== localUserId))
       }
       return false
     } finally {
       busyRef.current = false
       if (courseRef.current === requestCourseId) setBusy(false)
     }
-  }, [courseId, teacherPersona, ensureConversation])
+  }, [courseId, ensureConversation])
 
   /* agent 流式提问：本地插入用户消息 → 逐步更新 agentRun → final 规范成消息入历史 */
   const askAgent = useCallback(async (text: string, options: AgentAskOptions): Promise<boolean> => {
@@ -337,15 +412,62 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
-    setAgentRun({ steps: [], streamingText: '' })
+    setAgentRun({ steps: [], streamingText: '', thinking: '' })
     let targetId = ''
     const historyRequest = historyRequestRef.current
+    /* 首轮判定：归属（scope/笔记快照）是会话级属性，后端在首条消息落库时锁定，
+       之后不再改写。所以只有首轮才允许按本次参数同步列表字段。 */
+    const firstTurn = !history.some((message) => message.role === 'user')
+    const isCurrentRequest = () => courseRef.current === requestCourseId
+      && historyRequestRef.current === historyRequest
+    /* 归属同步只做一次：final 事件带标题时一并更新，其余情况由首轮判定兜底 */
+    let ownershipSynced = false
+    const acceptOwnership = (title?: string) => {
+      if (!isCurrentRequest() || (ownershipSynced && !title)) return
+      ownershipSynced = true
+      setConversations((current) => current.map((item) => item.id !== targetId ? item : {
+        ...item,
+        ...(title ? { title } : {}),
+        ...(firstTurn ? {
+          scope: options.scope,
+          default_scope: options.scope,
+          note_id: options.scope === 'note' ? options.notebookContext?.notebook_id ?? null : null,
+          note_title: options.scope === 'note'
+            ? options.notebookContext?.title ?? options.readingContext?.note_title ?? item.note_title
+            : null,
+        } : {}),
+      }))
+    }
+    /* 从服务端读回权威状态：会话归属（scope/笔记快照）与消息历史。
+       后端在首条消息落库时就锁定了归属，中断或失败也可能已经落库，
+       此时前端的本地推测不可信，必须以服务端为准。
+       reloadHistory=false 时只刷新归属，保留已经收到的本地正文。 */
+    const refreshSavedConversation = async (reloadHistory: boolean) => {
+      if (!targetId || !isCurrentRequest()) return
+      const [savedConversations, savedMessages] = await Promise.allSettled([
+        api.listConversations(requestCourseId),
+        reloadHistory ? api.listConversationMessages(targetId) : Promise.resolve(undefined),
+      ])
+      if (!isCurrentRequest()) return
+      if (savedConversations.status === 'fulfilled') {
+        const saved = savedConversations.value.find((item) => item.id === targetId)
+        if (saved) setConversations((current) => current.map((item) => item.id === targetId ? saved : item))
+      }
+      if (savedMessages.status === 'fulfilled' && savedMessages.value) {
+        setHistory(savedMessages.value)
+        seedSuggestionsFromMessages(savedMessages.value)
+      }
+    }
     /* 中断器：用户点「停止」时 abort 本次请求（signal 铺在 fetch 上，见 api/agent.ts） */
     const controller = new AbortController()
     abortRef.current = controller
     try {
       targetId = await ensureConversation() ?? ''
-      if (!targetId || courseRef.current !== requestCourseId) return false
+      if (!targetId || courseRef.current !== requestCourseId) {
+        /* 提问链路没走通：清掉置好的空实时块，避免线程残留「Agent 执行中」（v6 P5） */
+        setAgentRun(null)
+        return false
+      }
       const askedAt = Date.now()
       setHistory((current) => [...current, {
         id: `local-user-${askedAt}`,
@@ -364,20 +486,66 @@ export function useConversation(
       await streamAgentMessage(targetId, {
         question,
         scope: options.scope,
-        teacher_persona: teacherPersona,
+        teacher_persona: TEACHER_PERSONA.id,
         material_id: options.materialId,
         allow_web: true,
         idempotency_key: `${targetId}-${askedAt}`,
         reading_context: options.readingContext,
         notebook_context: options.notebookContext,
+        allow_note_discovery: options.allowNoteDiscovery,
+        allow_quiz: options.allowQuiz,
+        learning_mode: options.learningMode,
       }, {
-        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
-        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
-        onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
+      /* 三个实时分支都必须过双守门（v6 P1）：否则切会话后旧流继续写 agentRun，
+          在新会话线程里渲染旧会话的流式块 */
+      onStep: (event: AgentStepEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => {
+          if (!current) return current
+          if (event.status === 'running') {
+            return { ...current, steps: [...current.steps, { ...event, startedAt: Date.now() }] }
+          }
+          /* done：替换最后一个同名 running 行并记耗时（并行同名工具按完成顺序对号，展示够用）；
+              没有对应 running（异常重放等）就原样追加 */
+          const steps = [...current.steps]
+          for (let index = steps.length - 1; index >= 0; index -= 1) {
+            const running = steps[index]
+            if (running.status === 'running' && running.tool === event.tool) {
+              steps[index] = { ...event, durationMs: running.startedAt ? Date.now() - running.startedAt : undefined }
+              return { ...current, steps }
+            }
+          }
+          return { ...current, steps: [...steps, event] }
+        })
+      },
+      onThinking: (event: AgentThinkingEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => current ? { ...current, thinking: current.thinking + event.text } : current)
+      },
+      onDelta: (event: AgentDeltaEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current)
+      },
+      onNotice: (event: AgentNoticeEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        setAgentRun((current) => current ? { ...current, notice: event.text } : current)
+      },
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
           setAgentRun((current) => current ? { ...current, final } : current)
+          /* 建议按产生它的助手消息 id 分桶累计（桶内按 id 去重）：技能卡跟随对应那轮回答渲染，
+              生命周期跟随会话，不随下一次提问的 agentRun 重置而消失。
+              key 与下方入历史消息的 id 同源，历史重载（服务端 id）后依然对得上。 */
+          if (final.suggestions?.length) {
+            const bucketKey = final.message_id ?? `local-agent-${askedAt}`
+            setAgentSuggestionsByMessage((current) => {
+              const seen = new Set((current[bucketKey] ?? []).map((item) => item.id))
+              const fresh = final.suggestions?.filter((item) => !seen.has(item.id)) ?? []
+              if (!fresh.length) return current
+              return { ...current, [bucketKey]: [...(current[bucketKey] ?? []), ...fresh] }
+            })
+          }
           setHistory((current) => [...current, {
             id: final.message_id ?? `local-agent-${askedAt}`,
             conversation_id: targetId,
@@ -391,48 +559,39 @@ export function useConversation(
             evidence: [],
             mode: final.mode,
             sources: final.sources ?? [],
+            process: final.process ?? null,
           }])
-          // 同步后端回写的标题（仅标题；scope 分组字段不在流里回传，且只在首轮生效，
-          // 避免把中途改范围错误反映成分组迁移——下次载入会话列表会自洽）。
-          if (final.conversation_title) {
-            const renamed = final.conversation_title
-            setConversations((current) => current.map((item) => (item.id === targetId ? { ...item, title: renamed } : item)))
-          }
+          // 同步后端回写的标题，并在首轮同步归属（scope/笔记快照）。
+          // 归属是会话级属性：只在首轮落库时确定，后续轮次不得按本轮参数改写。
+          acceptOwnership(final.conversation_title)
         },
       }, controller.signal)
-      if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
-        try {
-          const loaded = await api.listConversationMessages(targetId)
-          if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
-        } catch { /* Keep the final event's local message until history can be loaded. */ }
-      }
+      await refreshSavedConversation(true)
       return true
     } catch (cause) {
       /* 用户中断：不是错误。保留已收到的正文并打「已中断」标记；
-         不弹错误、不重载历史（重载会把这段本地正文冲掉）。提问本身已落库，照常留在历史里。 */
+         不弹错误、不重载消息历史（重载会把这段本地正文冲掉）；只刷新会话归属。 */
       if (isAbortError(cause)) {
         if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
           setAgentRun((current) => current ? { ...current, aborted: true } : current)
         }
+        await refreshSavedConversation(false)
         return true
       }
       if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
         setError(cause instanceof Error ? cause.message : '智能问答请求失败')
         setAgentRun(null)
-        if (targetId) {
-          try {
-            const loaded = await api.listConversationMessages(targetId)
-            if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
-          } catch { /* Keep the visible error when history cannot be loaded. */ }
-        }
+        await refreshSavedConversation(true)
       }
       return false
     } finally {
       if (abortRef.current === controller) abortRef.current = null
       busyRef.current = false
-      if (courseRef.current === requestCourseId) setBusy(false)
+      /* busy 归还必须过请求门（v6 P1）：切会话触发的 abort 会让本分支在历史加载期间
+          抢先 setBusy(false)，吞掉加载态；门内表示仍是本会话的本请求，正常复位 */
+      if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setBusy(false)
     }
-  }, [courseId, teacherPersona, ensureConversation])
+  }, [courseId, ensureConversation])
 
   /* 中断正在进行的回答：abort 当前请求，已收到的正文保留（实时块改渲染成「已中断」） */
   const stopAgent = useCallback(() => {
@@ -449,5 +608,5 @@ export function useConversation(
     [history, conversationId, greeting],
   )
 
-  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, selectConversation, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
+  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, agentSuggestionsByMessage, pendingMessageId, selectConversation, consumePendingMessage, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
 }

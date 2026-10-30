@@ -193,7 +193,9 @@ def test_mineru_image_crop_uses_v2_normalized_coordinates(tmp_path, monkeypatch)
 
 
 def test_mineru_pdf_crop_uses_normalized_coordinates_with_pdfium(tmp_path, monkeypatch):
-    import pymupdf
+    # pymupdf 只用于构造 PDF fixture（裁剪本身走 pypdfium2）；可选依赖缺失时跳过，
+    # 与 test_document_adapters / test_notebook_workspace 的 importorskip 约定一致。
+    pymupdf = pytest.importorskip("pymupdf")
     from PIL import Image
 
     from app.document_processing.adapters.mineru import _render_figure_crop

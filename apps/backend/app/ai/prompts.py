@@ -163,6 +163,8 @@ AGENT_SYSTEM = r"""
   remove_section 删除整个小节。anchor 必须填笔记里标题的原文（不含 # 号），不确定时先用 read_notebook 查看结构。
 - 每个操作的 content 只能包含笔记正文本身：绝对不要把你的对话回复、改动说明（如「这版删了什么」「留下了什么」）、
   「建议已提交」「待确认」等字样或表情符号写进 content；这些内容只应出现在你的回答正文里。
+- 用户明确要求出题、自测、复习提纲或易混概念辨析时，优先调用对应的学习技能工具（若该工具在本轮可用）；
+  这些结构化技能结果应作为前端卡片呈现，不要用笔记修改建议承载。
 
 来源规范（硬性）：
 - 来自课件资料的结论标注 [课程资料：文件名 | 第 N 页]；来自学习笔记正文的标注 [课程笔记：笔记标题 | 第 N 节]；
@@ -235,6 +237,7 @@ def build_agent_messages(
     persona: str | None = None,
     history: list[tuple[str, str]] | None = None,
     reading_context: str = "",
+    learning_mode: str = "direct",
 ) -> list[dict[str, str]]:
     """agent 循环的首轮消息：人设 + agent 规范 + 范围指令与上下文。
 
@@ -249,6 +252,10 @@ def build_agent_messages(
         else "会话历史：这是本段会话的第一个问题，之前没有任何发言。"
     )
     reading_section = reading_context.strip() or "当前没有正在阅读的笔记。"
+    mode_section = (
+        "引导模式：先用一个简短问题确认学生卡点，再分步提示；不要一开始直接给最终答案。学生明确要求答案或连续两轮仍卡住时，给出完整解释。"
+        if learning_mode == "guided" else "直接答模式：先检索课程依据，再清楚直接地回答。"
+    )
     user = f"""
 用户问题：
 {question}
@@ -264,6 +271,8 @@ def build_agent_messages(
 {reading_section}
 
 {history_section}
+
+答疑方式：{mode_section}
 
 请先判断是否需要调用工具获取依据，然后按系统规范作答。
 """.strip()

@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>桌宠的窝 · 三个方向</title>
+<style>
+  :root {
+    --bg: #F4F6F3;
+    --surface: #FFFFFF;
+    --ink: #1B2A22;
+    --muted: #55635A;
+    --faint: #6B7A6E;
+    --line: #E6EAE4;
+    --g900: #12382A;
+    --g800: #174534;
+    --g700: #1E5A44;
+    --g500: #3F8064;
+    --g300: #A8C4B5;
+    --g200: #CFE0D6;
+    --g100: #E8F0E9;
+    --g50: #F2F8F4;
+    --cream: #FBF9F3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 36px 40px 64px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.65 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1 { margin: 0 0 6px; font: 600 22px/1.3 var(--font-serif, Georgia, "Songti SC", serif); letter-spacing: .01em; }
+  .lead { margin: 0; color: var(--muted); font-size: 13px; }
+  .lead b { color: var(--g800); font-weight: 500; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 280px);
+    gap: 22px;
+    margin-top: 30px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 16px;
+  }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .card-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--g800); }
+  .tag {
+    border: 1px solid var(--g200);
+    border-radius: 999px;
+    padding: 1px 7px;
+    color: var(--g700);
+    background: var(--g50);
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .card p { margin: 5px 0 12px; color: var(--faint); font-size: 11.5px; line-height: 1.6; min-height: 36px; }
+
+  .rail {
+    position: relative;
+    width: 240px;
+    margin: 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #FBFCFA;
+    padding: 10px 10px 12px;
+  }
+  .eyebrow {
+    display: block;
+    color: var(--faint);
+    font-size: 9px;
+    letter-spacing: .14em;
+    margin-bottom: 2px;
+  }
+  .stage {
+    position: relative;
+    height: 236px;
+    isolation: isolate;
+  }
+  .nest, .pet {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .nest-back { bottom: 8px; width: 200px; height: 96px; z-index: 1; }
+  .pet {
+    bottom: 24px;
+    width: 150px;
+    height: 200px;
+    z-index: 2;
+    transition: opacity .28s ease, transform .28s ease;
+  }
+  .nest-front { bottom: 8px; width: 200px; height: 96px; z-index: 3; pointer-events: none; }
+  .stage[data-state="out"] .pet { opacity: 0; transform: translate(-50%, 8px) scale(.94); }
+  .stage[data-state="out"] .nest-front,
+  .stage[data-state="out"] .nest-back { transition: transform .25s ease; }
+  .stage[data-state="out"]:hover .nest-front,
+  .stage[data-state="out"]:hover .nest-back { transform: translate(-50%, -2px); }
+
+  .empty-mark {
+    position: absolute;
+    left: 50%;
+    bottom: 50px;
+    transform: translateX(-50%);
+    z-index: 4;
+    display: grid;
+    place-items: center;
+    width: 74px;
+    height: 26px;
+    border-radius: 999px;
+    background: rgba(255,255,255,.94);
+    border: 1px solid var(--g300);
+    color: var(--g700);
+    font-size: 10.5px;
+    letter-spacing: .04em;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .stage[data-state="out"] .empty-mark { opacity: 1; }
+  .stage[data-state="out"]:hover .empty-mark { transform: translate(-50%, -2px); border-color: var(--g700); }
+  .empty-ring {
+    position: absolute;
+    left: 50%;
+    bottom: 40px;
+    transform: translateX(-50%);
+    width: 128px;
+    height: 34px;
+    border: 1px dashed rgba(63,128,100,.62);
+    border-radius: 50%;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity .25s ease;
+  }
+  .stage[data-state="out"] .empty-ring { opacity: 1; }
+
+  .identity { margin-top: 10px; padding: 0 2px; }
+  .identity strong { display: block; font: 600 14px/1.3 var(--font-serif, Georgia, "Songti SC", serif); color: var(--ink); }
+  .identity span { display: block; margin-top: 1px; color: var(--faint); font-size: 10.5px; }
+  .identity .state { margin-top: 7px; display: inline-flex; align-items: center; gap: 5px; }
+  .identity .state i { width: 6px; height: 6px; border-radius: 50%; background: var(--g500); }
+  .identity .state.out i { background: var(--g300); }
+
+  .toggle {
+    display: flex;
+    gap: 4px;
+    margin-top: 12px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #F7FAF7;
+  }
+  .toggle button {
+    flex: 1;
+    border: 0;
+    border-radius: 6px;
+    padding: 5px 0;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .toggle button[aria-pressed="true"] { background: var(--surface); color: var(--g800); box-shadow: 0 1px 2px rgba(18,56,42,.06); }
+
+  .notes { margin-top: 34px; border-top: 1px solid var(--line); padding-top: 22px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 40px; }
+  .notes h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--g800); }
+  .notes ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12.5px; }
+  .notes li { margin-bottom: 5px; }
+  .notes code { font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--g700); background: var(--g50); border-radius: 4px; padding: 1px 4px; }
+  .legend { display: flex; gap: 14px; color: var(--faint); font-size: 11px; margin-top: 8px; }
+  .legend i { display: inline-block; width: 18px; height: 8px; border-radius: 4px; margin-right: 5px; vertical-align: 1px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="chibi">
+      <path d="M60 8 C34 8 20 27 20 52 C20 70 22 88 17 106 C14 120 17 134 25 142 C31 128 33 112 33 96 L41 72 L79 72 L87 96 C87 112 89 128 95 142 C103 134 106 120 103 106 C98 88 100 70 100 52 C100 27 86 8 60 8 Z" fill="#3E6B58"/>
+      <ellipse cx="60" cy="55" rx="21" ry="24" fill="#F4E7DB"/>
+      <ellipse cx="52" cy="57" rx="2" ry="2.8" fill="#3E6B58" opacity=".72"/>
+      <ellipse cx="68" cy="57" rx="2" ry="2.8" fill="#3E6B58" opacity=".72"/>
+      <path d="M57 65 q3 2.4 6 0" stroke="#C99A8A" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+      <circle cx="45" cy="63" r="3" fill="#F0C9C0" opacity=".5"/>
+      <circle cx="75" cy="63" r="3" fill="#F0C9C0" opacity=".5"/>
+      <path d="M38 50 C38 28 48 20 60 20 C72 20 82 28 82 50 C76 40 70 36 60 36 C50 36 44 40 38 50 Z" fill="#3E6B58"/>
+      <path d="M38 46 C33 58 33 74 36 86 C40 76 41 62 43 52 Z" fill="#3E6B58"/>
+      <path d="M82 46 C87 58 87 74 84 86 C80 76 79 62 77 52 Z" fill="#3E6B58"/>
+      <path d="M46 82 L74 82 L86 128 L34 128 Z" fill="#F7FBF8" stroke="#D8E5DC" stroke-width="1"/>
+      <path d="M48 82 L72 82 L70 98 L50 98 Z" fill="#2C6B52"/>
+      <path d="M46 90 C38 98 36 108 38 116" fill="none" stroke="#F4E7DB" stroke-width="7" stroke-linecap="round"/>
+      <path d="M74 90 C82 98 84 108 82 116" fill="none" stroke="#F4E7DB" stroke-width="7" stroke-linecap="round"/>
+      <circle cx="38" cy="117" r="4" fill="#F4E7DB"/>
+      <circle cx="82" cy="117" r="4" fill="#F4E7DB"/>
+      <rect x="52" y="126" width="6" height="10" rx="3" fill="#F4E7DB"/>
+      <rect x="62" y="126" width="6" height="10" rx="3" fill="#F4E7DB"/>
+      <ellipse cx="55" cy="138" rx="7" ry="4" fill="#E8F0E9" stroke="#CFE0D6" stroke-width="1"/>
+      <ellipse cx="65" cy="138" rx="7" ry="4" fill="#E8F0E9" stroke="#CFE0D6" stroke-width="1"/>
+      <g transform="translate(40,30)">
+        <circle cx="0" cy="-5" r="3.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".6"/>
+        <circle cx="4.8" cy="-1.5" r="3.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".6"/>
+        <circle cx="2.9" cy="4" r="3.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".6"/>
+        <circle cx="-2.9" cy="4" r="3.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".6"/>
+        <circle cx="-4.8" cy="-1.5" r="3.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".6"/>
+        <circle cx="0" cy="0" r="2" fill="#C9A961"/>
+      </g>
+    </g>
+  </defs>
+</svg>
+
+<h1>桌宠的窝 · 三个方向</h1>
+<p class="lead">按真实栏宽 <b>240px</b> 展示，窝的占地 <b>200 × 96</b>。角色是占位剪影，只用来看比例和遮挡，不是最终素材。</p>
+
+<div class="grid">
+
+  <!-- A 叶编小窝 -->
+  <section class="card" data-variant="a">
+    <div class="card-head"><h2>A · 叶编小窝</h2><span class="tag">推荐</span></div>
+    <p>深绿藤蔓编成浅碗，边缘两朵白色小花，和她的发饰同源；内里浅绿软垫。</p>
+    <div class="rail">
+      <span class="eyebrow">DESK PET · 桌宠</span>
+      <div class="stage" data-state="in">
+        <svg class="nest nest-back" viewBox="0 0 200 96" aria-hidden="true">
+          <ellipse cx="100" cy="88" rx="72" ry="7" fill="rgba(30,90,68,.10)"/>
+          <ellipse cx="100" cy="58" rx="70" ry="21" fill="#E8F0E9"/>
+          <path d="M22 58 A78 24 0 0 1 178 58" fill="none" stroke="#3F8064" stroke-width="12" stroke-linecap="round"/>
+          <path d="M36 46 l9 8 M54 38 l8 9 M78 33 l6 9 M104 33 l-6 9 M128 38 l-8 9 M154 46 l-9 8" stroke="#1E5A44" stroke-width="1" opacity=".35" fill="none"/>
+        </svg>
+
+        <svg class="pet" viewBox="0 0 120 160" aria-label="角色占位">
+          <use href="#chibi"/>
+        </svg>
+
+        <svg class="nest nest-front" viewBox="0 0 200 96" aria-hidden="true">
+          <path d="M22 58 C22 84 56 94 100 94 C144 94 178 84 178 58 Z" fill="#2C6B52"/>
+          <path d="M22 58 A78 24 0 0 0 178 58" fill="none" stroke="#3F8064" stroke-width="12" stroke-linecap="round"/>
+          <path d="M22 58 A78 24 0 0 0 178 58" fill="none" stroke="#174534" stroke-width="1.4" opacity=".55"/>
+          <path d="M38 66 q10 14 24 20 M58 74 q12 12 28 16 M82 78 q10 9 24 11 M110 82 q12 5 24 5" stroke="#174534" stroke-width="1.2" opacity=".42" fill="none"/>
+          <path d="M32 60 q-16 2 -22 12 q16 4 26 -4 Z" fill="#3F8064"/>
+          <path d="M168 60 q16 2 22 12 q-16 4 -26 -4 Z" fill="#3F8064"/>
+          <g transform="translate(44,62)">
+            <circle cx="0" cy="-7" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="6.7" cy="-2.2" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="4.1" cy="5.7" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="-4.1" cy="5.7" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="-6.7" cy="-2.2" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="0" cy="0" r="2.6" fill="#C9A961"/>
+          </g>
+          <g transform="translate(158,66) scale(.78)">
+            <circle cx="0" cy="-7" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="6.7" cy="-2.2" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="4.1" cy="5.7" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="-4.1" cy="5.7" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="-6.7" cy="-2.2" r="4.4" fill="#FFFFFF" stroke="#D8DFD7" stroke-width=".7"/>
+            <circle cx="0" cy="0" r="2.6" fill="#C9A961"/>
+          </g>
+        </svg>
+
+        <div class="empty-ring"></div>
+        <div class="empty-mark">点窝召回</div>
+      </div>
+      <div class="identity">
+        <strong>新桌宠</strong>
+        <span>学者 · 教学助手</span>
+        <span class="state"><i></i><em style="font-style:normal">在窝里，等你提问</em></span>
+      </div>
+    </div>
+    <div class="toggle" role="group" aria-label="预览状态">
+      <button type="button" aria-pressed="true">在窝里</button>
+      <button type="button" aria-pressed="false">已浮出</button>
+    </div>
+  </section>
+
+  <!-- B 奶油软垫 -->
+  <section class="card" data-variant="b">
+    <div class="card-head"><h2>B · 奶油软垫</h2></div>
+    <p>米白圆垫 + 一圈细缝线，只有一枚小叶子吊牌。最克制，完全不抢角色。</p>
+    <div class="rail">
+      <span class="eyebrow">DESK PET · 桌宠</span>
+      <div class="stage" data-state="in">
+        <svg class="nest nest-back" viewBox="0 0 200 96" aria-hidden="true">
+          <ellipse cx="100" cy="88" rx="74" ry="7" fill="rgba(90,78,55,.09)"/>
+          <ellipse cx="100" cy="58" rx="72" ry="21" fill="#FBF9F3"/>
+          <path d="M20 58 A80 24 0 0 1 180 58" fill="none" stroke="#E3DDCC" stroke-width="13" stroke-linecap="round"/>
+          <path d="M24 58 A76 21 0 0 1 176 58" fill="none" stroke="#F7F3E8" stroke-width="9" stroke-linecap="round"/>
+        </svg>
+        <svg class="pet" viewBox="0 0 120 160" aria-label="角色占位">
+          <use href="#chibi"/>
+        </svg>
+        <svg class="nest nest-front" viewBox="0 0 200 96" aria-hidden="true">
+          <path d="M20 58 C20 84 56 94 100 94 C144 94 180 84 180 58 Z" fill="#F2EFE6"/>
+          <path d="M20 58 A80 24 0 0 0 180 58" fill="none" stroke="#E3DDCC" stroke-width="13" stroke-linecap="round"/>
+          <path d="M30 62 A70 18 0 0 0 170 62" fill="none" stroke="#C9BFA8" stroke-width="1" stroke-dasharray="4 5" opacity=".8"/>
+          <path d="M38 68 q12 12 28 18 M64 76 q12 8 26 10" stroke="#D8CFBD" stroke-width="1" opacity=".5" fill="none"/>
+          <g transform="translate(168,68)">
+            <path d="M0 0 q10 -2 14 6 q-10 4 -14 -6 Z" fill="#A8C4B5"/>
+            <path d="M0 0 q6 4 12 5" stroke="#3F8064" stroke-width=".8" fill="none"/>
+          </g>
+        </svg>
+        <div class="empty-ring" style="border-color: rgba(140,128,100,.35)"></div>
+        <div class="empty-mark">点窝召回</div>
+      </div>
+      <div class="identity">
+        <strong>新桌宠</strong>
+        <span>学者 · 教学助手</span>
+        <span class="state"><i></i><em style="font-style:normal">在窝里，等你提问</em></span>
+      </div>
+    </div>
+    <div class="toggle" role="group" aria-label="预览状态">
+      <button type="button" aria-pressed="true">在窝里</button>
+      <button type="button" aria-pressed="false">已浮出</button>
+    </div>
+  </section>
+
+  <!-- C 暖色藤篮 -->
+  <section class="card" data-variant="c">
+    <div class="card-head"><h2>C · 暖色藤篮</h2></div>
+    <p>棕黄编织篮，和绿色界面形成暖冷对比；前沿搭一条奶油小毯，更像具体的「家」。</p>
+    <div class="rail">
+      <span class="eyebrow">DESK PET · 桌宠</span>
+      <div class="stage" data-state="in">
+        <svg class="nest nest-back" viewBox="0 0 200 96" aria-hidden="true">
+          <ellipse cx="100" cy="88" rx="74" ry="7" fill="rgba(92,62,30,.13)"/>
+          <ellipse cx="100" cy="58" rx="71" ry="21" fill="#F7EFE2"/>
+          <path d="M22 58 A78 24 0 0 1 178 58" fill="none" stroke="#C9A06A" stroke-width="13" stroke-linecap="round"/>
+          <path d="M28 50 l10 8 M50 40 l9 9 M76 34 l6 10 M104 34 l-6 10 M130 40 l-9 9 M152 50 l-10 8" stroke="#8C6239" stroke-width="1.1" opacity=".55" fill="none"/>
+        </svg>
+        <svg class="pet" viewBox="0 0 120 160" aria-label="角色占位">
+          <use href="#chibi"/>
+        </svg>
+        <svg class="nest nest-front" viewBox="0 0 200 96" aria-hidden="true">
+          <path d="M22 58 C22 84 56 94 100 94 C144 94 178 84 178 58 Z" fill="#B8874F"/>
+          <path d="M22 58 A78 24 0 0 0 178 58" fill="none" stroke="#D9B47E" stroke-width="13" stroke-linecap="round"/>
+          <path d="M30 62 q10 16 26 22 M52 72 q10 12 26 16 M78 78 q10 8 24 10 M108 82 q10 4 22 4" stroke="#8C6239" stroke-width="1.4" opacity=".6" fill="none"/>
+          <path d="M134 56 C146 54 160 54 170 58 L168 74 C158 78 144 76 138 70 Z" fill="#FBF9F3"/>
+          <path d="M136 64 q14 5 32 2" stroke="#E3DDCC" stroke-width="1" fill="none"/>
+          <path d="M142 70 q12 3 24 1" stroke="#E3DDCC" stroke-width="1" fill="none"/>
+        </svg>
+        <div class="empty-ring" style="border-color: rgba(140,98,57,.38)"></div>
+        <div class="empty-mark">点窝召回</div>
+      </div>
+      <div class="identity">
+        <strong>新桌宠</strong>
+        <span>学者 · 教学助手</span>
+        <span class="state"><i></i><em style="font-style:normal">在窝里，等你提问</em></span>
+      </div>
+    </div>
+    <div class="toggle" role="group" aria-label="预览状态">
+      <button type="button" aria-pressed="true">在窝里</button>
+      <button type="button" aria-pressed="false">已浮出</button>
+    </div>
+  </section>
+
+</div>
+
+<div class="notes">
+  <div>
+    <h3>三个方案共用同一套行为</h3>
+    <ul>
+      <li>她在窝里时：前沿压住脚踝约 8px，看起来是「站进去」而不是「站在前面」。</li>
+      <li>浮出后：窝留在原地，内圈变虚线、中间出现「点窝召回」，点整只窝就能叫她回来。</li>
+      <li>空窝 hover：整体上抬 2px，召回提示加深；不自动播放任何动画，避免抢注意力。</li>
+      <li>窄屏 &lt; 900px：窝不显示，仍然是顶部头像条；浮层不渲染。</li>
+      <li>尺寸：窝 200 × 96，前沿最高点距栏底 40px；角色占位 118 × 150。</li>
+    </ul>
+  </div>
+  <div>
+    <h3>取舍</h3>
+    <ul>
+      <li>A 和角色同源，最容易长在一起；缺点是细节多，120px 浮层里看不到花。</li>
+      <li>B 最安静，像一块地毯，但「窝」的语义最弱，更像装饰。</li>
+      <li>C 的暖色对比最强，第一眼最像家；但棕色会从整页的绿色里跳出来。</li>
+    </ul>
+    <div class="legend">
+      <span><i style="background:#2C6B52"></i>叶编</span>
+      <span><i style="background:#F2EFE6;border:1px solid #E3DDCC"></i>软垫</span>
+      <span><i style="background:#B8874F"></i>藤篮</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.card').forEach((card) => {
+    const stage = card.querySelector('.stage');
+    const [inBtn, outBtn] = card.querySelectorAll('.toggle button');
+    const stateText = card.querySelector('.state');
+    function set(mode) {
+      stage.dataset.state = mode;
+      inBtn.setAttribute('aria-pressed', String(mode === 'in'));
+      outBtn.setAttribute('aria-pressed', String(mode === 'out'));
+      stateText.classList.toggle('out', mode === 'out');
+      stateText.querySelector('em').textContent = mode === 'out'
+        ? '在页面上，点窝召回'
+        : '在窝里，等你提问';
+    }
+    inBtn.addEventListener('click', () => set('in'));
+    outBtn.addEventListener('click', () => set('out'));
+    card.querySelector('.stage').addEventListener('click', () => {
+      if (stage.dataset.state === 'out') set('in');
+    });
+    if (new URLSearchParams(location.search).get('state') === 'out') set('out');
+  });
+</script>
+</body>
+</html>

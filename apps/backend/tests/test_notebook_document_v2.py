@@ -120,6 +120,26 @@ def test_v2_document_round_trips_marks_and_stable_ids(setup):
     assert "先理解再记忆" in blocks[-1]["text"]
 
 
+def test_ordered_list_tiptap_type_attribute_round_trips(setup):
+    client, _, course = setup
+    book = make_book(client, course)
+    url = document_url(course, book)
+    content = {"type": "doc", "content": [{
+        "type": "orderedList", "attrs": {"start": 3, "type": "a"}, "content": [{
+            "type": "listItem", "content": [{
+                "type": "paragraph", "content": [{"type": "text", "text": "公式说明"}],
+            }],
+        }],
+    }]}
+
+    response = client.put(url, json={"schema_version": 2, "content": content,
+                                     "expected_revision": 0})
+    assert response.status_code == 200, response.text
+    saved = response.json()["content"]
+    assert saved["content"][0]["attrs"]["type"] == "a"
+    assert client.get(url).json()["content"] == saved
+
+
 def test_v2_document_rejects_unsafe_or_unknown_nodes(setup):
     client, _, course = setup
     book = make_book(client, course)

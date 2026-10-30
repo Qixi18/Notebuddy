@@ -50,6 +50,37 @@ class ConversationUnavailable(Exception):
         super().__init__(detail)
 
 
+def _hit_snippet(content: str, keyword: str, *, window: int = 60) -> str:
+    index = content.lower().find(keyword.lower())
+    if index < 0:
+        return content[:window * 2] + ("…" if len(content) > window * 2 else "")
+    start = max(0, index - window)
+    end = min(len(content), index + len(keyword) + window)
+    return f"{'…' if start else ''}{content[start:end]}{'…' if end < len(content) else ''}"
+
+
+def search_course_messages(db: Session, course_id: str, query: str, *, limit: int = 20) -> list[dict]:
+    keyword = query.strip()
+    if not keyword:
+        return []
+    rows = db.execute(
+        select(ConversationMessage, Conversation)
+        .join(Conversation, ConversationMessage.conversation_id == Conversation.id)
+        .where(Conversation.course_id == course_id,
+               ConversationMessage.content.icontains(keyword, autoescape=True))
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(limit)
+    ).all()
+    return [{
+        "conversation_id": conversation.id,
+        "conversation_title": conversation.title,
+        "message_id": message.id,
+        "message_role": message.role,
+        "snippet": _hit_snippet(message.content, keyword),
+        "created_at": message.created_at,
+    } for message, conversation in rows]
+
+
 def load_conversation(db: Session, conversation_id: str) -> Conversation:
     conversation = db.scalar(
         select(Conversation).where(Conversation.id == conversation_id).options(
@@ -81,11 +112,15 @@ def persist_assistant_message(
     chunks: list,
     web_results: list[dict],
     claims: list[dict],
+    process: dict | None = None,
+    suggestions: list[dict] | None = None,
 ) -> ConversationMessage:
     """Commit a complete assistant answer and its evidence in one transaction."""
     assistant = ConversationMessage(
         conversation_id=conversation.id, role="assistant", content=content,
         learning_goal=learning_goal, status="completed", model_version=model_version,
+        process_json=json.dumps(process, ensure_ascii=False) if process else None,
+        suggestions_json=json.dumps(suggestions, ensure_ascii=False) if suggestions else None,
     )
     db.add(assistant)
     db.flush()

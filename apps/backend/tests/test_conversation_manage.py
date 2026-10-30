@@ -80,3 +80,35 @@ def test_delete_removes_conversation_and_cascades_messages_and_evidence(tmp_path
         assert client.delete(f"/api/v1/conversations/{conversation_id}").status_code == 404
     finally:
         app.dependency_overrides.clear()
+
+
+def test_search_course_messages_returns_hits_with_snippet(tmp_path) -> None:
+    """P6 消息全文搜索：提问与回答都命中；跨课程不串；空 q 返回空。"""
+    client, factory, (course_id, conversation_id) = _setup(tmp_path)
+    try:
+        with factory() as db:
+            other_course = Course(name="别的课程")
+            db.add(other_course)
+            db.flush()
+            other_conversation = Conversation(course_id=other_course.id, title="别课会话")
+            db.add(other_conversation)
+            db.commit()
+            other_conversation_id = other_conversation.id
+
+        def post(conv_id: str, question: str) -> None:
+            assert client.post(f"/api/v1/conversations/{conv_id}/messages", json={"question": question}).status_code == 201
+
+        post(conversation_id, "什么是红黑树的旋转规则？")
+        post(other_conversation_id, "红黑树在另一门课的提问")
+        # 空关键词 → 空结果
+        assert client.get(f"/api/v1/courses/{course_id}/conversations/search", params={"q": ""}).json() == []
+
+        hits = client.get(f"/api/v1/courses/{course_id}/conversations/search", params={"q": "红黑树"}).json()
+        assert len(hits) == 1, "只应命中本课程的消息"
+        hit = hits[0]
+        assert hit["conversation_id"] == conversation_id
+        assert hit["message_role"] == "user"
+        assert "红黑树" in hit["snippet"]
+        assert client.get(f"/api/v1/courses/{course_id}/conversations/search", params={"q": "不存在的词"}).json() == []
+    finally:
+        app.dependency_overrides.clear()

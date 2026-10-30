@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 import shutil
 from datetime import UTC, datetime
-from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
@@ -100,6 +100,7 @@ def _asset_read(asset: Asset, role: str, notebook_id: str) -> dict:
         "sha256": asset.sha256, "state": asset.state, "role": role,
         "content_url": f"/api/v1/notebooks/{notebook_id}/assets/{asset.id}/content",
         "created_at": asset.created_at,
+        "processing_route": asset.processing_route,
     }
 
 
@@ -245,25 +246,27 @@ def delete_notebook_asset(notebook_id: str, asset_id: str, db: Session = Depends
 async def upload_notebook_asset(
     notebook_id: str,
     file: UploadFile = File(...),
+    processing_route: str | None = Form(default=None),
     upload_batch_id: str | None = Header(default=None, alias="X-Upload-Batch-ID"),
     db: Session = Depends(get_db),
 ):
     filename = file.filename or "upload"
     extension = Path(filename).suffix.lower()
     if extension in settings.allowed_extensions:
-        data = await file.read(settings.max_upload_bytes + 1)
         notebook = db.get(Notebook, notebook_id)
         if notebook is None or notebook.deleted_at is not None:
             raise HTTPException(404, "笔记不存在")
         batch = ensure_upload_batch(
             db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+            processing_route=processing_route,
         )
         try:
             material, document_job = ingest_document(
                 db, course_id=notebook.course_id, notebook_id=notebook_id,
-                source=BytesIO(data), filename=filename,
+                source=file.file, filename=filename,
                 lecture_title=filename, topic_title="",
                 media_type=file.content_type, upload_batch_id=batch.id,
+                processing_route=batch.processing_route,
             )
         except UploadRejected as exc:
             raise HTTPException(exc.status_code, str(exc)) from exc
@@ -284,10 +287,12 @@ async def upload_notebook_asset(
             raise HTTPException(404, "笔记不存在")
         batch = ensure_upload_batch(
             db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+            processing_route=processing_route,
         )
         asset, job = ingest_source_image(
             db, notebook_id=notebook_id, filename=filename, data=data,
             upload_batch_id=batch.id,
+            processing_route=batch.processing_route,
         )
     except ImageUploadRejected as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
@@ -656,6 +661,72 @@ def retry_asset_parse(asset_id: str, db: Session = Depends(get_db)):
     return job
 
 
+class ProcessingRouteSelection(BaseModel):
+    processing_route: str
+
+
+@router.post('/assets/{asset_id}/processing-route', status_code=202)
+def switch_asset_processing_route(asset_id: str, payload: ProcessingRouteSelection,
+                                  db: Session = Depends(get_db)):
+    from app.document_processing.routes import provider_snapshot, resolve_route
+    try:
+        route = resolve_route(payload.processing_route)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    asset = _ensure_asset(db, asset_id)
+    owner = db.scalar(select(NotebookAsset).where(NotebookAsset.asset_id == asset_id,
+        NotebookAsset.is_owner.is_(True), NotebookAsset.detached_at.is_(None)))
+    if owner is None or asset.state != 'ready':
+        raise HTTPException(404, '原始资料当前不可用')
+    material = db.scalar(select(Material).where(Material.asset_id == asset_id))
+    active = db.scalar(select(ProcessingJob.id).where(ProcessingJob.material_id == material.id,
+        ProcessingJob.status.in_(['pending', 'processing']))) if material else db.scalar(
+        select(AssetProcessingJob.id).where(AssetProcessingJob.asset_id == asset_id,
+            AssetProcessingJob.status.in_(['pending', 'processing'])))
+    if active:
+        raise HTTPException(409, '资料仍在处理中，请取消或等待后再切换路线')
+    asset.processing_route = route
+    asset.processing_config_json = json.dumps(provider_snapshot())
+    if material:
+        material.processing_route = route
+        material.status = 'pending'
+        job = ProcessingJob(material_id=material.id, kind='reparse_material')
+    else:
+        job = AssetProcessingJob(asset_id=asset.id, notebook_id=owner.notebook_id,
+            owner_link_id=owner.id, kind='image_reparse', status='pending')
+    db.add(job)
+    db.flush()
+    input_row = db.scalar(select(NotebookGenerationInput).where(NotebookGenerationInput.asset_id == asset_id))
+    if input_row is not None and input_row.status not in {'completed', 'generating'}:
+        input_row.parse_job_id = job.id
+        input_row.status = 'waiting_parse'
+        input_row.error_code = input_row.error_message = None
+        input_row.updated_at = datetime.now(UTC)
+    db.commit()
+    return {'asset_id': asset_id, 'processing_route': route, 'job_id': job.id}
+
+
+@router.post('/assets/{asset_id}/cancel-processing')
+def cancel_asset_processing(asset_id: str, db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id)
+    material = db.scalar(select(Material).where(Material.asset_id == asset_id))
+    model = ProcessingJob if material else AssetProcessingJob
+    condition = model.material_id == material.id if material else model.asset_id == asset_id
+    active = db.scalars(select(model).where(condition, model.status.in_(['pending', 'processing']))).all()
+    if not active:
+        raise HTTPException(409, '没有可取消的读取任务')
+    for job in active:
+        job.status = 'failed'
+        job.error_code = 'cancelled'
+        job.error_message = '读取已取消，已完成页面保留，可重试继续'
+        job.attempt_count += 1
+        job.finished_at = datetime.now(UTC)
+    if material:
+        material.status = 'failed'
+    db.commit()
+    return {'cancelled': True}
+
+
 class CourseNotebookFileRead(BaseModel):
     id: str
     notebook_id: str | None
@@ -794,6 +865,7 @@ def upload_material(
     topic_title: str = Form(default=""),
     allow_duplicate: bool = Form(default=False),
     notebook_id: str | None = Form(default=None),
+    processing_route: str | None = Form(default=None),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     upload_batch_id: str | None = Header(default=None, alias="X-Upload-Batch-ID"),
     db: Session = Depends(get_db),
@@ -801,6 +873,7 @@ def upload_material(
     ensure_course(db, course_id)
     batch = ensure_upload_batch(
         db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+        processing_route=processing_route,
     ) if notebook_id is not None else None
     try:
         material, job = ingest_document(
@@ -809,6 +882,7 @@ def upload_material(
             topic_title=topic_title, media_type=file.content_type,
             allow_duplicate=allow_duplicate, idempotency_key=idempotency_key,
             notebook_id=notebook_id, upload_batch_id=batch.id if batch else None,
+            processing_route=batch.processing_route if batch else processing_route,
         )
     except UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -840,6 +914,7 @@ def upload_notebook_file(
     lecture_title: str = Form(default=""),
     topic_title: str = Form(default=""),
     allow_duplicate: bool = Form(default=False),
+    processing_route: str | None = Form(default=None),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     upload_batch_id: str | None = Header(default=None, alias="X-Upload-Batch-ID"),
     db: Session = Depends(get_db),
@@ -849,6 +924,7 @@ def upload_notebook_file(
         raise HTTPException(404, "笔记不存在")
     batch = ensure_upload_batch(
         db, notebook_id, upload_batch_id, close_if_new=upload_batch_id is None,
+        processing_route=processing_route,
     )
     try:
         material, job = ingest_document(
@@ -858,6 +934,7 @@ def upload_notebook_file(
             topic_title=topic_title, media_type=file.content_type,
             allow_duplicate=allow_duplicate, idempotency_key=idempotency_key,
             upload_batch_id=batch.id,
+            processing_route=batch.processing_route,
         )
     except UploadRejected as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

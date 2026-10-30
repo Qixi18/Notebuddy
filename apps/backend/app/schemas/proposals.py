@@ -45,3 +45,5 @@ class NoteSuggestionRead(BaseModel):
     status: str
     created_at: datetime
     reviewed_at: datetime | None
+    # 来自 NoteSuggestion.note_title property：多目标建议卡与改动栏显示目标笔记标题
+    note_title: str | None = None

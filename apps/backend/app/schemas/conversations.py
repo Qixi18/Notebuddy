@@ -49,6 +49,15 @@ class ConversationTitleUpdate(BaseModel):
         return stripped
 
 
+class ConversationMessageHit(BaseModel):
+    conversation_id: str
+    conversation_title: str
+    message_id: str
+    message_role: str
+    snippet: str
+    created_at: datetime
+
+
 class MessageEvidenceRead(BaseModel):
     id: str
     claim_key: str
@@ -77,6 +86,8 @@ class ConversationMessageRead(BaseModel):
     # 会话消息落库时只存了 evidence，这里在读取时从 evidence 反推，避免加表字段与迁移。
     mode: str = ""
     sources: list[AssistantSource] = Field(default_factory=list)
+    process: dict | None = None
+    suggestions: list[dict] | None = None
     # 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表，避免仍显示「新对话」。
     conversation_title: str = "新对话"
 
@@ -127,6 +138,8 @@ class AgentMessageCreate(BaseModel):
     learning_goal: str | None = Field(default=None, max_length=60)
     material_id: str | None = None
     allow_web: bool = True
+    allow_quiz: bool = True
+    learning_mode: Literal["direct", "guided"] = "direct"
     idempotency_key: str | None = Field(default=None, max_length=120)
     teacher_persona: TeacherPersonaId = "elf"
     reading_context: ReadingContext | None = None

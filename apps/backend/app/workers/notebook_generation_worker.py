@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import aliased
 
 from app.core.config import settings
@@ -28,11 +29,29 @@ from app.db.models import (
     NotebookGenerationInput,
     NotebookGenerationJob,
 )
-from app.generation.composer import CompositionError, compose
+from app.document_processing.checkpoints import (
+    WorkPending,
+    fingerprint,
+    get_step,
+    put_step,
+    structured_call,
+)
+from app.document_processing.routes import provider_client
+from app.generation.composer import (
+    CompositionError,
+    combine_compositions,
+    compose,
+    repair_deepseek_document_format,
+)
 from app.generation.context import GenerationInputError, current_outline
 from app.generation.figures import append_source_figures
+from app.generation.llm_planner import build_llm_plan
 from app.generation.planner import build_plan
+from app.generation.quality_gate import inspect_generated_math
+from app.generation.resume import compose_batch
 from app.notes.document import (
+    CALLOUT_TONES,
+    MAX_LATEX,
     DocumentValidationError,
     load_document,
     normalize_document,
@@ -41,7 +60,8 @@ from app.notes.document import (
 from app.notes.store import DocumentConflict, body_fingerprint, write_document
 from app.services.notebook_generation_inputs import cancel_generation_inputs
 
-PROMPT_VERSION = "notebook-generation-v3"
+PROMPT_VERSION = "notebook-generation-v4-math-contract"
+logger = logging.getLogger(__name__)
 
 
 def claim_next_generation_job() -> str | None:
@@ -51,12 +71,16 @@ def claim_next_generation_job() -> str | None:
         busy = aliased(NotebookGenerationJob)
         available = ~select(busy.id).where(
             busy.notebook_id == NotebookGenerationJob.notebook_id,
-            busy.status.in_(("processing", "cancel_requested")),
+            or_(busy.status.in_(("processing", "cancel_requested")),
+                and_(busy.status == 'pending', or_(
+                    busy.created_at < NotebookGenerationJob.created_at,
+                    and_(busy.created_at == NotebookGenerationJob.created_at,
+                         busy.id < NotebookGenerationJob.id)))),
         ).exists()
         job_id = db.scalar(select(NotebookGenerationJob.id).where(
             NotebookGenerationJob.status == "pending",
             available,
-        ).order_by(NotebookGenerationJob.created_at, NotebookGenerationJob.id).limit(1))
+        ).order_by(NotebookGenerationJob.updated_at, NotebookGenerationJob.created_at, NotebookGenerationJob.id).limit(1))
         if job_id is None:
             return None
         result = db.execute(update(NotebookGenerationJob).where(
@@ -80,6 +104,30 @@ def process_generation_job(job_id: str) -> None:
         if not _checkpoint(db, job, attempt):
             return
         snapshot = _parse_json(job.input_snapshot_json) or {}
+        llm_route = snapshot.get('processing_route') == 'llm'
+        model_steps = 0
+        def cached_model_call(messages, *, max_tokens=6000, validator=None):
+            nonlocal model_steps
+            identity = fingerprint([messages, snapshot.get('provider'), 'plan-v1'])
+            cached = get_step(db, job.id, 'plan', identity, identity)
+            if cached is not None:
+                if validator:
+                    validator(cached)
+                return cached
+            if model_steps >= 2:
+                raise WorkPending()
+            if not _checkpoint(db, job, attempt):
+                raise CompositionError('任务已停止', code='cancelled')
+            db.commit()
+            client = provider_client(snapshot.get('provider', {}))
+            result = structured_call(client, messages, max_tokens=max_tokens)
+            if validator:
+                validator(result)
+            if not _checkpoint(db, job, attempt):
+                raise CompositionError('任务已停止', code='cancelled')
+            put_step(db, job.id, 'plan', identity, identity, result, client.last_usage)
+            model_steps += 1
+            return result
         try:
             _validate_snapshot_sources(db, job.notebook_id, snapshot)
         except GenerationInputError as exc:
@@ -110,23 +158,51 @@ def process_generation_job(job_id: str) -> None:
             job.input_snapshot_json = json.dumps(snapshot, ensure_ascii=False)
             job.base_document_revision = notebook.document_revision
             try:
-                plan = build_plan(snapshot)
+                plan = build_llm_plan(snapshot, cached_model_call) if llm_route else build_plan(snapshot)
+            except WorkPending:
+                job.status = 'pending'
+                job.updated_at = datetime.now(UTC)
+                db.commit()
+                return
             except Exception as exc:
                 _fail_inputs(db, job, "plan_failed", f"生成计划构建失败：{exc}", attempt)
                 return
             job.knowledge_plan_json = json.dumps(plan, ensure_ascii=False)
+            job.input_snapshot_json = json.dumps(snapshot, ensure_ascii=False)
             db.commit()
         generator = job.generator or settings.notebook_generator
         try:
             compositions = []
+            def fresh_composition(snapshot, plan, batch, *, generator):
+                nonlocal model_steps
+                if model_steps >= 2:
+                    raise WorkPending()
+                result = compose(snapshot, plan, batch, generator=generator)
+                result.nodes = _normalize_model_blocks(result.nodes)
+                if not _checkpoint(db, job, attempt):
+                    raise CompositionError('任务已停止', code='cancelled')
+                model_steps += 1
+                return result
             for batch in plan.get("batches") or []:
                 if not _checkpoint(db, job, attempt):
                     return
                 # Do not hold a read transaction across a network/model call.
                 db.commit()
-                compositions.append(compose(snapshot, plan, batch, generator=generator))
+                if llm_route:
+                    compositions.append(compose_batch(db, job.id, snapshot, plan, batch, generator,
+                                                       compose_impl=fresh_composition))
+                else:
+                    compositions.append(compose(snapshot, plan, batch, generator=generator))
                 if not _checkpoint(db, job, attempt):
                     return
+        except WorkPending:
+            job.status = 'pending'
+            job.updated_at = datetime.now(UTC)
+            db.commit()
+            return
+        except DocumentValidationError as exc:
+            _fail_inputs(db, job, 'document_validation_failed', str(exc), attempt)
+            return
         except (CompositionError, GenerationInputError) as exc:
             _fail_inputs(db, job, getattr(exc, "code", "generation_failed"), str(exc), attempt)
             return
@@ -135,12 +211,9 @@ def process_generation_job(job_id: str) -> None:
                          f"生成任务失败：{type(exc).__name__}", attempt)
             return
 
-        nodes: list[dict[str, Any]] = []
-        source_map: dict[str, list[str]] = {}
-        for composition in compositions:
-            nodes.extend(composition.nodes)
-            for block_id, ids in composition.source_map.items():
-                source_map[block_id] = list(dict.fromkeys(source_map.get(block_id, []) + ids))
+        combined = combine_compositions(compositions)
+        nodes = combined.nodes
+        source_map = combined.source_map
         if not nodes:
             if plan.get("units") and all(
                 unit.get("intent") == "skip" for unit in plan["units"]
@@ -149,15 +222,53 @@ def process_generation_job(job_id: str) -> None:
                 return
             _fail_inputs(db, job, "empty_generation", "没有可追加的正文内容（资料可能已全部覆盖）", attempt)
             return
+        format_repair_count = 0
+        normalized_nodes = nodes
         try:
-            fragment = validate_document(normalize_document({
-                "type": "doc", "content": _normalize_model_blocks(nodes),
-            }))
+            normalized_nodes = _normalize_model_blocks(nodes)
+            candidate_document = normalize_document({"type": "doc", "content": normalized_nodes})
+            math_report = inspect_generated_math(candidate_document)
+            if not _accept_generated_math(db, job, generator, math_report, attempt, format_repair_count):
+                return
+            fragment = validate_document(candidate_document)
             _reject_images(fragment)
             _validate_source_map(fragment, source_map)
-        except DocumentValidationError as exc:
-            _fail_inputs(db, job, "document_validation_failed", str(exc)[:1000], attempt)
-            return
+        except DocumentValidationError as first_validation_error:
+            if generator != "deepseek":
+                _fail_inputs(db, job, "document_validation_failed", str(first_validation_error)[:1000], attempt)
+                return
+            allowed_source_ids = {
+                block["block_id"]
+                for source in snapshot.get("sources") or []
+                if isinstance(source, dict)
+                for section in source.get("sections") or []
+                if isinstance(section, dict)
+                for block in section.get("blocks") or []
+                if isinstance(block, dict) and isinstance(block.get("block_id"), str)
+            }
+            try:
+                repaired = repair_deepseek_document_format(
+                    normalized_nodes, source_map, allowed_source_ids, str(first_validation_error),
+                )
+                format_repair_count = 1
+                source_map = repaired.source_map
+                normalized_nodes = _normalize_model_blocks(repaired.nodes)
+                candidate_document = normalize_document({"type": "doc", "content": normalized_nodes})
+                math_report = inspect_generated_math(candidate_document)
+                if not _accept_generated_math(
+                    db, job, generator, math_report, attempt, format_repair_count,
+                ):
+                    return
+                fragment = validate_document(candidate_document)
+                _reject_images(fragment)
+                _validate_source_map(fragment, source_map)
+            except (CompositionError, DocumentValidationError) as repair_error:
+                _fail_inputs(
+                    db, job, "document_format_repair_failed",
+                    f"初次正文格式校验失败：{first_validation_error}；自动矫正后仍未通过：{repair_error}"[:2000],
+                    attempt,
+                )
+                return
 
         allowed_runs = {
             source["parse_run_id"] for source in snapshot.get("sources") or []
@@ -168,6 +279,13 @@ def process_generation_job(job_id: str) -> None:
             _fail_inputs(db, job, "invalid_sources", "生成内容引用了本次输入之外的原文块", attempt)
             return
 
+        if llm_route:
+            notebook = db.get(Notebook, job.notebook_id, populate_existing=True)
+            if notebook is not None and notebook.document_revision != snapshot['base_document_revision']:
+                job.knowledge_plan_json = None
+                job.status = 'pending'
+                db.commit()
+                return
         try:
             merged = _merge_with_retry(db, job, fragment, source_map, attempt, snapshot, plan)
         except DocumentValidationError as exc:
@@ -196,7 +314,10 @@ def process_generation_job(job_id: str) -> None:
             if notebook.course_id is not None:
                 from app.forest.notebook_relations import enqueue_notebook_relations
 
-                enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id)
+                relation_job = enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id,
+                    processing_route=snapshot.get('processing_route', 'standard'),
+                    provider=snapshot.get('provider', {}))
+                job.relation_job_id = relation_job.id if relation_job else None
             db.commit()
         except Exception:
             db.rollback()
@@ -296,6 +417,36 @@ def _reject_images(document: dict[str, Any]) -> None:
         stack.extend(node.get("content") or [])
 
 
+def _accept_generated_math(db, job, generator: str, report, attempt: int, retry_count: int) -> bool:
+    """Log small diagnostics and stop AI-only failures before formal writes."""
+    logger.info(
+        "notebook_generation_quality_gate",
+        extra={
+            "event": "notebook_generation_quality_gate",
+            "job_id": job.id,
+            "generator": generator,
+            "stage": "math_validation",
+            "inline_math_count": report.inline_math_count,
+            "block_math_count": report.block_math_count,
+            "suspected_unstructured_math_count": report.suspected_unstructured_math_count,
+            "failure_codes": report.failure_codes,
+            "elapsed_ms": report.elapsed_ms,
+            "retry_count": retry_count,
+            "result": "passed" if report.passed else "blocked",
+        },
+    )
+    if report.passed:
+        return True
+    issue = next(issue for issue in report.issues if issue.severity == "error")
+    block_context = f", block_id={issue.block_id}" if issue.block_id else ""
+    _fail_inputs(
+        db, job, issue.code,
+        f"生成数学内容质量检查未通过：{issue.code}（{issue.node_path}{block_context}）",
+        attempt,
+    )
+    return False
+
+
 def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Repair model formatting and promote standalone raw LaTeX to math nodes."""
     result = copy.deepcopy(nodes)
@@ -334,11 +485,33 @@ def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]
             return
         promote_standalone_latex(node)
         kind = node.get("type")
+        if kind in {"inlineMath", "blockMath"}:
+            attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+            latex = attrs.get("latex")
+            if not isinstance(latex, str) or not latex.strip():
+                # Models sometimes place the same formula in text instead of attrs.
+                fallback = node.get("text")
+                if isinstance(fallback, str) and fallback.strip():
+                    attrs["latex"] = fallback.strip()
+                    node.pop("text", None)
+            elif latex != latex.strip():
+                attrs["latex"] = latex.strip()
+            node["attrs"] = attrs
         children = node.get("content")
         if kind == "callout":
-            attrs = node.get("attrs")
-            if isinstance(attrs, dict) and not attrs.get("title"):
+            attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+            tone = attrs.get("tone")
+            if tone not in CALLOUT_TONES:
+                tone_aliases = {
+                    "important": "tip", "positive": "tip", "success": "tip",
+                    "caution": "warning", "danger": "warning", "error": "warning",
+                    "info": "note", "neutral": "note",
+                }
+                tone_key = tone.strip().casefold() if isinstance(tone, str) else ""
+                attrs["tone"] = tone_aliases.get(tone_key, "tip")
+            if not attrs.get("title"):
                 attrs["title"] = "请核对" if attrs.get("tone") == "warning" else "提示"
+            node["attrs"] = attrs
         if kind in {"tableHeader", "tableCell", "callout", "example"} and isinstance(children, list):
             inline_types = {"text", "hardBreak", "inlineMath"}
             if children and all(isinstance(child, dict) and child.get("type") in inline_types
@@ -349,6 +522,25 @@ def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]
 
     for node in result:
         visit(node)
+    def check_math(node: Any, path: str) -> None:
+        if not isinstance(node, dict):
+            return
+        if node.get("type") in {"inlineMath", "blockMath"}:
+            attrs = node.get("attrs") or {}
+            latex = attrs.get("latex") if isinstance(attrs, dict) else None
+            if not isinstance(latex, str):
+                raise DocumentValidationError(f"{path} 的公式缺少字符串 latex")
+            if not latex.strip():
+                raise DocumentValidationError(f"{path} 的公式 latex 为空")
+            if len(latex) > MAX_LATEX:
+                raise DocumentValidationError(
+                    f"{path} 的公式 latex 过长（{len(latex)} 字符，上限 {MAX_LATEX}）",
+                )
+        for index, child in enumerate(node.get("content") or [], start=1):
+            check_math(child, f"{path} / 子节点 {index}")
+
+    for index, node in enumerate(result, start=1):
+        check_math(node, f"正文块 {index}")
     return result
 
 

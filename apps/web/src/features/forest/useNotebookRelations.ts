@@ -4,6 +4,7 @@ import type { CourseTree } from '../../types'
 import type { NotebookRelation } from './types'
 import { projectRelations } from './notebookRelations'
 import { useNotebookRelationJobs } from './useNotebookRelationJobs'
+import { growthLedger } from '../tree/growth/ledger'
 
 export function useNotebookRelations(trees: CourseTree[], settledVersion: number,
   watchKey: string, refreshDirectories: (ids?: string[]) => Promise<unknown>) {
@@ -20,6 +21,7 @@ export function useNotebookRelations(trees: CourseTree[], settledVersion: number
     try {
       const rows = await api.getForestRelations()
       if (mounted.current && request === generation.current) {
+        growthLedger.observeRelations(rows)
         setRecords(rows)
         setError(undefined)
       }
@@ -42,5 +44,8 @@ export function useNotebookRelations(trees: CourseTree[], settledVersion: number
   }, [refresh, settledVersion])
   const relations = useMemo(() => projectRelations(records, trees), [records, trees])
   const jobs = useNotebookRelationJobs(watchKey, settledVersion, refresh, refreshDirectories)
-  return { records, relations, error: error ?? jobs.error, refresh, jobs: jobs.jobs, track: jobs.track }
+  return {
+    records, relations, error: error ?? jobs.error, refresh,
+    jobs: jobs.jobs, track: jobs.track, discoverJobs: jobs.discoverJobs,
+  }
 }

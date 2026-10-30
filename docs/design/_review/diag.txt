@@ -1,0 +1,166 @@
+{
+ "sample1815": [
+  {
+   "tag": "SPAN",
+   "cls": "katex",
+   "txt": "OOO",
+   "fs": "18.15px",
+   "parentCls": ""
+  },
+  {
+   "tag": "SPAN",
+   "cls": "katex-mathml",
+   "txt": "OO",
+   "fs": "18.15px",
+   "parentCls": "katex"
+  },
+  {
+   "tag": "math",
+   "cls": "",
+   "txt": "OO",
+   "fs": "18.15px",
+   "parentCls": "katex-mathml"
+  },
+  {
+   "tag": "semantics",
+   "cls": "",
+   "txt": "OO",
+   "fs": "18.15px",
+   "parentCls": ""
+  },
+  {
+   "tag": "mrow",
+   "cls": "",
+   "txt": "O",
+   "fs": "18.15px",
+   "parentCls": ""
+  }
+ ],
+ "count1815": 959,
+ "sample1px": [
+  {
+   "tag": "SPAN",
+   "cls": "vlist-s"
+  },
+  {
+   "tag": "SPAN",
+   "cls": "vlist-s"
+  },
+  {
+   "tag": "SPAN",
+   "cls": "vlist-s"
+  },
+  {
+   "tag": "SPAN",
+   "cls": "vlist-s"
+  },
+  {
+   "tag": "SPAN",
+   "cls": "vlist-s"
+  }
+ ],
+ "count1px": 19,
+ "smallTargets": 52,
+ "smallTargetSamples": [
+  {
+   "tag": "BUTTON",
+   "cls": "sidebar-collapse-toggle",
+   "w": 24,
+   "h": 32,
+   "txt": "‹",
+   "aria": "收起侧边栏"
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "workspace-pet-floatout",
+   "w": 41,
+   "h": 22,
+   "txt": "浮出 ⤢",
+   "aria": null
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "workspace-conv-new",
+   "w": 59,
+   "h": 24,
+   "txt": "＋ 新对话",
+   "aria": null
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "workspace-topbar-search",
+   "w": 28,
+   "h": 29,
+   "txt": "⌕",
+   "aria": "搜索会话"
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "workspace-topbar-mistakes",
+   "w": 46,
+   "h": 29,
+   "txt": "复习",
+   "aria": "打开错题本"
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "workspace-topbar-changes",
+   "w": 43,
+   "h": 28,
+   "txt": "改动",
+   "aria": "展开改动栏"
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "workspace-scope-trigger is-locked",
+   "w": 73,
+   "h": 23,
+   "txt": "全局可查",
+   "aria": null
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "",
+   "w": 47,
+   "h": 24,
+   "txt": "有帮助",
+   "aria": null
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "",
+   "w": 47,
+   "h": 24,
+   "txt": "需改进",
+   "aria": null
+  },
+  {
+   "tag": "BUTTON",
+   "cls": "workspace-msg-copy",
+   "w": 36,
+   "h": 24,
+   "txt": "复制",
+   "aria": null
+  }
+ ],
+ "unlabeledIconButtons": 0,
+ "unlabeledSamples": [],
+ "docScrollW": 1440,
+ "docClientW": 1440,
+ "headings": [
+  "H1",
+  "H2",
+  "H2",
+  "H2",
+  "H2",
+  "H2",
+  "H2",
+  "H2",
+  "H2",
+  "H2",
+  "H3",
+  "H3",
+  "H3",
+  "H2"
+ ]
+}

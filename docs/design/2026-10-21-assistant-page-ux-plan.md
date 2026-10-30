@@ -11,7 +11,41 @@
 
 ### 实施记录
 
-- **第一批（P1 + P2 + P5）已于 2026-10-21 落地**（纯前端，尚未提交）：
+- **第四批（P6 会话全文搜索）已于 2026-10-24 落地并提交**：
+  - 后端 3 文件：`services/conversations.py`（`search_course_messages`：JOIN 消息表 `content LIKE`，提问与回答都参与匹配——「上周问过的一个问题」搜的正是 user 消息；`_hit_snippet` 按首个命中位置截 ±60 字符窗口）、`schemas/conversations.py` + `schemas/api.py`（`ConversationMessageHit`）、`api/v1/conversations.py`（`GET /courses/{id}/conversations/search?q=`，query 参数用 `fastapi.Query`）。
+  - 前端 5 文件：`api/conversations.ts`（`searchMessages` 封装）、`useConversation.ts`（`pendingMessageId` 状态：`selectConversation(id, pendingMessageId?)` 携带、`consumePendingMessage` 消费、切课程清理）、`ConversationList.tsx`（面板两级结果——会话组本地标题过滤照旧 + 消息组 300ms 防抖走后端，命中片段 `<mark>` 高亮、标注会话名与「提问/回答」）、`AssistantThread.tsx`（消息元素加 `data-message-id`；`highlightMessageId` 就绪后 `scrollIntoView` 居中 + 1.8s 闪烁高亮后消费）、`assistant-workspace.css`（分组标签/命中片段/闪烁动画）。
+  - 定位时序按计划处理：selectConversation 先清空 history 再异步加载，高亮不靠「切完再找」，而是目标随选择传入、历史就绪且消息在场才滚动，消费后清除。
+  - 新增测试 2 个：后端搜索命中（本课程命中含片段、跨课程不串、空 q 空、无命中空）；前端面板两级结果（标题组照旧 + 消息组 `<mark>` 高亮，点击命中带 `selectConversation(convId, msgId)`）。
+  - 验证：`tsc -b && vite build` 通过；vitest 49 文件（仅已知 flaky 组，隔离复跑 13/13）；test:navigation 38/38；后端全量 283 passed（唯一失败仍为上游自带 notebook 备份用例）。
+  - 待真机：浏览器里 Ctrl+K 搜一个历史问题关键词，看两级结果与点击后滚动高亮的观感。
+- **2026-10-24 真机走查（API 层，真实模型跑通）**：测试后端跑最新代码（8010 端口，主 8000 被一个无法定位的旧进程占用），结论如下——
+  - **P3 验收 2 ✅**：course 档带 material_id 真实模型跑完整 agent 链路（无降级），final.sources 的 material_id 集合 = 收窄课件单元素，课件依据只来自该课件。
+  - **P4 验收 1/2/3 ✅**：global 档自然语言「把《内聚与耦合》的方法与应用补全」→ agent 定位成功 → final 携带 note_suggestion（note_title 正确）→ 确认前正文未变 → 课程级端点可见 → 采纳写入（revision 7→8，新增内容带课程资料标注，diff 基准无串写）→ 撤销还原（内容与原文逐字相等，revision 8→9）。
+  - **P4 kill switch ✅**：同一问题不传开关（坞默认）→ agent 能读笔记与课件但 **0 条建议产出**，回答如实说明无法直接修改——坞行为与旧版一致。
+  - **P1-3 实测结论**：客户端断开后服务端生成器被取消——**中断后刷新页面 = 有问无答**（提问已落库保留，回答不落库）。前端「已中断」本地态仅不刷新时有意义；若要中断后保留部分答案，需后端把持久化改为逐块落库（后续项）。
+  - **P2-2 实测结论**：同一问题重发两次 → 历史两条相同提问气泡，已知限制成立（去重依赖 §7-1 后端重试能力）。
+  - **数据还原**：走查产生的建议行已删、4 个走查会话已删、《内聚与耦合》正文逐字还原（revision 因采纳/撤销净 +2，内容为准）；既有 pending 建议 `aef37d06` 未动。
+  - **仍需浏览器人工确认（纯视觉）**：P5a 锁定预告文案位置、来源 chip 的渲染观感、坞内收窄下拉的交互。
+- **第三批（P4 agent 自主定位并修改笔记）已于 2026-10-24 落地**（提交 `5037a0e`；基线为合并上游 12 个提交后的 `6866402`）：
+  - 后端 8 文件：`schemas/conversations.py`（`allow_note_discovery: bool = False`）、`api/v1/agent.py`（透传）、`ai/agent_loop.py`（透传至工具装配/执行器/提示词）、`ai/agent_tools.py`（`build_tool_specs` 发现模式注册 note_id 必填版 `propose_note_edits`，开关关闭行为逐字节一致；`_propose_note_edits` 多目标——note 档必须等于锁定篇、开关关闭必须等于打开篇、发现开启 course/global 可定位任意篇，`load_note` 课程护栏兜底）、`ai/prompts.py`（发现模式独立范围标签 + `AGENT_DISCOVERY_RULES` 追加 system 消息，`AGENT_SYSTEM` 常量不动——提示词与工具集同步条件化）、`schemas/proposals.py` + `db/models.py`（`note_title` 字段 + property）、`api/v1/notes.py`（`GET /courses/{id}/note-suggestions?status=pending`）。
+  - 前端 9 文件（比计划多 1 个 `useConversation.ts` 透传）：`api/agentStream.ts`（payload 开关）、`api/notes.ts`（课程级封装）、`features/conversation/useConversation.ts`（`AgentAskOptions.allowNoteDiscovery` 透传）、`features/assistant/useNoteSuggestions.ts`（**重写为多目标状态机**：课程级/逐目标双模式拉取、`notesById` 正文+revision 缓存（knownNotes 种子 + 按 note_id 补拉）、diff/写入/撤销全部按 `suggestion.note_id` 路由、applyAll 按笔记分组且正文缓存缺失的组跳过、review 返回值防御性合并（字段不全不入缓存））、`AgentCards.tsx`（`currentContentByNoteId` + 卡上标注目标笔记）、`ChangesPanel.tsx`（标题改「待确认改动（本课程）」+ 按笔记分组标签）、`pages/AssistantPage.tsx`（开关 true + 课程级 hook + 预览按目标笔记取正文）、`AssistantDock.tsx`（单目标语义不变：targets=[当前笔记]、不传 courseId/开关）、`assistant-workspace.css`（`.agent-card-note` + `.workspace-change-group`）。
+  - 数据安全红线已落测试：`note-suggestion.test.tsx`「applyAll groups by note」断言 A/B 两篇各自以自己正文为基准、互不串写。
+  - 新增测试 9 个：后端 `test_agent_tools.py`（发现模式注册条件 / 多目标采纳 / 跨课程拒越界 / 开关关闭单目标回归 / note 档兜底）、`test_agent_loop.py`（开关透传链路）、`test_agent_api.py`（端点透传 + 课程级端点带 note_title）；前端 `note-suggestion.test.tsx` 3 个（分组红线 / 缺缓存自动拉取 / 409 回归迁移到新 API）。
+  - 验证：`tsc -b && vite build` 通过；`vitest run` 49 文件 247 用例（仅 forest-page 2 例 flaky，隔离复跑全过）；`test:navigation` 38/38；后端全量 `pytest` 282 passed（唯一失败为上游自带 `test_multi_notebook_backup`，与本批无关）。
+  - 与上游 notebook 功能的边界：`notebook_context` 与发现开关并存互不干扰；坞的「锁定当前笔记」在打开 notebook 时禁用（上游逻辑），本批未动。
+  - 待真机走查（写 PR 描述）：验收 1（全局范围说「把《某笔记》补全」→ 建议卡出现 → 采纳/撤销闭环）、验收 3（刷新后建议仍在、标题正确）、验收 5（坞采纳/忽略/撤销/全部写入全回归）、验收 8（不涉及笔记的回答零变化）；定位歧义（两篇标题相近）的观感。
+- **第二批（P3 课件级收窄）已于 2026-10-24 落地**（尚未提交）：
+  - 后端 4 文件：`schemas/conversations.py`（`AgentMessageCreate` 加 `model_validator`：material_id 仅 course 档，global/note 携带 → 422）、`ai/agent_tools.py`（`build_tool_specs` 收窄模式改 `search_course` 描述 + 裁 `get_note_coverage`，`search_forest` 兜底裁剪；`execute_tool` 对 `search_course` 注入当前 material_id、显式传别的课件直接拒绝）、`ai/prompts.py`（`build_agent_messages` 收 `material_title`，教学上下文追加「课件限定」声明）、`ai/agent_loop.py`（读课件标题传提示词；material_id 传给工具装配与执行器）。
+  - 前端 3 文件：`AssistantComposer.tsx`（工具区「课件 · 全部/《讲次》」chip，向上弹菜单，复用 `.workspace-scope-option` 条目样式）、`pages/AssistantPage.tsx`（`materialId` 状态；仅 course 档且已有 completed 课件时显示；agentOptions 带消息级 materialId；切档/切会话/切课程复位）、`assistant-workspace.css`（`.workspace-material-wrap/menu` + chip 选中态）。
+  - 新增测试 6 个：`test_agent_tools.py`（工具裁剪 + 注入/拒覆盖/放行 + 笔记工具不受收窄影响）、`test_agent_loop.py`（标题进提示词 + id 进执行器）、`test_agent_api.py`（global/note + material → 422；course + bogus material → 404 归属校验）、`assistant-layout.test.tsx`（仅 course 档显示 + 选课件 payload 带 material_id 且切档复位 + 无完成课件不显示）。
+  - 验证：`npx tsc -b && vite build` 通过；`npx vitest run` 33 文件（2 个失败均为已知 flaky 组，隔离复跑全过）；`npm run test:navigation` 38/38；后端全量 `pytest` 261 passed / 1 skipped。
+  - 待真机走查（写 PR 描述）：验收 2「课件依据只来自该课件」（需真实模型跑一轮看来源 chip）；验收 6 切会话复位；**悬浮坞收窄自动生效**（坞早已传 material_id，真机验证下拉选课件后回答收窄）。
+- **2026-10-24 核对与修补**（对照本计划逐项核对工作区代码后落地）：
+  - **修复一次 CSS 回归**：工作区未提交改动把 `course-assistant.css` 里三段唯一定义的样式整段删除（agent 实时块基座 / `note-preview-*` 预览弹窗 / `note-picker-*` 笔记选择器 / `.workspace-history-sub[aria-expanded="false"]` 箭头旋转），而这些选择器在 `assistant-workspace.css` 中并无宿主，组件仍在使用——按 §6 纪律已全部迁入 `assistant-workspace.css`（agent 实时块基座插在 P1 小节前，保证 `.is-aborted` 变体仍在其后覆盖；其余追加文件末尾）。原 `course-assistant.css` 的删除保持不变。
+  - **提前落地 P4 的「顺手修 409」**（原本捆在第三批）：`useNoteSuggestions.ts` 的 `applyAll` 删掉循环后那次多余的 `api.updateNote`（用循环前旧 revision 提交必然 409；每次 `reviewSuggestion(confirm)` 服务端已按笔记当前 revision 写入并返回最新 `NoteRead`）。新增回归测试 `tests/note-suggestion.test.tsx`「applyAll writes through review only」：断言只走 review 通道、`updateNote` 零调用。本缺陷属现存 bug，不必等 P4 的 8 文件大改。
+  - **口径勘误（P3 验收 7 与 §7-3）**：核对发现悬浮坞早已把课件 id 传进请求（`AssistantDock.tsx` 的 `agentMaterialId` 随 `askAgent` 发出，`useConversation.ts` 落进 payload），「坞的下拉只是标签」的表述已过时——P3 后端一落地，坞的收窄**自动真正生效**。两处已按此更新；P3 验收需补坞链路的来源 chip 走查。
+  - 事实订正：第一批（P1+P2+P5）随 `cd3479b` / `a8763db` 已提交，不再是「尚未提交」状态。
+- **第一批（P1 + P2 + P5）已于 2026-10-21 落地**（纯前端）：
   - 改动文件：`features/conversation/useConversation.ts`（AbortController + `stopAgent` + 中断分支）、`features/assistant/AssistantComposer.tsx`（停止键 + Esc）、`features/assistant/AssistantThread.tsx`（已中断态 / 复制 / 重试 / chips / 用户时间）、`features/assistant/AssistantDock.tsx`（停止键 / 锁定三档）、`features/assistant/AssistantContextBar.tsx`（锁定预告）、`pages/AssistantPage.tsx`（接线）、`assistant-workspace.css`（新样式）。
   - 新增测试 11 个（`apps/web/tests/assistant-layout.test.tsx` 7 个、`apps/web/tests/dock-interaction.test.tsx` 4 个）。
   - 验证：`npx tsc -b` 通过；`npm run build` 通过；`npx vitest run` = 33 文件 / 181 用例全过；`npm run test:navigation` = 38 通过。
@@ -185,7 +219,7 @@
 4. 模型显式传别的 material_id 被拒（后端用例）。
 5. global / note 档带 material_id → 422（后端用例）。
 6. 切课程 / 切会话后收窄选择复位。
-7. 悬浮坞回归：现状不变（下拉仍只是标签，直到 §7-3 落地）。
+7. 悬浮坞回归：**坞的收窄随 P3 后端落地自动真正生效**（坞早已把课件 id 随请求发出，此前后端空转）——真机走查坞下拉选课件后的来源 chip，口径同验收 2。
 
 ---
 
@@ -240,7 +274,7 @@
 - **采纳 review**：已按 `suggestion.note_id` 路由（`useNoteSuggestions.ts:51`），不变。
 - **撤销 undo**：用 `noteById[suggestion.note_id].revision_number`（不是当前单篇的），回写采纳前正文。
 - **全部写入 applyAll**：**按 note_id 分组**，每组以该篇当前正文为基准逐条累加（保持 `:107-111` 的累加语义），组间互不影响。
-- **顺手修既有 409 缺陷**：`useNoteSuggestions.ts:113` 那次多余的 `api.updateNote` 必须删掉——循环里每次 `reviewSuggestion` 都会写笔记并递增 revision（`api/v1/notes.py:176-180` → `notes/service.py:19-26`），再用循环前的旧 revision 提交必然 409。改为以 `reviewSuggestion` 返回的 `NoteRead`（含新 revision）串联；`adopted` 记录**每篇笔记写入前**的正文，供撤销使用。
+- **顺手修既有 409 缺陷**：✅ **已于 2026-10-24 提前单独修复**（不必捆在 P4）——`useNoteSuggestions.ts` 的 `applyAll` 已删掉循环后那次多余的 `api.updateNote`（循环里每次 `reviewSuggestion` 都会按笔记**当前** revision 写入并递增，`api/v1/notes.py:176-180` → `notes/service.py:19-26`，再用循环前的旧 revision 提交必然 409）；现在以 `reviewSuggestion` 返回的 `NoteRead`（含新 revision）天然串联。回归测试见 `apps/web/tests/note-suggestion.test.tsx`（applyAll 只走 review 通道、`updateNote` 零调用）。P4 多目标改造时沿用此语义：`adopted` 记录**每篇笔记写入前**的正文，供撤销使用。
 
 **面板语义（D6）**：课程级端点返回的是「本课程的待确认建议」，**不承诺只属于本会话**。本版把改动栏标题从「本次改动」改为「待确认改动（本课程）」并在卡上标注笔记标题；若要严格按会话归属，需给 `NoteSuggestion` 加 `conversation_id` 并迁移，列入 §7-2。
 
@@ -254,7 +288,7 @@
 3. 刷新页面后建议仍在、标题正确（走课程级端点）。
 4. 跨课程笔记不越界（agent 尝试改别的课 → 被 `load_note` 的课程护栏挡）。
 5. 悬浮坞行为零变化（不传开关；采纳/忽略/撤销/全部写入全回归）。
-6. 坞的「全部写入」不再出现 409（修掉既有缺陷）。
+6. ~~坞的「全部写入」不再出现 409（修掉既有缺陷）~~ ✅ 已于 2026-10-24 提前单独修复（见实施记录），P4 改造时不得回退该语义。
 7. note 档 + 坞「锁定当前笔记」编辑链行为不变。
 8. 不涉及笔记的回答行为零变化。
 
@@ -441,7 +475,7 @@ Notebuddy/
 
 1. **后端「重试」能力**（消除 P2 的重复气泡）：agent 端点支持按消息 id 重试 + 失败 assistant 消息的替换 / 作废语义。做完重试按钮即可无重复。
 2. **建议按会话归属**（P4 面板语义回到「本会话」）：`NoteSuggestion` 加 `conversation_id` + 迁移 + 工具链路透传会话 id。
-3. **悬浮坞的课件收窄真正生效**：坞的下拉目前只是标签；P3 的后端能力落地后，坞需决定是复用还是拆控件。
+3. **悬浮坞的课件收窄真正生效**：坞早已把课件 id 随请求发出（`AssistantDock.tsx` 的 `agentMaterialId`），只是后端 agent 链路空转；P3 后端落地后坞的收窄即自动生效。剩余待决仅 UX：坞沿用现有下拉还是拆独立控件（对齐答疑页的 P3 方案 A）。
 4. **跨课程会话搜索**（P6）：入口与端点都要去掉 course 维度。
 5. **更严格的课件收窄**：把 `read_note` / `list_course_notes` 也限制到所选课件的笔记（需处理 `Note.material_id` 可空的情况，`db/models.py:355`）。
 6. **composer 的 `@课件名` 语法**（P3 方案 B）。

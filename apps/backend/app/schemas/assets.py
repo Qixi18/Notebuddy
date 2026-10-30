@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 
 class AssetRead(BaseModel):
+    processing_route: str = 'standard'
     id: str
     source_type: str
     media_type: str
@@ -20,6 +21,9 @@ class AssetRead(BaseModel):
 
 
 class AssetProcessingJobRead(BaseModel):
+    phase: str = 'parse'
+    completed_pages: int = 0
+    total_pages: int = 0
     id: str
     asset_id: str
     status: str

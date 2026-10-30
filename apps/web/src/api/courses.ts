@@ -1,7 +1,7 @@
 import type { Course, CourseOverview, DeletionPreview, NotebookSummary } from '../types'
 import { request } from './http'
 
-export type DeletedNotebookSummary = Omit<NotebookSummary, 'course_id'> & { course_id: string | null }
+export type DeletedNotebookSummary = Omit<NotebookSummary, 'course_id'> & { course_id: string | null; deleted_at?: string | null }
 
 export const courseApi = {
   listCourses: () => request<Course[]>('/api/v1/courses'),
@@ -10,7 +10,9 @@ export const courseApi = {
   previewCourseDeletion: (id: string) => request<DeletionPreview>(`/api/v1/courses/${id}/deletion-preview`),
   deleteCourse: (id: string) => request<DeletionPreview>(`/api/v1/courses/${id}`, { method: 'DELETE' }),
   restoreCourse: (id: string) => request<Course>(`/api/v1/courses/${id}/restore`, { method: 'POST' }),
+  permanentlyDeleteCourse: (id: string) => request<void>(`/api/v1/courses/${id}/permanent`, { method: 'DELETE' }),
   listDeletedNotebooks: () => request<DeletedNotebookSummary[]>('/api/v1/notebooks/deleted'),
+  permanentlyDeleteNotebook: (id: string) => request<void>(`/api/v1/notebooks/${id}/permanent`, { method: 'DELETE' }),
   restoreDeletedNotebook: (notebookId: string, courseId: string | null) => request<NotebookSummary>(`/api/v1/notebooks/${notebookId}/restore`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ course_id: courseId }),
   }),

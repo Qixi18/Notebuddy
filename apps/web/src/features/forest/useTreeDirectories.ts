@@ -11,6 +11,7 @@ export function useTreeDirectories() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const requested = useRef(new Set<string>())
   const inFlight = useRef(new Map<string, Promise<void>>())
+  const queuedRefresh = useRef(new Map<string, Promise<void>>())
   const watched = useRef<string[]>([])
   const [watchKey, setWatchKey] = useState('')
   const [settledVersion, setSettledVersion] = useState(0)
@@ -41,7 +42,18 @@ export function useTreeDirectories() {
   const load = useCallback((ids: string[]) => {
     for (const id of ids) if (!requested.current.has(id)) void fetchDirectory(id)
   }, [fetchDirectory])
-  const refresh = useCallback((ids?: string[]) => Promise.all((ids ?? watched.current).map(fetchDirectory)), [fetchDirectory])
+  const refresh = useCallback((ids?: string[]) => Promise.all((ids ?? watched.current).map(id => {
+    const existing = inFlight.current.get(id)
+    if (!existing) return fetchDirectory(id)
+    const queued = queuedRefresh.current.get(id)
+    if (queued) return queued
+    const next = existing.then(() => {
+      queuedRefresh.current.delete(id)
+      return mounted.current ? fetchDirectory(id) : Promise.resolve()
+    })
+    queuedRefresh.current.set(id, next)
+    return next
+  })), [fetchDirectory])
   const watch = useCallback((ids: string[]) => {
     watched.current = [...new Set(ids)]
     setWatchKey([...watched.current].sort().join('|'))

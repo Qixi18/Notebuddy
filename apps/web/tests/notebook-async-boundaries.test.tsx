@@ -3,15 +3,23 @@ import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
+import { clearDraft, readDraft } from '../src/features/notebook-editor/draftStore'
 import { NotebookPage } from '../src/pages/NotebookPage'
 
-vi.mock('../src/api', () => ({ api: {
+vi.mock('../src/api', () => ({
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(message: string, status: number) { super(message); this.status = status }
+  },
+  api: {
   getNotebookById: vi.fn(), getNotebookDocument: vi.fn(), getNotebookChapter: vi.fn(),
   saveNotebookDocument: vi.fn(), listNotebookRevisions: vi.fn(),
+  getReadingPosition: vi.fn().mockResolvedValue(null), putReadingPosition: vi.fn().mockResolvedValue({ revision: 1 }),
   listNotebookAssets: vi.fn().mockResolvedValue([]), listDetachedNotebookAssets: vi.fn().mockResolvedValue([]), listNotebookUploadBatches: vi.fn().mockResolvedValue([]),
   getNotebookUploadBatch: vi.fn(), getNotebookGenerationJob: vi.fn(), listNotebookAssetJobs: vi.fn().mockResolvedValue([]),
   listDeletedMaterials: vi.fn().mockResolvedValue([]),
-} }))
+  },
+}))
 
 const { replaceContent } = vi.hoisted(() => ({ replaceContent: vi.fn() }))
 vi.mock('../src/features/notebook-editor/NotebookEditor', async () => {
@@ -65,10 +73,16 @@ beforeEach(() => {
   }) as never)
   vi.mocked(api.listNotebookRevisions).mockResolvedValue([])
 })
-afterEach(() => { cleanup(); vi.useRealTimers() })
+afterEach(async () => {
+  cleanup()
+  await clearDraft('course', 'a')
+  await clearDraft('course', 'b')
+  vi.useRealTimers()
+})
 
 test('generation completion preserves an unsaved local Notebook draft', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  await clearDraft('course', 'a')
   const batch = {
     id: 'batch-1', status: 'generating', inputs: [],
     generation_jobs: [{ id: 'generation-1', status: 'processing' }],
@@ -82,8 +96,29 @@ test('generation completion preserves an unsaved local Notebook draft', async ()
   await waitFor(() => expect(api.getNotebookGenerationJob).toHaveBeenCalledTimes(1))
   fireEvent.click(screen.getByRole('button', { name: '模拟编辑正文' }))
   await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
-  expect(screen.getByText(/当前有未保存的本地编辑，已保留草稿/)).toBeTruthy()
+  expect(await screen.findAllByText(/当前有未保存的本地编辑，已保留草稿/)).not.toHaveLength(0)
   expect(replaceContent).not.toHaveBeenCalled()
+  expect(api.getNotebookDocument).toHaveBeenCalledTimes(1)
+  expect(screen.getByRole('button', { name: '模拟编辑正文' })).toBeTruthy()
+  await waitFor(async () => {
+    const draft = await readDraft('course', 'a')
+    expect(draft?.revision).toBe(1)
+    expect(JSON.stringify(draft?.content)).toContain('新写正文')
+  })
+})
+
+test('a fast Notebook switch persists the departing unsaved draft for recovery', async () => {
+  await clearDraft('course', 'a')
+  mount()
+  await screen.findByRole('textbox', { name: '笔记名称' })
+  fireEvent.click(screen.getByRole('button', { name: '模拟编辑正文' }))
+  fireEvent.click(screen.getByRole('link', { name: '切换笔记' }))
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '笔记名称' })).toHaveProperty('value', '笔记 B'))
+  await waitFor(async () => {
+    const draft = await readDraft('course', 'a')
+    expect(draft?.revision).toBe(1)
+    expect(JSON.stringify(draft?.content)).toContain('新写正文')
+  })
 })
 
 test('a save response from the previous notebook cannot change the next notebook revision', async () => {

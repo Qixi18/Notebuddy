@@ -1,0 +1,417 @@
+/* Watercolor scenery, limestone course markers, and quiet field-journal controls. */
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) {
+  --garden-paper: var(--nb-paper);
+  --garden-green: var(--nb-forest);
+  --garden-muted: var(--nb-muted);
+  --garden-line: var(--nb-line);
+  --botanical-surface: var(--nb-white);
+  --botanical-wash: var(--nb-mist);
+  --botanical-shadow: 0 3px 12px #3549330a, 0 1px 2px #35493308;
+  --botanical-ease: 150ms ease;
+  --botanical-serif: 'STSong', 'SimSun', 'Songti SC', Georgia, serif;
+}
+
+/* One shared dark, botanical frame for the global navigation. */
+.app-shell-garden .app-sidebar {
+  background: radial-gradient(ellipse at 5% 0, #49624866, transparent 65%), linear-gradient(165deg, #263e32, #213d30 70%, #294435);
+  border-right: 1px solid #61705455;
+  box-shadow: inset -1px 0 #ffffff0b;
+}
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-link {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #e2e7d8;
+  transition: background-color var(--botanical-ease), border-color var(--botanical-ease);
+}
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-link:hover { background: #e5edc810; }
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-link-active {
+  background: #c3d1ab24;
+  border-color: #d4dfbd15;
+  color: #fcf9e9;
+  box-shadow: inset 3px 0 #c5ce9d;
+}
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-create-button {
+  border-color: #c9d1af77;
+  background: #c3d1ab0e;
+  box-shadow: inset 0 1px #ffffff0b;
+}
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-create-button:hover { background: #c3d1ab22; }
+
+/* Warm paper spans the canvas. Illustration remains behind every hit target. */
+.app-shell-home .app-main-home,
+.app-shell-forest .app-main-forest {
+  background-color: var(--garden-paper);
+  background-image: var(--garden-grain);
+}
+.app-shell-home .home-canvas { background: transparent; }
+.app-shell-home .home-garden-header h1,
+.app-shell-forest .forest-heading h1 {
+  font-family: var(--botanical-serif);
+  font-weight: 600;
+  letter-spacing: .035em;
+  color: var(--garden-green);
+}
+.app-shell-home .home-garden-header p,
+.app-shell-forest .forest-heading p { color: var(--garden-muted); line-height: 1.8; }
+.app-shell-home .home-tree-surface {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+.app-shell-home .home-tree-surface::before {
+  --home-ground-rise: calc(clamp(40px, 8dvh, 64px) + 36px);
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url('/assets/forest/sage-meadow-background.png') center calc(100% - var(--home-ground-rise)) / cover no-repeat;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - var(--home-ground-rise) - 100px), transparent calc(100% - var(--home-ground-rise)));
+}
+.app-shell-forest .forest-page,
+.app-shell-forest .forest-surface { background: var(--garden-paper); }
+.app-shell-forest .knowledge-tree-scene {
+  background-color: var(--garden-paper);
+  background-image: radial-gradient(ellipse at 7% 94%, #aebf8f20, transparent 44%), radial-gradient(ellipse at 94% 12%, #d9ca941a, transparent 42%), var(--garden-grain);
+  background-position: left top;
+  background-size: auto;
+  background-repeat: repeat;
+}
+.app-shell-forest .knowledge-tree-scene::before,
+.app-shell-forest .knowledge-tree-scene::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  aspect-ratio: 4 / 5;
+  background: url('/assets/forest/forest-watercolor-corner.png') center / contain no-repeat;
+  filter: saturate(.7);
+}
+.app-shell-forest .knowledge-tree-scene::before {
+  left: -14px;
+  bottom: -12px;
+  width: clamp(150px, 22vw, 300px);
+  opacity: .29;
+}
+.app-shell-forest .knowledge-tree-scene::after {
+  right: -16px;
+  top: 68px;
+  width: clamp(120px, 16vw, 220px);
+  opacity: .2;
+  rotate: 180deg;
+}
+
+/* Primary actions have the same weight as the reference's "打开笔记" button. */
+.app-shell-home .home-garden-actions button,
+.app-shell-forest .forest-header-actions .forest-action,
+.forest-dialog .forest-action {
+  min-height: 44px;
+  border: 1px solid #294636;
+  border-radius: 9px;
+  padding: 10px 20px;
+  background: #294636;
+  color: #fffdf2;
+  box-shadow: inset 0 1px #ffffff12, 0 3px 8px #29463612;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+.app-shell-home .home-garden-actions button:hover:not(:disabled),
+.app-shell-forest .forest-header-actions .forest-action:hover:not(:disabled),
+.forest-dialog .forest-action:hover:not(:disabled) { background: #365941; border-color: #365941; }
+.app-shell-home .home-garden-actions > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 9px 15px;
+  border: 1px solid var(--garden-line);
+  border-radius: 9px;
+  background: #fffdf6c9;
+  color: var(--garden-green);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.app-shell-home .home-garden-actions > a:hover { background: var(--botanical-wash); }
+.app-shell-forest .forest-header-actions > button:not(.forest-action) {
+  min-height: 44px;
+  padding: 9px 16px;
+  border: 1px solid var(--garden-line);
+  border-radius: 9px;
+  background: #fffdf6;
+  color: var(--garden-green);
+  box-shadow: var(--botanical-shadow);
+  font-size: 13px;
+}
+.app-shell-forest .forest-header-actions > button:not(.forest-action):hover { background: var(--botanical-wash); }
+.app-shell-forest .forest-header { border-bottom: 1px solid #dedecf99; background: #faf8f0; }
+
+/* The toolbars read as shallow paper trays, not heavy panels. */
+.app-shell-home .home-garden-toolbar,
+.app-shell-forest .kt-toolbar {
+  gap: 12px 18px;
+  border: 1px solid #dedecfbf;
+  border-radius: 12px;
+  background: #fffdf7db;
+  box-shadow: var(--botanical-shadow);
+}
+.app-shell-home .home-garden-toolbar { padding: 7px 13px; min-height: 60px; }
+.app-shell-forest .kt-toolbar { margin: 12px 18px 0; padding: 10px 13px; }
+.app-shell-home .home-search-field,
+.app-shell-forest .forest-search label {
+  min-height: 42px;
+  border: 1px solid #d7dacb;
+  border-radius: 9px;
+  padding: 0 12px;
+  background: #f8f7f0;
+  box-shadow: inset 0 1px 3px #29463604;
+  box-sizing: border-box;
+}
+.app-shell-home .home-search-field:focus-within,
+.app-shell-forest .forest-search label:focus-within { border-color: #738465; outline: 2px solid #7d906940; outline-offset: 2px; }
+.app-shell-home .home-search-field input,
+.app-shell-forest .forest-search input { background: transparent; color: #304735; font-size: 13px; }
+.app-shell-home .home-search-field input:focus-visible { outline: 0; }
+.app-shell-home .home-search-field input::placeholder,
+.app-shell-forest .forest-search input::placeholder { color: #6d7463; }
+.app-shell-home .home-view-caption { color: #717763; }
+.app-shell-home .home-relations-link,
+.app-shell-forest .forest-home-manage {
+  min-height: 40px;
+  border: 1px solid #d9deca;
+  border-radius: 8px;
+  padding: 7px 12px;
+  background: #eef1e4;
+  color: #3a533c;
+  font-size: 12px;
+  text-decoration: none;
+}
+.app-shell-home .home-relations-link:hover,
+.app-shell-forest .forest-home-manage:hover { background: #e3e9d6; }
+.app-shell-forest .kt-toolbar .kt-camera-controls { border: 0; background: transparent; gap: 4px; padding: 0; }
+.app-shell-forest .kt-camera-controls button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #e2e2d5;
+  border-radius: 50%;
+  background: #f9f8f1;
+  color: #304a38;
+}
+.app-shell-forest .kt-camera-controls button:hover { background: #e9eddd; border-color: #cbd3bc; }
+.app-shell-forest .kt-camera-controls button[aria-label="适应全部课程"] { border-radius: 9px; padding-inline: 10px; }
+.app-shell-forest .forest-legend { color: #66715a; font-size: 12px; }
+
+/* Each garden stone sits in front of its own roots; controls remain course-local. */
+.app-shell-home .home-course-grid-triangle {
+  --home-triangle-depth: clamp(30px, 5dvh, 52px);
+  --home-tree-clearance: 12px;
+}
+.app-shell-home .home-course-grid-triangle .home-course-details {
+  translate: var(--home-tree-x, 0px) calc(var(--home-tree-y, 0px) - var(--home-triangle-depth) - var(--home-tree-clearance));
+}
+.app-shell-home .home-course-card-header h2 {
+  margin: -61px auto 0;
+  min-height: 0;
+  width: min(100%, 270px);
+  font-family: var(--botanical-serif);
+  color: var(--garden-green);
+}
+.app-shell-home .home-course-stone-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 96px;
+  padding: 19px 48px 28px;
+  border: 0;
+  border-radius: 8px;
+  background: url('/assets/forest/course-garden-stone-a.png') center / 100% 100% no-repeat;
+  color: #1f3d2b;
+  cursor: pointer;
+  font-family: 'KaiTi', 'STKaiti', var(--botanical-serif);
+  font-size: clamp(23px, 2.7cqw, 27px);
+  font-weight: 700;
+  letter-spacing: .1em;
+  line-height: 1.3;
+  text-shadow: 0 1px 1px #fffbed80;
+  transition: color 160ms ease, filter 160ms ease;
+  -webkit-tap-highlight-color: #758b4e26;
+}
+.app-shell-home .home-course-card[data-stone-variant="1"] .home-course-stone-button { background-image: url('/assets/forest/course-garden-stone-b.png'); }
+.app-shell-home .home-course-stone-name { overflow-wrap: anywhere; text-wrap: balance; rotate: -1deg; }
+.app-shell-home .home-course-card[data-stone-variant="1"] .home-course-stone-name { translate: 3px 1px; rotate: 1deg; }
+.app-shell-home .home-course-stone-button.is-long-name {
+  min-height: 108px;
+  padding: 23px 67px 31px;
+  font-size: 14px;
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+.app-shell-home .home-course-stone-button.is-long-name .home-course-stone-name { rotate: none; translate: 0 4px; }
+.app-shell-home .home-course-stone-button:hover {
+  filter: brightness(1.025);
+  color: #123d26;
+}
+.app-shell-home .home-course-stone-button:active { filter: brightness(.98); color: #102f1d; }
+.app-shell-home .home-course-card-header > p {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: -3px auto 0;
+  padding: 3px 10px;
+  border-radius: 0;
+  background: radial-gradient(ellipse, #faf8f0b3, transparent 75%);
+  color: #33472d;
+  font-size: 12px;
+  text-shadow: 0 1px 1px #fffdf0;
+}
+.app-shell-home .home-course-state { font-size: 11px; }
+.app-shell-home .home-course-controls {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  padding: 2px 8px 10px;
+  gap: 8px;
+  background: radial-gradient(ellipse, #faf8f0d9 25%, transparent 75%);
+  text-shadow: 0 1px 2px #fffdf0;
+}
+.app-shell-home .home-book-picker select {
+  min-height: 44px;
+  border: 0;
+  border-bottom: 1px solid #8d9d7970;
+  border-radius: 0;
+  padding: 6px 24px 6px 6px;
+  background-color: transparent;
+  color: #3a5138;
+}
+.app-shell-home .home-directory-more {
+  min-height: 44px;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid #8d9d7970;
+  border-radius: 0;
+  background: transparent;
+  color: #354d32;
+  font-size: 12px;
+  text-decoration: none;
+}
+.app-shell-home .home-directory-more:hover { background: #e6edd580; border-color: #95a580; text-decoration: underline; text-underline-offset: 4px; }
+.app-shell-home .home-course-empty { padding: 7px 10px; background: #fcfaf1d9; border-radius: 7px; }
+.app-shell-forest .kt-course-title { font-family: 'KaiTi', 'STKaiti', var(--botanical-serif); fill: #1f3d2b; }
+.app-shell-forest .kt-root:hover .kt-course-stone { filter: brightness(1.04); }
+.app-shell-forest .kt-root:focus-visible .kt-course-stone { filter: drop-shadow(0 0 5px #56753f); }
+.app-shell-home .home-garden-footer { border-color: #dedecf; color: #66705d; }
+.app-shell-forest .forest-settings-wrap,
+.app-shell-forest .kt-contents,
+.app-shell-forest .forest-minimap {
+  border: 1px solid #dadccc;
+  border-radius: 11px;
+  background: #fffdf6f5;
+  box-shadow: 0 8px 28px #3549330d;
+}
+.app-shell-forest .forest-settings-wrap { padding: 18px; }
+.app-shell-forest .forest-settings-wrap > label {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: #5b6b51;
+  font-size: 12px;
+}
+.app-shell-forest .forest-settings-wrap > label select {
+  min-width: 0;
+  width: 100%;
+  min-height: 40px;
+  padding: 7px 10px;
+  border: 1px solid #d5dac6;
+  border-radius: 7px;
+  background: #f8f8ef;
+  font-size: 13px;
+}
+.app-shell-forest .forest-settings-wrap .forest-course-panel { background: transparent; box-shadow: none; }
+.app-shell-forest .forest-course-panel h2 { font-family: var(--botanical-serif); color: #294636; }
+.app-shell-forest .forest-course-panel h3 { color: #4d6043; font-size: 13px; line-height: 1.7; }
+.app-shell-forest .forest-course-reading-links :is(a, button) { min-height: 32px; display: inline-flex; align-items: center; color: #45603d; }
+.app-shell-forest .forest-course-panel .forest-suggest-button { min-height: 44px; background: #edf0e3; border-color: #d0d8bf; color: #3b5538; }
+.app-shell-forest .forest-minimap { padding: 10px 14px; color: #48603f; font-size: 12px; }
+.app-shell-forest .forest-minimap summary { cursor: pointer; }
+.app-shell-forest .forest-course-map { padding-top: 10px; }
+.app-shell-forest .forest-course-map button { border-color: #dce0cf; background: #f6f7ed; }
+.home-leaf-preview,
+.forest-dialog { background: #fffdf6; border-color: #d9ddca; box-shadow: 0 16px 48px #203f3020; }
+.forest-dialog > header h2 { font-family: 'STSong', 'SimSun', 'Songti SC', Georgia, serif; color: #294636; }
+.forest-dialog button:not(.forest-action):not([aria-label]) { border-radius: 8px; }
+.forest-dialog input, .forest-dialog select, .forest-dialog textarea { background: #faf9f1; border-color: #d5dac6; }
+.forest-dialog-backdrop { background: #233f3445; backdrop-filter: blur(3px); }
+
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) :is(button, a, select):focus-visible,
+.forest-dialog :is(button, a, input, select, textarea):focus-visible { outline: 2px solid #698256; outline-offset: 3px; }
+.app-shell-garden:is(.app-shell-home, .app-shell-forest) .app-sidebar :is(button, a):focus-visible { outline-color: #dbe3b2; }
+
+@media (max-width: 900px) {
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .app-sidebar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    overflow: visible;
+    height: auto;
+    min-height: 0;
+  }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-header { grid-column: 1; min-width: 0; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-create-area { grid-column: 2; grid-row: 1; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-create-button { width: auto; min-height: 44px; padding-inline: 10px; white-space: nowrap; gap: 4px; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-footer { grid-column: 3; grid-row: 1; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-settings-label { display: none; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-nav { grid-column: 1 / -1; grid-row: 2; display: flex; gap: 4px; min-width: 0; width: 100%; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-link { flex: 1 1 0; min-width: 0; min-height: 50px; width: auto; padding: 7px 3px; flex-direction: column; gap: 4px; white-space: nowrap; font-size: 11px; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-link-icon { width: 22px; height: 22px; }
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-link-icon svg { width: 22px; height: 22px; }
+}
+@media (max-width: 760px) {
+  .app-shell-home .home-garden-toolbar { padding: 8px 10px; gap: 9px; }
+  .app-shell-forest .kt-toolbar { margin: 8px 10px 0; padding: 9px; gap: 9px; }
+  .app-shell-forest .forest-header-actions > button { min-height: 44px; padding: 8px 12px; font-size: 12px; }
+  .app-shell-forest .forest-header { gap: 12px; flex-wrap: wrap; }
+  .app-shell-forest .forest-header-actions { width: 100%; flex-direction: row; flex-wrap: wrap; gap: 8px; }
+  .app-shell-forest .forest-header-actions > button { flex: 1; white-space: nowrap; }
+  .app-shell-forest .forest-explore-tools { gap: 10px; }
+  .app-shell-forest .kt-toolbar .kt-camera-controls { width: 100%; justify-content: center; }
+  .app-shell-home .home-tree-surface::before { background-size: auto 100%; }
+  .app-shell-home .home-course-card-header h2 { margin-top: -40px; }
+  .app-shell-home .home-course-stone-button { min-height: 80px; padding: 17px 26px 23px; font-size: 19px; }
+  .app-shell-home .home-course-stone-button.is-long-name { min-height: 112px; padding: 22px 37px 32px; font-size: 12px; line-height: 1.3; }
+  .app-shell-home .home-course-card-header > p { padding-inline: 5px; font-size: 10px; column-gap: 4px; }
+  .app-shell-home .home-course-controls { padding-inline: 1px; gap: 5px; }
+  .app-shell-home .home-book-picker { max-width: 100%; }
+  .app-shell-home .home-book-picker select { font-size: 11px; padding-left: 6px; }
+  .app-shell-home .home-directory-more { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell-garden:is(.app-shell-home, .app-shell-forest) .sidebar-link,
+  .app-shell-home .home-garden-actions button,
+  .app-shell-forest .forest-header-actions .forest-action,
+  .app-shell-home .home-course-stone-button { transition: none; }
+  .app-shell-home .home-course-stone-button:is(:hover, :active) { translate: none; }
+}
+@media (max-width: 600px) {
+  .app-shell-home .home-course-grid-triangle .home-course-stone-button {
+    min-height: 76px;
+    padding-inline: 16px;
+    font-size: 14px;
+    letter-spacing: .02em;
+  }
+  .app-shell-home .home-course-grid-triangle .home-course-stone-button.is-long-name {
+    min-height: 112px;
+    padding-inline: 18px;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+  .app-shell-home .home-course-grid-triangle .home-course-controls {
+    display: grid;
+    justify-items: stretch;
+    width: 100%;
+    gap: 2px;
+    padding-inline: 2px;
+  }
+}

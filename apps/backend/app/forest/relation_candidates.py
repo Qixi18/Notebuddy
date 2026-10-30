@@ -21,7 +21,7 @@ def _tokens(value: str) -> set[str]:
     return words
 
 
-def body_sections(db) -> list[dict]:
+def body_sections(db, *, full: bool = False) -> list[dict]:
     rows = db.execute(select(Notebook, Course.name).join(Course, Course.id == Notebook.course_id)
                       .where(Notebook.deleted_at.is_(None), Course.deleted_at.is_(None))
                       .order_by(Notebook.id)).all()
@@ -37,17 +37,23 @@ def body_sections(db) -> list[dict]:
                 "notebook_id": book.id, "course_id": book.course_id,
                 "course_name": course_name, "notebook_title": book.title,
                 "block_id": section.block_id, "title": section.heading or book.title,
-                "excerpt": section.text[:1200], "revision": book.document_revision,
+                "excerpt": section.text if full else section.text[:1200], "revision": book.document_revision,
                 "fingerprint": section_relation_fingerprint(section.heading, section.text),
             })
     return result
 
 
-def candidate_snapshots(db, course_id: str, *, notebook_id: str | None = None) -> dict:
-    rows = body_sections(db)
+def candidate_snapshots(db, course_id: str, *, notebook_id: str | None = None,
+                        processing_route: str = 'standard') -> dict:
+    rows = body_sections(db, full=processing_route == 'llm')
     source = [row for row in rows if row["course_id"] == course_id
               and (notebook_id is None or row["notebook_id"] == notebook_id)]
     target = [row for row in rows if row["course_id"] != course_id]
+    if processing_route == 'llm':
+        for prefix, group in (('s', source), ('t', target)):
+            for index, row in enumerate(group):
+                row['key'] = f'{prefix}{index}'
+        return {'sources': source, 'targets': target, 'processing_route': 'llm'}
     # Candidate ranking is a bounded model input, never a substitute body.
     # Its complete chosen identities/fingerprints are persisted with the job.
     terms = set().union(*(_tokens(row["title"]) for row in target)) if target else set()

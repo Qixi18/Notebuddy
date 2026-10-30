@@ -61,5 +61,6 @@
 .kt-branch-growth { animation: kt-branch-grow 600ms ease-out both; transform-origin: 0 0; }
 @keyframes kt-branch-grow { from { opacity: 0; transform: scale(.16); } to { opacity: 1; transform: scale(1); } }
 @keyframes kt-grow { from { opacity: 0; } to { opacity: 1; } }
+.kt-growth-managed .kt-branch-growth, .kt-growth-managed .kt-leaf-growth { animation: none; }
 @media (prefers-reduced-motion: reduce) { .kt-leaf-growth, .kt-branch-growth { animation: none; } .kt-note-label-bg, .kt-leaf-hit, .kt-book-plaque { transition: none; } }
 @media (max-width: 600px) { .kt-camera-controls { top: 10px; right: 10px; gap: 0; padding: 2px; } .kt-camera-controls button { font-size: 16px; } .kt-hint { left: 8px; right: 8px; text-align: center; font-size: 10px; } .kt-contents { right: 10px; top: 70px; width: calc(100% - 20px); } }

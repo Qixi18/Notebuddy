@@ -13,6 +13,9 @@ import type { KnowledgeTreeSceneProps } from './sceneTypes'
 import { detailInteraction } from './treeInteraction'
 import { placeLeafLabels } from './leafLabels'
 import { projectNotebookControls } from './notebookControls'
+import { useGrowthPlayback } from './growth/useGrowthPlayback'
+import { playTreeGrowth } from './growth/paint'
+import { growthVisible } from './growth/visibility'
 import './knowledge-tree.css'
 
 export type { KnowledgeTreeSceneProps, KnowledgeTreeView } from './sceneTypes'
@@ -53,38 +56,6 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     return mode === 'forest' ? arrangeForestGroves(raw, spacing) : raw.map(tree => ({ ...tree, x: (tree.x - 280) / TREE_SPACING * spacing + spacing / 2 }))
   }, [courses, mode, spacing])
   const treeMap = useMemo(() => new Map(trees.map(tree => [tree.course_id, tree])), [trees])
-  const knownCourses = useRef(new Set<string>())
-  const knownNotes = useRef(new Set<string>())
-  const knownBooks = useRef(new Map(Object.entries(initialView?.knownNotebookIds ?? {})
-    .filter(([, ids]) => Array.isArray(ids) && ids.every(id => typeof id === 'string'))
-    .map(([id, ids]) => [id, new Set(ids)])))
-  const growingBooks = useMemo(() => {
-    const fresh = new Set<string>()
-    const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    for (const tree of trees) {
-      const previous = knownBooks.current.get(tree.course_id)
-      if (previous && !reduced) for (const book of tree.notebooks) {
-        if (book.course_id === tree.course_id && !previous.has(book.id)) fresh.add(book.id)
-      }
-    }
-    return fresh
-  }, [trees])
-  const growingNotes = useMemo(() => {
-    const fresh = new Set<string>()
-    for (const tree of trees) for (const book of tree.notebooks) for (const section of [...book.chapters.flatMap(chapter => chapter.sections), ...book.historical_sections]) {
-      if (knownCourses.current.has(tree.course_id) && !knownNotes.current.has(section.id)) fresh.add(section.id)
-    }
-    return fresh
-  }, [trees])
-  useEffect(() => {
-    for (const tree of trees) {
-      knownCourses.current.add(tree.course_id)
-      const books = knownBooks.current.get(tree.course_id) ?? new Set<string>()
-      for (const book of tree.notebooks) if (book.course_id === tree.course_id) books.add(book.id)
-      knownBooks.current.set(tree.course_id, books)
-      for (const book of tree.notebooks) for (const section of [...book.chapters.flatMap(chapter => chapter.sections), ...book.historical_sections]) knownNotes.current.add(section.id)
-    }
-  }, [trees])
   const branchMap = useMemo(() => new Map(trees.map(tree => [tree.course_id, tree.notebooks.filter(book => book.course_id === tree.course_id).sort((a, b) => a.tree_slot - b.tree_slot).map(notebookGeometry)])), [trees])
   const noteBooks = useMemo(() => new Map([...branchMap.values()].flatMap(branches => branches.flatMap(branch => branch.leaves.map(leaf => [leaf.section.id, branch.book.id] as const)))), [branchMap])
   const relationGroups = useMemo(() => {
@@ -136,6 +107,38 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
   const visibleCallback = useRef(onVisibleCourseIdsChange)
   visibleCallback.current = onVisibleCourseIdsChange
   useEffect(() => { visibleCallback.current?.(visibleKey ? visibleKey.split('|') : []) }, [visibleKey])
+  const growth = useGrowthPlayback(trees, visibleKey ? visibleKey.split('|') : [], courses.map(course => course.course_id))
+  const growingBooks = growth.books
+  const growingNotes = growth.sections
+  useEffect(() => {
+    if (!growth.courses.size && !growth.books.size && !growth.sections.size) return
+    const root = camera.sceneRef.current
+    if (!root || !root.animate || document.visibilityState === 'hidden' || !growthVisible(root)
+      || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)
+      || document.querySelector('[role="dialog"], .modal-backdrop')) return
+    root.classList.add('kt-growth-managed')
+    const playbacks: Array<ReturnType<typeof playTreeGrowth>> = []
+    if (growth.books.size || growth.sections.size) {
+      playbacks.push(playTreeGrowth(root, { course: false, books: growth.books, notes: growth.sections }))
+    }
+    for (const tree of root.querySelectorAll<SVGGElement>('[data-course-id]')) {
+      if (tree.dataset.courseId && growth.courses.has(tree.dataset.courseId) && growthVisible(tree)) {
+        playbacks.push(playTreeGrowth(tree, { course: true, books: new Set(), notes: new Set() }))
+      }
+    }
+    const finish = () => { for (const playback of playbacks) playback.finish() }
+    const visibility = () => { if (document.visibilityState === 'hidden') finish() }
+    root.addEventListener('pointerdown', finish, true)
+    root.addEventListener('focusin', finish, true)
+    document.addEventListener('visibilitychange', visibility)
+    return () => {
+      root.removeEventListener('pointerdown', finish, true)
+      root.removeEventListener('focusin', finish, true)
+      document.removeEventListener('visibilitychange', visibility)
+      finish()
+      root.classList.remove('kt-growth-managed')
+    }
+  }, [growth, camera.sceneRef])
   useEffect(() => {
     if (!host.current) return
     const measure = () => {
@@ -193,7 +196,6 @@ export function KnowledgeTreeScene({ courses, trees, mode = 'forest', initialVie
     if (viewport.ready) callback.current?.({ layoutVersion: mode === 'forest' ? FOREST_LAYOUT_VERSION : undefined, camera: { ...camera.cameraRef.current }, viewport: { width: viewport.width, height: viewport.height }, slots: { ...slots.current }, focusedCourseId: focusCourseId,
       contents: selection ? { courseId: selection.courseId, notebookId: selection.notebookId } : !contentsRestored.current ? restoredContents.current : undefined,
       revealedNoteId: revealed,
-      knownNotebookIds: Object.fromEntries([...knownBooks.current].map(([id, ids]) => [id, [...ids]])),
     })
   }
   useEffect(() => {

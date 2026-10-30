@@ -13,12 +13,19 @@ Both produce the same contract: top-level nodes + ``blockId -> IR block ids``.
 
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai.deepseek import DeepSeekClient, DeepSeekError
+from app.generation.budget import (
+    MAX_BATCH_REQUESTS,
+    NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS,
+    partition_payload_units,
+    split_payload_batch,
+)
 
 MAX_PARAGRAPH_CHARS = 1_000
 MAX_TEXT_NODE = 8_000
@@ -134,7 +141,7 @@ def _lookup_blocks(
     )
     if source is None:
         raise CompositionError(f"输入快照缺少资料 {unit['source_asset_id']}", code="snapshot_invalid")
-    section = next(
+    section = {'blocks': [block for s in source['sections'] for block in s['blocks']]} if unit['section_id'] == '__all__' and snapshot.get('processing_route') == 'llm' else next(
         (item for item in source.get("sections") or []
          if item["section_id"] == unit["section_id"]), None,
     )
@@ -289,10 +296,21 @@ SYSTEM_PROMPT = (
     '{"nodes":[Tiptap节点...],"sources":{"<节点blockId>":["<原文块id>",...]}}。'
     "规则：1) 只依据给定资料陈述，不编造事实或来源；2) 每个顶层节点必须有唯一 attrs.blockId，"
     "并在 sources 中列出支撑它的原文块 id；3) 不要重写、复制已有正文，只输出需要新增的内容；"
-    "4) 公式用 blockMath(latex)，表格用 table，tableCell/tableHeader 的文本需放入 paragraph；"
-    "callout 要有 title，内部内容放入 paragraph；禁止 image/URL/HTML/SVG；"
+    "4) 数学内容必须使用数学节点：中文句子中嵌入的短公式使用 inlineMath，独占一行或需要展示的推导使用 blockMath；"
+    "公式 attrs.latex 只放裸 LaTeX 字符串，不带 $、$$、\\(、\\)、\\[、\\] 定界符，不是 HTML 或图片。"
+    "例如段落 content 可为 [{\"type\":\"text\",\"text\":\"设点列 \"},"
+    "{\"type\":\"inlineMath\",\"attrs\":{\"latex\":\"x_k\\\\to a\"}},"
+    "{\"type\":\"text\",\"text\":\" 在 \"},"
+    "{\"type\":\"inlineMath\",\"attrs\":{\"latex\":\"\\\\mathbb{R}^n\"}},"
+    "{\"type\":\"text\",\"text\":\" 中收敛。\"}]；不要把 x_k、R^n、(x-x_0)^2 等教学公式写成普通 text。"
+    "不要给 inlineMath 添加 blockId；来源映射归属于它所在的顶层块。"
+    "列表项内部是 listItem→paragraph；callout 的 content 内放 paragraph；tableCell/tableHeader 的 content 内放 paragraph。"
+    "这些容器里的中文说明与短公式都拆成 text + inlineMath；独占行公式用带 blockId 的 blockMath 顶层节点。"
+    "表格用 table，tableCell/tableHeader 的文本需放入 paragraph。"
+    "callout 要有 title，内部内容放入 paragraph；禁止 image、URL 节点、HTML、SVG 及不可信链接/HTML 数学命令；"
     "5) 资料不足或图形未识别时，用 callout(tone=warning) 明确写“需人工核对”，不要猜测；"
     "6) 输出应是有教学顺序的完整讲解：定义、前提、推导/方法、例题、易错点。"
+    "7) 正文精炼，避免逐字抄录；continuation=true 是同一章节的续段，不重复章节标题。"
 )
 
 JSON_REPAIR_PROMPT = (
@@ -308,18 +326,33 @@ SOURCE_REPAIR_PROMPT = (
     "没有来源依据的节点返回空数组，本地校验会拒绝写入。"
 )
 
+FORMAT_REPAIR_PROMPT = (
+    "请只修复给定 Tiptap 正文 JSON 的结构格式，使其通过 NoteBuddy Notebook document v2 校验。"
+    "不得改变知识含义、删除有效内容、添加事实或更改任何 blockId；已有 inlineMath/blockMath 的 attrs.latex 必须逐字保留，"
+    "不得改动其中的变量、运算符、比较符、上下标、正负号或分组；每个顶层正文节点都必须保留原 blockId，"
+    "sources 必须逐项保留并为每个节点映射至少一个允许的原文块 ID。"
+    "允许的顶层类型仅为 paragraph、heading、bulletList、orderedList、taskList、blockquote、codeBlock、"
+    "horizontalRule、table、callout、example、blockMath。正文结构、attrs、子节点、marks 和文本必须符合 Tiptap。"
+    "只输出完整 JSON 对象 {\"nodes\":[...],\"sources\":{...}}，不要 Markdown 或解释。"
+)
+
 
 def compose_deepseek(
     snapshot: dict[str, Any], plan: dict[str, Any], unit_ids: list[str],
 ) -> Composition:
-    client = DeepSeekClient()
+    from app.document_processing.routes import provider_client
+    client = provider_client(snapshot.get('provider', {})) if snapshot.get('processing_route') == 'llm' else DeepSeekClient()
+    def call_json(messages, *, max_tokens):
+        if snapshot.get('processing_route') == 'llm':
+            from app.document_processing.checkpoints import structured_call
+            return structured_call(client, messages, max_tokens=max_tokens)
+        return client.complete_json(messages, max_tokens=max_tokens)
     if not client.configured:
         raise CompositionError(
             "DEEPSEEK_API_KEY 未配置，无法调用模型生成正文；可改用离线结构化生成器",
             code="model_not_configured",
         )
     payload_units = []
-    allowed_ids: set[str] = set()
     for unit_id in unit_ids:
         unit, _source, blocks = _lookup_blocks(snapshot, plan, unit_id)
         if unit.get("intent") == "skip":
@@ -332,26 +365,103 @@ def compose_deepseek(
             "pages": f"{unit.get('page_start')}-{unit.get('page_end')}",
             "blocks": blocks,
         })
-        allowed_ids.update(block["block_id"] for block in blocks)
     if not payload_units:
         return Composition(nodes=[], source_map={}, generator="deepseek", generator_version="2")
-    user_payload = {
+    base_payload = {
         "notebook_title": snapshot.get("notebook_title"),
         "existing_outline": [
             item["heading"] for item in snapshot.get("current_outline") or []
         ],
-        "units": payload_units,
+        "processing_route": snapshot.get("processing_route"),
+        "outline_context": snapshot.get("outline_context", []),
     }
+    requests = _DeepSeekRequests(client, llm_route=snapshot.get("processing_route") == "llm")
+    pending = partition_payload_units(payload_units)
+    compositions: list[Composition] = []
+    while pending:
+        batch = pending.pop(0)
+        try:
+            compositions.append(_compose_deepseek_batch(requests, base_payload, batch))
+        except DeepSeekError as exc:
+            if exc.code != "output_truncated":
+                raise CompositionError(f"模型生成失败：{exc}", code="model_failed") from exc
+            smaller = split_payload_batch(batch)
+            if not smaller:
+                raise CompositionError(
+                    "单一原文块的模型输出仍超出长度限制；请缩短该资料块或拆分资料后重试",
+                    code="model_output_limit",
+                ) from exc
+            pending[0:0] = smaller
+    # Return only after every subrequest and source map passes validation. The
+    # worker retains its existing atomic append and retry/idempotency guards.
+    return combine_compositions(compositions)
+
+
+@dataclass
+class _DeepSeekRequests:
+    client: DeepSeekClient
+    llm_route: bool = False
+    remaining: int = MAX_BATCH_REQUESTS
+
+    def complete_json(self, messages: list[dict[str, str]], *, max_tokens: int):
+        if self.remaining <= 0:
+            raise CompositionError(
+                "本批资料已达到模型请求上限；请拆分资料后重试", code="model_output_limit",
+            )
+        self.remaining -= 1
+        # Only this bounded, structured note generator opts out of thinking.
+        # Ordinary completion and the streaming agent keep their own defaults.
+        if self.llm_route:
+            from app.document_processing.checkpoints import structured_call
+            return structured_call(self.client, messages, max_tokens=max_tokens)
+        return self.client.complete_json(messages, max_tokens=max_tokens, thinking=False)
+
+
+def combine_compositions(compositions: list[Composition]) -> Composition:
+    """Keep each node's exact evidence when independent calls reuse model IDs."""
+    merged = Composition(nodes=[])
+    used: set[str] = set()
+    if compositions:
+        merged.generator = compositions[0].generator
+        merged.generator_version = compositions[0].generator_version
+    for composition in compositions:
+        for raw_node in composition.nodes:
+            node = copy.deepcopy(raw_node)
+            attrs = node.get("attrs") or {}
+            block_id = attrs.get("blockId")
+            sources = composition.source_map.get(block_id)
+            if block_id and block_id in used:
+                block_id = _block_id()
+                attrs["blockId"] = block_id
+                node["attrs"] = attrs
+            if block_id:
+                used.add(block_id)
+            if sources is not None:
+                merged.source_map[block_id] = list(sources)
+            merged.nodes.append(node)
+        merged.warnings.extend(composition.warnings)
+    return merged
+
+
+def _compose_deepseek_batch(
+    requests: _DeepSeekRequests, base_payload: dict[str, Any], payload_units: list[dict[str, Any]],
+) -> Composition:
+    user_payload = {**base_payload, "units": payload_units}
+    allowed_ids = {block["block_id"] for unit in payload_units for block in unit["blocks"]}
+    if base_payload.get("processing_route") == "llm":
+        user_payload["existing_outline"] = base_payload.get("outline_context", [])
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
     ]
     try:
-        result = client.complete_json(messages, max_tokens=8_000)
+        result = requests.complete_json(messages, max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS)
         json_repair_used = False
     except DeepSeekError as first_error:
-        # Repair malformed/truncated JSON once while preserving the original
-        # evidence payload.  A second failure remains visible to the user.
+        # Syntax errors get one repair; length errors are handled by the caller
+        # using smaller evidence batches, never another identical-size request.
+        if first_error.code == "output_truncated":
+            raise
         if first_error.code != "invalid_json":
             raise CompositionError(f"模型生成失败：{first_error}", code="model_failed") from first_error
         repair_messages = [
@@ -360,9 +470,13 @@ def compose_deepseek(
             {"role": "user", "content": JSON_REPAIR_PROMPT},
         ]
         try:
-            result = client.complete_json(repair_messages, max_tokens=8_000)
+            result = requests.complete_json(
+                repair_messages, max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS,
+            )
             json_repair_used = True
         except DeepSeekError as exc:
+            if exc.code == "output_truncated":
+                raise
             raise CompositionError(f"模型生成失败（JSON 修复重试后仍无效）：{exc}", code="model_failed") from exc
     try:
         return _composition_from_deepseek_result(result, allowed_ids)
@@ -387,8 +501,12 @@ def compose_deepseek(
         }, ensure_ascii=False)},
     ]
     try:
-        repaired = client.complete_json(repair_messages, max_tokens=4_000)
+        repaired = requests.complete_json(
+            repair_messages, max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS,
+        )
     except DeepSeekError as exc:
+        if exc.code == "output_truncated":
+            raise
         raise CompositionError(f"模型来源映射修复失败：{exc}", code="missing_sources") from exc
     repaired_sources = repaired.get("sources")
     if not isinstance(repaired_sources, dict):
@@ -396,6 +514,47 @@ def compose_deepseek(
     return _composition_from_deepseek_result(
         {"nodes": normalized_nodes, "sources": repaired_sources}, allowed_ids,
     )
+
+
+def repair_deepseek_document_format(
+    nodes: list[dict[str, Any]],
+    source_map: dict[str, list[str]],
+    allowed_source_ids: set[str],
+    validation_error: str,
+) -> Composition:
+    """Ask the model to repair a rejected document fragment without changing its evidence."""
+    client = DeepSeekClient()
+    if not client.configured:
+        raise CompositionError("格式矫正需要已配置的 DeepSeek 模型", code="model_not_configured")
+    request = {
+        "nodes": nodes,
+        "sources": source_map,
+        "allowed_source_block_ids": sorted(allowed_source_ids),
+        "validation_error": validation_error[:1_000],
+    }
+    try:
+        # Formatting is one final bounded attempt over the validated evidence;
+        # it shares the generation cap and non-thinking request contract.
+        result = _DeepSeekRequests(client, remaining=1).complete_json([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(request, ensure_ascii=False)},
+            {"role": "user", "content": FORMAT_REPAIR_PROMPT},
+        ], max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS)
+    except DeepSeekError as exc:
+        raise CompositionError(f"模型正文格式矫正失败：{exc}", code="document_format_repair_failed") from exc
+    try:
+        composition = _composition_from_deepseek_result(result, allowed_source_ids)
+    except CompositionError as exc:
+        raise CompositionError(
+            f"模型正文格式矫正结果未通过来源校验：{exc}", code="document_format_repair_failed",
+        ) from exc
+    original_ids = {(node.get("attrs") or {}).get("blockId") for node in nodes}
+    if (set(composition.source_map) != original_ids
+            or set(composition.source_map) != set(source_map)
+            or any(set(ids) != set(source_map[block_id])
+                   for block_id, ids in composition.source_map.items())):
+        raise CompositionError("格式矫正改变了正文块与来源的对应关系", code="document_format_repair_failed")
+    return composition
 
 
 def _normalize_model_node_ids(
@@ -459,5 +618,5 @@ def _composition_from_deepseek_result(
     if not cleaned:
         raise CompositionError("模型返回的节点均不可用", code="empty_generation")
     return Composition(
-        nodes=cleaned, source_map=source_map, generator="deepseek", generator_version="3",
+        nodes=cleaned, source_map=source_map, generator="deepseek", generator_version="4",
     )

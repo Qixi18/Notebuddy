@@ -6,23 +6,76 @@ import remarkMath from 'remark-math'
 import { SourceCard } from '../../components/SourceCard'
 import type { AssistantSource } from '../../types'
 
+/* 重点句标记（§7 用户反馈）：模型把重点句/结论句包在 ==…== 里，渲染成红色强调。
+   手写 mdast 遍历：只拆分纯文本节点里的 ==对==，代码块/公式天然不受影响。 */
+type MdastNode = { type: string; value?: string; children?: MdastNode[] }
+
+function splitKeyPointSegments(value: string): Array<{ text: string; key: boolean }> {
+  const segments: Array<{ text: string; key: boolean }> = []
+  const pattern = /==([^=\n]+)==/g
+  let cursor = 0
+  for (let match = pattern.exec(value); match !== null; match = pattern.exec(value)) {
+    if (match.index > cursor) segments.push({ text: value.slice(cursor, match.index), key: false })
+    segments.push({ text: match[1], key: true })
+    cursor = match.index + match[0].length
+  }
+  if (cursor < value.length) segments.push({ text: value.slice(cursor), key: false })
+  return segments
+}
+
+export function remarkKeyPoint() {
+  return (tree: MdastNode) => {
+    const walk = (node: MdastNode) => {
+      const children = node.children
+      if (!Array.isArray(children)) return
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index]
+        if (child.type === 'text' && child.value && child.value.includes('==')) {
+          const segments = splitKeyPointSegments(child.value)
+          if (segments.length === 1 && !segments[0].key) continue
+          const replacement = segments.map((segment) => (
+            segment.key
+              ? {
+                  type: 'emphasis',
+                  data: { hName: 'span', hProperties: { className: ['assistant-key-point'] } },
+                  children: [{ type: 'text', value: segment.text }],
+                }
+              : { type: 'text', value: segment.text }
+          ))
+          children.splice(index, 1, ...replacement)
+          index += replacement.length - 1
+          continue
+        }
+        walk(child)
+      }
+    }
+    walk(tree)
+  }
+}
+
 export function AssistantMessageMarkdown({ content }: { content: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
+  return <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm, remarkKeyPoint]} rehypePlugins={[rehypeKatex]}>{content}</ReactMarkdown>
 }
 
 export function AssistantMessageSource({ source, onOpen }: {
   source: AssistantSource
   onOpen?: () => void
 }) {
-  const statusLabel = source.source_status === 'stale' ? ' · 来源已更新' : source.source_status === 'unavailable' ? ' · 来源已不可用' : ''
+  /* 来源失效提示：课件重新解析后旧引用会标记 stale；资料被删则 unavailable。
+     后端 assistant_sources 一直在产出这两个状态，缺了渲染就等于把失效静默掉。 */
+  const statusLabel = source.source_status === 'stale'
+    ? ' · 来源已更新'
+    : source.source_status === 'unavailable'
+      ? ' · 来源已不可用'
+      : ''
   if (source.source_type === 'web' && source.url) {
     return (
       <a className="source-card web-source-card" href={source.url} target="_blank" rel="noreferrer">
         <span className="source-card-icon" aria-hidden="true">↗</span>
         <span className="source-card-body">
-        <span className="source-card-meta">
+          <span className="source-card-meta">
             网络补充 · {source.site_name}
-          {statusLabel}
+            {statusLabel}
             {source.published_at ? ` · 发布于 ${source.published_at}` : ''}
             {source.retrieved_at ? ` · 检索于 ${new Date(source.retrieved_at).toLocaleDateString('zh-CN')}` : ''}
           </span>
@@ -32,31 +85,17 @@ export function AssistantMessageSource({ source, onOpen }: {
       </a>
     )
   }
-  if (source.notebook_id || source.document_block_id || source.block_id) {
-    const locator = source.locator && typeof source.locator === 'object' ? source.locator : null
-    const locatorLabel = typeof locator?.['location_label'] === 'string'
-      ? locator['location_label'] as string
-      : source.document_block_id ? '资料原文片段' : 'Notebook 正文'
-    return <button className={`source-card notebook-source-card${source.source_status === 'stale' ? ' is-stale' : ''}${source.source_status === 'unavailable' ? ' is-unavailable' : ''}`} type="button" onClick={onOpen} disabled={!onOpen || source.source_status === 'unavailable'}>
-      <span className="source-card-icon" aria-hidden="true">▤</span>
-      <span className="source-card-body">
-        <span className="source-card-meta">{source.notebook_title ?? source.lecture_title ?? '课程内容'} · {locatorLabel}{statusLabel}</span>
-        <strong>{source.title ?? '回答依据'}</strong>
-        <small>{source.snippet}</small>
-      </span>
-    </button>
-  }
   if (!source.material_id || !source.page_number) return null
   return (
-    <div className={source.source_status === 'stale' ? 'source-citation is-stale' : source.source_status === 'unavailable' ? 'source-citation is-unavailable' : undefined}>
-    {statusLabel && <small className="source-citation-status">{statusLabel.slice(3).trim()}</small>}
-    <SourceCard
-      title={source.lecture_title ?? '课程资料'}
-      pageNumber={source.page_number}
-      locationLabel={source.location_label}
-      quote={source.snippet}
-      onOpen={source.source_status === 'unavailable' ? undefined : onOpen}
-    />
+    <div className={`source-citation${source.source_status === 'stale' ? ' is-stale' : ''}${source.source_status === 'unavailable' ? ' is-unavailable' : ''}`}>
+      {statusLabel ? <small className="source-citation-status">{statusLabel.slice(3).trim()}</small> : null}
+      <SourceCard
+        title={source.lecture_title ?? '课程资料'}
+        pageNumber={source.page_number}
+        locationLabel={source.location_label}
+        quote={source.snippet}
+        onOpen={source.source_status === 'unavailable' ? undefined : onOpen}
+      />
     </div>
   )
 }

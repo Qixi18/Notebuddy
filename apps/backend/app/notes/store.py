@@ -43,11 +43,13 @@ def write_document(
     expected_revision: int,
     origin: str = "autosave",
     legacy_compatible: bool = False,
+    refresh_relations: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Validate, CAS-write, snapshot and re-index one document mutation."""
 
     normalized = validate_document(normalize_document(content))
     previous = load_document(notebook.document_json).content
+    body_changed = normalized != previous
     next_revision = expected_revision + 1
     now = datetime.now(UTC).replace(tzinfo=None)
     result = db.execute(update(Notebook).where(
@@ -66,6 +68,13 @@ def write_document(
     rebuild_notebook_sections(db, notebook, normalized, next_revision)
     mark_orphaned_sources_stale(db, notebook.id, normalized, previous_content=previous)
     db.flush()
+    if refresh_relations and body_changed and notebook.course_id is not None:
+        # Keep Forest's automatic cross-course relation candidates in step with
+        # the canonical Notebook body. Generation and explicit forest actions
+        # may enqueue the same snapshot; the job idempotency key coalesces them.
+        from app.forest.notebook_relations import enqueue_notebook_relations
+
+        enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id)
     return next_revision, normalized
 
 

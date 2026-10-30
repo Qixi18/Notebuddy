@@ -24,6 +24,7 @@ class NotebookGenerationCandidateRead(BaseModel):
 
 
 class NotebookGenerationJobRead(BaseModel):
+    processing_route: str = 'standard'
     id: str
     notebook_id: str
     status: str

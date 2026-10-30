@@ -6,6 +6,9 @@ dist/
 __pycache__/
 *.py[cod]
 .venv/
+.venv-*/
+# Project-local UV, managed Python, Node, model/download caches and setup logs.
+.runtime/
 .pytest_cache/
 .ruff_cache/
 
@@ -45,4 +48,16 @@ test-*.pptx
 
 # Task implementation scratch and review evidence
 .superpowers/
+
+# Local tree-growth visual QA harness and original-renderer comparison copies
+/apps/web/output/growth-qa.html
+/apps/web/output/growth-qa.tsx
+/apps/web/output/growth-base/
+
+# Local UI-only visual fixture; never writes real data
+/apps/web/output/garden-polish-preview.html
+/apps/web/output/garden-polish-preview.tsx
+
+# Local browser visual experiments and bundled previews
+/apps/web/output/playwright/
 

@@ -5,6 +5,7 @@ import type { ProviderStatus } from '../api'
 import type { SettingsStatus } from '../types'
 
 type Draft = {
+  NOTEBOOK_DOCUMENT_PROCESSING_ROUTE: string
   DEEPSEEK_BASE_URL: string
   DEEPSEEK_MODEL: string
   DEEPSEEK_TIMEOUT_SECONDS: string
@@ -25,6 +26,7 @@ type ConnectiveProvider = 'deepseek' | 'embedding'
 
 function buildDraft(status: SettingsStatus): Draft {
   return {
+    NOTEBOOK_DOCUMENT_PROCESSING_ROUTE: status.storage.processing_route ?? 'standard',
     DEEPSEEK_BASE_URL: status.deepseek.base_url ?? '',
     DEEPSEEK_MODEL: status.deepseek.model ?? '',
     DEEPSEEK_TIMEOUT_SECONDS: String(status.deepseek.timeout_seconds ?? ''),
@@ -103,6 +105,7 @@ export function useSettingsDraft() {
       setError(undefined)
       setNotice(undefined)
       const response = await api.updateSettings(updates, token || undefined)
+      window.dispatchEvent(new Event('notebuddy-settings-changed'))
       setStatus(response.status)
       const nextDraft = buildDraft(response.status)
       setDraft(nextDraft)

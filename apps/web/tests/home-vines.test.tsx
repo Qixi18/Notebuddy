@@ -6,7 +6,7 @@ import type { CourseTree } from '../src/types'
 import { courseCanopyGeometry } from '../src/features/tree/courseCanopyGeometry'
 import { pointAt } from '../src/features/tree/naturalBranchGeometry'
 
-afterEach(() => { cleanup(); vi.restoreAllMocks() })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); sessionStorage.clear() })
 const courses = ['a', 'b', 'c'].map((id, i) => ({ course_id: id, name: `课程${id}`, position: i, learning_state: 'learning' })) as ForestCourse[]
 const trees = courses.map(course => ({ course_id: course.course_id, notebooks: Array.from({ length: 5 }, (_, b) => ({ id: `${course.course_id}-book-${b}`, course_id: course.course_id, tree_slot: b, title: `笔记本${b}`, chapters: [{ id: `m-${b}`, sections: [{ id: `${course.course_id}-note-${b}`, title: `知识${b}`, notebook_id: `${course.course_id}-book-${b}`, tree_slot: 0 }] }], historical_sections: [] })) })) as CourseTree[]
 const relations = Array.from({ length: 5 }, (_, i) => ({ id: `relation-${i}`, source_course_id: 'a', target_course_id: 'b', source_block_id: `a-note-${i}`, target_block_id: `b-note-${i}`, source_title: `起点${i}`, target_title: `终点${i}`, source_course_name: '课程a', target_course_name: '课程b', status: 'confirmed', stale: false, reason: `原始依据${i}`, origin: 'ai' })) as TreeRelation[]

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useWorkspace, type Feature } from '../components/AppLayout'
 import { CourseGate } from '../components/CourseGate'
+import { Dialog } from '../components/Dialog'
 import { HomeCourseGarden } from '../features/home/HomeCourseGarden'
 import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 import { ForestRelationsPanel } from '../features/forest/ForestRelationsPanel'
@@ -12,6 +13,7 @@ import type { ForestCourse, ForestSearchResult } from '../features/forest/types'
 import { notebookPath } from '../features/notebook/navigation'
 import { selectHomeCourses } from '../features/workspace/homeCourses'
 import { HomeSearch } from '../features/home/HomeSearch'
+import { growthLedger } from '../features/tree/growth/ledger'
 import '../features/forest/forest.css'
 
 export function HomePage() {
@@ -36,6 +38,7 @@ function HomeScene() {
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string>()
+  const [createError, setCreateError] = useState<string>()
   const directories = useTreeDirectories()
   const vines = useNotebookRelations(directories.trees, directories.settledVersion, directories.watchKey, directories.refresh)
   const [relationsOpen, setRelationsOpen] = useState(false)
@@ -44,26 +47,33 @@ function HomeScene() {
   useEffect(() => {
     let active = true
     setForestLoading(true); setForestError(undefined)
-    void api.getForest().then(result => { if (active) setForestCourses(result.courses) }).catch((cause: unknown) => { if (active) setForestError(cause instanceof Error ? cause.message : '课程树读取失败') }).finally(() => { if (active) setForestLoading(false) })
+    void api.getForest().then(result => { if (active) { growthLedger.observeCourses(result.courses.map(course => course.course_id)); setForestCourses(result.courses) } }).catch((cause: unknown) => { if (active) setForestError(cause instanceof Error ? cause.message : '课程树读取失败') }).finally(() => { if (active) setForestLoading(false) })
     return () => { active = false }
   }, [courses, forestReload])
 
   useEffect(() => {
-    const refresh = () => setForestReload(value => value + 1)
+    const refresh = () => {
+      setForestReload(value => value + 1)
+      void directories.refresh()
+      void vines.refresh()
+      void vines.discoverJobs()
+    }
     window.addEventListener('focus', refresh)
     return () => window.removeEventListener('focus', refresh)
-  }, [])
+  }, [directories.refresh, vines.refresh, vines.discoverJobs])
   const visible = selectHomeCourses(forestCourses)
   const returnState = { sceneReturn: '/', sceneEntry: entry }
 
   async function create(event: FormEvent) {
     event.preventDefault()
     if (!name.trim() || creating) return
-    setCreating(true); setError(undefined)
+    setCreating(true); setCreateError(undefined)
     try { navigate(`/courses/${(await createCourse(name.trim())).id}`) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '课程创建失败') }
+    catch (cause) { setCreateError(cause instanceof Error ? cause.message : '课程创建失败') }
     finally { setCreating(false) }
   }
+
+  function closeCreate() { setCreateOpen(false); setName(''); setCreateError(undefined) }
 
   return <div className="home-tree-page home-garden-page">
     <div className="home-canvas">
@@ -93,6 +103,12 @@ function HomeScene() {
     {relationsOpen && <ForestRelationsPanel relations={vines.records} courses={forestCourses} selectedRelationId={selectedRelation} onLocate={relation => navigate(`/forest?relation=${encodeURIComponent(relation.id)}`)} onChanged={() => { void vines.refresh(); void directories.refresh() }} onClose={() => setRelationsOpen(false)} />}
     {root && <NotebookRootMenu courseId={root} courseName={courses.find(course => course.id === root)?.name ?? '课程'} onClose={() => setRoot(undefined)} returnState={returnState} />}
     {requestedFeature && <CourseGate feature={requestedFeature} onClose={() => setRequestedFeature(undefined)} />}
-    {createOpen && <div className="modal-backdrop"><section className="course-gate-modal" role="dialog" aria-modal="true" aria-label="创建课程" onKeyDown={event => { if (event.key === 'Escape' && !creating) setCreateOpen(false) }}><button className="modal-close" onClick={() => setCreateOpen(false)} disabled={creating} aria-label="关闭">×</button><h2>创建课程</h2><form onSubmit={event => void create(event)}><label>课程名称<input autoFocus maxLength={120} value={name} onChange={event => setName(event.target.value)} /></label><button className="primary-button" disabled={!name.trim() || creating || busy}>创建并打开</button></form>{error && <p role="alert">{error}</p>}</section></div>}
+    {createOpen && <Dialog title="创建课程" description="为一门课程留下一片生长的空间。首页有空位时，新课程会自动加入。" onClose={closeCreate} busy={creating}>
+      <form className="botanical-dialog-form" onSubmit={event => void create(event)}>
+        <label>课程名称<input autoFocus required maxLength={120} value={name} placeholder="例如：数字逻辑" disabled={creating} onChange={event => setName(event.target.value)} /></label>
+        {createError && <p className="form-error" role="alert">{createError}</p>}
+        <div className="botanical-dialog-actions"><button type="button" className="secondary-button" disabled={creating} onClick={closeCreate}>取消</button><button type="submit" className="primary-button" disabled={!name.trim() || creating || busy}>{creating ? '创建中…' : '创建并打开'}</button></div>
+      </form>
+    </Dialog>}
   </div>
 }

@@ -9,14 +9,17 @@ import { AssistantContextBar, type ScopeNext } from '../features/assistant/Assis
 import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
 import { NoteScopePicker } from '../features/assistant/NoteScopePicker'
-import { KnowledgeProposalCards, NotebookEditSuggestionCards } from '../features/assistant/AgentCards'
-import { useNotebookEditSuggestions } from '../features/assistant/useNotebookEditSuggestions'
-import { ChangesPanel } from '../features/assistant/ChangesPanel'
+import { NoteSuggestionCards } from '../features/assistant/AgentCards'
+import { useNoteSuggestions } from '../features/assistant/useNoteSuggestions'
+import { NotePreviewDialog } from '../features/assistant/NotePreviewDialog'
+import { ChangesPanel, type NoteChangeItem } from '../features/assistant/ChangesPanel'
+import { MistakeBook } from '../features/assistant/MistakeBook'
 import { TermDialog } from '../features/assistant/TermDialog'
 import { teacherPersonaMeta } from '../features/persona/personas'
 import { PetAvatar, type PetAvatarHandle } from '../features/pet/PetAvatar'
 import type { PetMode } from '../features/pet/petLayout'
 import { loadPetPlacement, savePetPlacement } from '../features/pet/petStorage'
+import { reportQuestion } from '../features/pet/petEggs'
 import type { AskScope } from '../features/conversation/useConversation'
 import type { AgentReadingContext, AgentScope } from '../api/agent'
 
@@ -31,10 +34,11 @@ export function AssistantPage() {
     courseId,
     courses,
     materials,
+    notes,
     courseContentLoading,
     openMaterialSource,
-    teacherPersona,
     conversation,
+    refreshCurrentNotes,
   } = useWorkspace()
   const { askAgent, stopAgent, ready, busy, hasMessages, messages, renameConversation, deleteConversation, agentRun } = conversation
   const navigate = useNavigate()
@@ -50,16 +54,19 @@ export function AssistantPage() {
   const [scopeKind, setScopeKind] = useState<'global' | 'course' | 'note'>('global')
   const [scopeTargetId, setScopeTargetId] = useState<string>()
   const [scopeTargetTitle, setScopeTargetTitle] = useState<string>()
-  const [scopeTargetCourseId, setScopeTargetCourseId] = useState<string>()
-  const [scopeTargetRevision, setScopeTargetRevision] = useState(0)
-  const [currentNotebooks, setCurrentNotebooks] = useState<import('../types').NotebookSummary[]>([])
-  const handledNotebookRoute = useRef<string | undefined>(undefined)
+  /* 课件收窄（P3）：消息级参数，仅 course 档随请求发送；不写会话 scope、不触发锁定。
+     切范围档 / 切会话 / 切课程时复位（见 changeScope 与下方两个 effect）。 */
+  const [materialId, setMaterialId] = useState<string>()
+  /* 学习模式（P9）：消息级参数，direct=直接答 / guided=引导式；切会话/切课程复位 */
+  const [learningMode, setLearningMode] = useState<'direct' | 'guided'>('direct')
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
-  const [changesOpen, setChangesOpen] = useState(false)
   const [notePickerOpen, setNotePickerOpen] = useState(false)
+  const [previewItem, setPreviewItem] = useState<NoteChangeItem>()
   const [scopeLockHint, setScopeLockHint] = useState(false)
   const scopeLockTimer = useRef<number | undefined>(undefined)
   const [webStatus, setWebStatus] = useState<{ configured: boolean; status: string }>({ configured: false, status: 'unconfigured' })
+  const [changesOpen, setChangesOpen] = useState(false)
+  const [mistakesOpen, setMistakesOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
   const [railDrawerOpen, setRailDrawerOpen] = useState(false)
@@ -71,39 +78,41 @@ export function AssistantPage() {
     [scopeKind, scopeTargetId, scopeTargetTitle],
   )
 
-  /* agent 产出的笔记修改建议：目标笔记 = 答疑页锁定的那一篇（与悬浮坞共用同一套建议状态机） */
-  const notebookSuggestions = useNotebookEditSuggestions({
-    target: scopeKind === 'note' && scopeTargetId && scopeTargetCourseId && scopeTargetCourseId === courseId ? {
-      courseId: scopeTargetCourseId,
-      notebookId: scopeTargetId,
-      title: scopeTargetTitle ?? 'Notebook',
-      revision: scopeTargetRevision,
-    } : null,
+  /* agent 产出的笔记修改建议（P4 多目标）：走课程级待确认端点，
+     目标集合 = 本课程的全部 pending（发现开关下 agent 可定位任意笔记提建议）。
+     正文缓存种子 = 工作区笔记；未命中的由 hook 按 note_id 拉取。 */
+  const noteSuggestions = useNoteSuggestions({
+    targets: [],
+    knownNotes: notes,
+    courseId,
+    refreshNotes: refreshCurrentNotes,
     agentFinalId: agentRun?.final?.message_id,
+    resetKey: conversation.conversationId,
   })
-  const knowledgeProposals = useMemo(
-    () => (agentRun?.final?.suggestions ?? []).filter(
-      (item): item is Extract<typeof item, { type: 'knowledge_proposal' }> => item.type === 'knowledge_proposal',
-    ),
-    [agentRun?.final?.suggestions],
-  )
 
   /* 答疑页的范围语义 → agent 的请求语义。
      答疑页的「整门课程」= agent 的 course 且不收窄到某份课件（agent 的 course 档可带 material_id）；
      答疑页的「锁定笔记」锁的是用户指定的任意一篇，而 agent 的 note 档强制要求 reading_context.note_id
-     （后端 agent.py 会 422），所以要把这篇笔记的正文节选一起带过去。 */
-  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext }>(() => {
-    if (scope.kind === 'global') return { scope: 'global' }
+     （后端 agent.py 会 422），所以要把这篇笔记的正文节选一起带过去。
+     发现开关（P4）：只有答疑页传 true——全局/课程档下 agent 也能自主定位笔记提交修改建议。 */
+  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext; allowNoteDiscovery: boolean; allowQuiz: boolean; learningMode: 'direct' | 'guided' }>(() => {
+    if (scope.kind === 'global') return { scope: 'global', allowNoteDiscovery: true, allowQuiz: true, learningMode }
     if (scope.kind === 'note' && scope.targetId) {
+      const note = notes.find((item) => item.id === scope.targetId)
       return {
         scope: 'note',
         readingContext: {
-          note_title: scope.targetTitle,
+          note_id: scope.targetId,
+          note_title: scope.targetTitle ?? note?.title,
+          excerpt: note?.content_markdown ? note.content_markdown.slice(0, 1200) : undefined,
         },
+        allowNoteDiscovery: true,
+        allowQuiz: true,
+        learningMode,
       }
     }
-    return { scope: 'course' }
-  }, [scope.kind, scope.targetTitle])
+    return { scope: 'course', materialId, allowNoteDiscovery: true, allowQuiz: true, learningMode }
+  }, [scope.kind, scope.targetId, scope.targetTitle, notes, materialId, learningMode])
 
   /* 切换会话时，把范围 chip 对齐到该会话的真实归属。
      范围是会话级属性，存在 Conversation 行上；只有「还没有消息」的会话才允许再改。
@@ -117,27 +126,19 @@ export function AssistantPage() {
       : undefined
     if (!target) {
       // 尚无活动会话（全新对话）→ 默认全局可查
-      setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined)
+      setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined); setMaterialId(undefined); setLearningMode('direct')
       return
     }
+    setMaterialId(undefined)
+    setLearningMode('direct')
     if (target.scope === 'note') {
       setScopeKind('note'); setScopeTargetId(target.note_id ?? undefined); setScopeTargetTitle(target.note_title ?? undefined)
-      setScopeTargetCourseId(courseId); setScopeTargetRevision(0)
     } else if (target.scope === 'global') {
       setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined)
     } else {
       setScopeKind('course'); setScopeTargetId(undefined); setScopeTargetTitle(undefined)
     }
   }, [conversation.conversationId, conversation.conversations])
-
-  useEffect(() => {
-    if (scopeKind !== 'note' || !scopeTargetId || !courseId || scopeTargetCourseId !== courseId) return
-    let active = true
-    void api.getNotebookDocument(courseId, scopeTargetId)
-      .then((document) => { if (active) setScopeTargetRevision(document.revision) })
-      .catch(() => { if (active) setScopeTargetRevision(0) })
-    return () => { active = false }
-  }, [scopeKind, scopeTargetId, scopeTargetCourseId, courseId])
 
   /* 范围锁定：当前会话一旦有过真实问答（不含本地开场白），就不再允许改范围 */
   const scopeLocked = hasMessages
@@ -153,27 +154,9 @@ export function AssistantPage() {
     setScopeKind('global')
     setScopeTargetId(undefined)
     setScopeTargetTitle(undefined)
-    setScopeTargetCourseId(undefined)
+    setMaterialId(undefined)
+    setLearningMode('direct')
   }, [courseId])
-
-  useEffect(() => {
-    if (!courseId || !notePickerOpen) return
-    let active = true
-    void api.listNotebooks(courseId).then((items) => { if (active) setCurrentNotebooks(items) }).catch(() => { if (active) setCurrentNotebooks([]) })
-    return () => { active = false }
-  }, [courseId, notePickerOpen])
-
-  useEffect(() => {
-    const state = location.state as { lockNotebook?: { id: string; course_id: string; title: string } } | null
-    const notebook = state?.lockNotebook
-    if (!notebook) { handledNotebookRoute.current = undefined; return }
-    if (!notebook || notebook.course_id !== courseId || !ready || handledNotebookRoute.current === notebook.id) return
-    handledNotebookRoute.current = notebook.id
-    setScopeKind('note'); setScopeTargetId(notebook.id); setScopeTargetTitle(notebook.title)
-    setScopeTargetCourseId(notebook.course_id); setScopeTargetRevision(0)
-    void conversation.startNewConversation({ scope: 'note', noteId: notebook.id, noteTitle: notebook.title })
-    navigate(location.pathname, { replace: true, state: null })
-  }, [location.key, location.pathname, location.state, courseId, ready, conversation, navigate])
 
   useEffect(() => { void api.getWebSearchStatus().then(setWebStatus).catch(() => setWebStatus({ configured: false, status: 'unavailable' })) }, [])
 
@@ -186,32 +169,40 @@ export function AssistantPage() {
     navigate(location.pathname, { replace: true, state: null })
   }, [location.key, location.pathname, location.state, navigate])
 
+  /* 重试口径快照（v6 P5）：记录每次提问发出时的 agentOptions，重试按原口径重发，
+      避免失败到重试之间用户改了范围/收窄导致口径漂移 */
+  const recentAsksRef = useRef<Array<{ text: string; options: typeof agentOptions }>>([])
+
   const send = useCallback((text: string): boolean => {
     const trimmed = text.trim()
     if (!trimmed || busy) return false
     /* 走 agent 流式通道：与悬浮坞同一条能力线（可调工具、正文逐字返回） */
-    void (async () => {
-      try {
-        let notebookContext
-        if (agentOptions.scope === 'note' && scopeTargetId && courseId) {
-          const document = await api.getNotebookDocument(courseId, scopeTargetId)
-          setScopeTargetRevision(document.revision)
-          notebookContext = { course_id: courseId, notebook_id: scopeTargetId, revision: document.revision,
-            title: scopeTargetTitle, excerpt: document.blocks.map((block) => block.text).join('\n').slice(0, 1200) }
-        }
-        const sent = await askAgent(trimmed, { ...agentOptions, notebookContext })
-        if (!sent) setDraft(trimmed)
-      } catch {
-        setDraft(trimmed)
-      }
-    })()
+    void askAgent(trimmed, agentOptions).then((sent) => { if (!sent) setDraft(trimmed) })
+    recentAsksRef.current = [...recentAsksRef.current.slice(-19), { text: trimmed, options: agentOptions }]
+    /* 彩蛋信号：桌宠据此判断"同一句问了两遍"（重试按钮不算） */
+    reportQuestion(trimmed)
     return true
-  }, [askAgent, busy, agentOptions, scopeTargetId, scopeTargetTitle, courseId])
+  }, [askAgent, busy, agentOptions])
 
-  /* 失败卡重试：拿原问题原文重发。
+  /* 失败卡重试：优先按提问时的口径快照重发。
      已知限制：后端对重复幂等键直接 409（api/v1/agent.py:61-68），所以这里用新键重发，
      用户会看到两条相同的提问气泡——去重需要后端「按消息 id 重试」的能力，见计划 §7-1。 */
-  const retryQuestion = useCallback((text: string) => { send(text) }, [send])
+  const retryQuestion = useCallback((text: string) => {
+    if (busy) return
+    const found = [...recentAsksRef.current].reverse().find((item) => item.text === text)
+    const options = found?.options ?? agentOptions
+    void askAgent(text, options).then((sent) => { if (!sent) setDraft(text) })
+  }, [askAgent, busy, agentOptions])
+
+  /* 错题本两个动作（v6 §7 第一批）：意图明确，直接走发送通道；
+     send 在忙碌时返回 false，此时退化为填草稿并聚焦输入框，不丢用户操作。 */
+  const askFromMistake = useCallback((prompt: string) => {
+    setMistakesOpen(false)
+    if (!send(prompt)) {
+      setDraft(prompt)
+      composerRef.current?.focus()
+    }
+  }, [send])
 
   useEffect(() => {
     if (!pendingInitialQuestion || !ready || initialQuestionSent.current) return
@@ -285,6 +276,8 @@ export function AssistantPage() {
     setScopeKind(next.kind)
     setScopeTargetId(next.targetId)
     setScopeTargetTitle(next.targetTitle)
+    /* 收窄只在 course 档有意义：离开该档即复位，避免残留一个不可见的消息级参数 */
+    if (next.kind !== 'course') setMaterialId(undefined)
   }
 
   function changePetMode(mode: PetMode) {
@@ -303,10 +296,10 @@ export function AssistantPage() {
     composerRef.current?.focus()
   }
 
-  async function handleFeedback(messageId: string, category: 'helpful' | 'not_helpful'): Promise<boolean> {
+  async function handleFeedback(messageId: string, category: 'helpful' | 'not_helpful', comment?: string): Promise<boolean> {
     if (!courseId) return false
     try {
-      await api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: messageId, category })
+      await api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: messageId, category, comment })
       return true
     } catch {
       return false
@@ -318,7 +311,7 @@ export function AssistantPage() {
     if (courseId) navigate(featurePath(courseId, 'materials'))
   }
 
-  const persona = teacherPersonaMeta(teacherPersona)
+  const persona = teacherPersonaMeta()
   const lastAssistantMessage = useMemo(
     () => [...messages].reverse().find((message) => message.role === 'assistant'),
     [messages],
@@ -332,6 +325,15 @@ export function AssistantPage() {
     ? '正在翻课程资料…'
     : lastAssistantMessage?.status === 'failed' ? '刚才没答上来，可以再试一次'
       : hasAsked ? '刚回答完，角标可以点开原文' : '等待你的问题'
+
+  /* 能力行（WorkBuddy 式）：任务类 chips 常驻输入框上方，功能可发现不靠话术 */
+  const quickPrompts = materials.length
+    ? [
+      { label: '考考我', prompt: '考考我：针对这一讲出两道题。' },
+      { label: '复习提纲', prompt: '帮我把这一讲整理成复习提纲。' },
+      { label: '易混概念', prompt: '这一讲有哪些容易混淆的概念？请对比说明。' },
+    ]
+    : []
 
   const starterPrompts = materials.length
     ? [
@@ -375,13 +377,15 @@ export function AssistantPage() {
             mode={petMode}
             onModeChange={changePetMode}
             status={teacherStatus}
-            character={teacherPersona}
+            /* 只认「本次请求已开始吐正文」：工具阶段/思考阶段都还在 thinking */
+            streaming={busy && (agentRun?.streamingText.length ?? 0) > 0}
+            draft={draft}
             bubbleHint={busy ? '正在翻课程资料，稍等一下…' : hasAsked ? '回答里的角标可以点，右栏能看到原文。' : `问我「${course?.name ?? '这门课'}」的问题吧`}
           />
           {petMode === 'rail' && (
             <div className="workspace-pet-identity">
               <span className="workspace-pet-identity-avatar" aria-hidden="true">
-                <TeacherCharacter status={teacherStatus} compact character={teacherPersona} />
+                <TeacherCharacter status={teacherStatus} compact />
               </span>
               <div className="workspace-pet-identity-text">
                 <h2>{persona.name}</h2>
@@ -405,7 +409,7 @@ export function AssistantPage() {
         {petMode === 'float' && (
           <div className="workspace-pet-anchor">
             <span className="workspace-pet-anchor-avatar" aria-hidden="true">
-              <TeacherCharacter status={teacherStatus} compact character={teacherPersona} />
+              <TeacherCharacter status={teacherStatus} compact />
             </span>
             <div className="workspace-pet-anchor-text">
               <strong>{persona.name}</strong>
@@ -468,9 +472,21 @@ export function AssistantPage() {
               title="搜索会话（Ctrl+K）"
               aria-label="搜索会话"
             >⌕</button>
-            <button type="button" className="workspace-topbar-changes"
-              onClick={() => setChangesOpen((open) => !open)} aria-pressed={changesOpen}
-              title={changesOpen ? '收起改动栏' : '展开改动栏'} aria-label={changesOpen ? '收起改动栏' : '展开改动栏'}>改动</button>
+            <button
+              type="button"
+              className="workspace-topbar-mistakes"
+              onClick={() => setMistakesOpen(true)}
+              title="错题本 · 本课程答错的题"
+              aria-label="打开错题本"
+            >复习</button>
+            <button
+              type="button"
+              className="workspace-topbar-changes"
+              onClick={() => setChangesOpen((open) => !open)}
+              aria-pressed={changesOpen}
+              title={changesOpen ? '收起改动栏' : '展开改动栏'}
+              aria-label={changesOpen ? '收起改动栏' : '展开改动栏'}
+            >改动</button>
             <button
               type="button"
               className="primary-button workspace-topbar-new"
@@ -516,25 +532,25 @@ export function AssistantPage() {
           onStarter={useStarter}
           onFeedback={handleFeedback}
           onOpenMaterial={openMaterial}
-          onOpenNotebook={(notebookId, blockId, assetId, page) => {
-            if (!courseId) return
-            const params = new URLSearchParams()
-            if (assetId) { params.set('asset', assetId); if (page) params.set('page', String(page)) }
-            else if (blockId) params.set('section', blockId)
-            navigate(`/courses/${courseId}/notebooks/${notebookId}${params.size ? `?${params}` : ''}`)
-          }}
           onRetry={retryQuestion}
           onFollowUp={useStarter}
           agentRun={agentRun}
+          suggestionsByMessage={conversation.agentSuggestionsByMessage}
+          skillCourseId={courseId}
+          onSkillAsk={useStarter}
+          highlightMessageId={conversation.pendingMessageId}
+          onHighlightConsumed={conversation.consumePendingMessage}
           extras={(
             <>
-              <NotebookEditSuggestionCards
-                suggestions={notebookSuggestions.suggestions}
-                busyId={notebookSuggestions.busyId}
-                onReview={(suggestion, decision, indices) => void notebookSuggestions.review(suggestion, decision, indices)}
+              <NoteSuggestionCards
+                suggestions={noteSuggestions.suggestions}
+                currentContentByNoteId={noteSuggestions.contentById}
+                busyId={noteSuggestions.busyId}
+                adoptedContents={noteSuggestions.adopted}
+                onReview={(suggestion, decision, finalMarkdown) => void noteSuggestions.review(suggestion, decision, finalMarkdown)}
+                onUndo={(suggestion) => void noteSuggestions.undo(suggestion)}
               />
-              <KnowledgeProposalCards suggestions={knowledgeProposals} />
-              {notebookSuggestions.notice ? <p className="workspace-agent-notice">{notebookSuggestions.notice}</p> : null}
+              {noteSuggestions.notice ? <p className="workspace-agent-notice">{noteSuggestions.notice}</p> : null}
             </>
           )}
         />
@@ -562,18 +578,59 @@ export function AssistantPage() {
             onTermClick={() => setTermOpen(true)}
             onComposerFocus={() => petRef.current?.yieldFromRect(composerAreaRef.current?.getBoundingClientRect() ?? null)}
             textareaRef={composerRef}
+            materials={scopeKind === 'course'
+              ? materials.filter((item) => item.status === 'completed').map((item) => ({ id: item.id, lecture_title: item.lecture_title }))
+              : undefined}
+            materialId={materialId}
+            onMaterialChange={setMaterialId}
+            learningMode={learningMode}
+            onLearningModeChange={setLearningMode}
+            quickPrompts={quickPrompts}
+            onQuickPrompt={useStarter}
           />
         </div>
       </section>
 
-      <ChangesPanel open={changesOpen} onToggle={() => setChangesOpen((open) => !open)} items={[]}
-        onApplyAll={() => undefined} applying={false} onPreview={() => undefined} />
+      <ChangesPanel
+        open={changesOpen}
+        onToggle={() => setChangesOpen((open) => !open)}
+        items={noteSuggestions.changes}
+        /* 只把已解析完成的课件传下去，正在解析的还没页数，列出来只会误导 */
+        materials={materials.filter((item) => item.status === 'completed')}
+        onApplyAll={() => void noteSuggestions.applyAll()}
+        applying={noteSuggestions.busyId === '__all__'}
+        onPreview={(item) => setPreviewItem(item)}
+      />
+
+      <MistakeBook
+        open={mistakesOpen}
+        courseId={courseId}
+        courseName={course?.name}
+        onClose={() => setMistakesOpen(false)}
+        onExplain={askFromMistake}
+        onRetry={askFromMistake}
+      />
+
+      <NotePreviewDialog
+        open={Boolean(previewItem)}
+        title={previewItem?.noteTitle ?? ''}
+        chapter={previewItem?.chapter}
+        /* 多目标：预览的「当前正文」按预览项自己的目标笔记取 */
+        current={previewItem ? (noteSuggestions.contentById[previewItem.noteId] ?? '') : ''}
+        proposed={previewItem?.proposed ?? ''}
+        onClose={() => setPreviewItem(undefined)}
+      />
 
       {paletteOpen && (
         <ConversationSearch
           conversations={conversation.conversations}
           conversationId={conversation.conversationId}
+          courseId={courseId}
           onSelect={(id) => void conversation.selectConversation(id)}
+          onSelectMessage={(conversationId, messageId) => {
+            /* P6 消息命中：切会话时带上定位目标，历史加载完由线程滚动高亮 */
+            void conversation.selectConversation(conversationId, messageId)
+          }}
           onClose={() => setPaletteOpen(false)}
         />
       )}
@@ -583,17 +640,11 @@ export function AssistantPage() {
         open={notePickerOpen}
         courses={courses}
         currentCourseId={courseId}
-        currentNotebooks={currentNotebooks}
-        loadNotebooks={(id) => api.listNotebooks(id)}
-        onPick={(notebook) => {
+        currentNotes={notes}
+        loadNotes={(id) => api.listNotes(id)}
+        onPick={(note) => {
+          changeScope({ kind: 'note', targetId: note.id, targetTitle: note.title })
           setNotePickerOpen(false)
-          if (notebook.course_id !== courseId) {
-            navigate(featurePath(notebook.course_id, 'assistant'), { state: { lockNotebook: notebook } })
-            return
-          }
-          setScopeKind('note'); setScopeTargetId(notebook.id); setScopeTargetTitle(notebook.title)
-          setScopeTargetCourseId(notebook.course_id); setScopeTargetRevision(0)
-          void conversation.startNewConversation({ scope: 'note', noteId: notebook.id, noteTitle: notebook.title })
         }}
         onClose={() => setNotePickerOpen(false)}
       />

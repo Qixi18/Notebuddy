@@ -1,57 +1,85 @@
-# 后端调用与业务数据存储契约
+# 后端调用与业务数据契约
 
-本文记录当前 `main` 的本地 Web 实现，供首页与知识树、答疑 Agent、课程与笔记三条开发线共同使用。字段及错误响应以 `apps/backend/app/schemas/` 和 `apps/backend/app/api/v1/` 为准；详细接口见 [API 契约](api.md)。云端多用户部署不属于当前实现。
+本文描述本地 `feat/debug-integration` 当前实现，核对基线为 2026-10-30 本地 `0777d0e`（Fetch 时 origin 为 `4759ff5`）。云端多用户安全不在当前本地实现保证范围内。字段和错误以 `apps/backend/app/schemas/`、路由及服务源码为准。
+## 双路线处理补充（2026-10-30）
 
-## 共同调用规则
+`assets.processing_route` / `processing_config_json` 固定上传所选路线和非敏感模型连接身份，`materials.processing_route` 与其保持一致。批次保存初始路线；失败输入切换后可在同一批次中按实际路线分组生成。历史数据默认 `standard`，新上传的默认值由设置控制。
 
-- 前端通过 `apps/web/src/api/` 的封装调用 `/api/v1`。开发时 Vite 将 `/api` 代理到本地 FastAPI；路由在 `apps/backend/app/api/v1/routes.py` 汇总，并由 `apps/backend/app/main.py` 挂载。页面和组件不能直接读写 SQLite 或 `data/` 文件。
-- 后端路由负责请求校验和 HTTP 响应，业务规则在服务层，持久化模型在 `app/db/`。改接口时同步更新后端 schema、前端 API 类型和调用方、迁移与文档。
-- 以 ID 和服务端校验确定归属：知识树叶子指向稳定的 `Note.id`；课程、笔记本、讲次、笔记与会话请求须校验所属课程。已软删除的课程或讲次不作为正常内容或答疑来源。
-- 笔记保存携带 `expected_revision_number`；笔记本目录重排、续读位置和森林课程配置使用各自的预期修订号。收到 409 后刷新数据并处理冲突，不直接覆盖。
-- `POST /courses/{course_id}/materials` 保存原文件并登记持久任务。独立的 `app.workers.runner` 执行解析；页面通过任务接口查询结果。森林培养方案与跨课程关系候选任务也由该执行器处理。
+`processing_steps` 保存以 scope/stage/step_key/fingerprint 唯一定位的成功模型步骤和用量，供读取、规划、正文与关系任务续跑，不承载 Notebook 正式正文。页面图像保存在 `derived/pages/<asset>/<run>/`；完整读取才提升为当前 Document IR。正文仍通过原有 Notebook 文档、来源映射、修订号与派生小节索引写入。
 
-## 三条开发线的调用链
+`notebook_generation_jobs.relation_job_id` 跟踪正文提交后的独立藤蔓任务。用户删除联系时在 `notebook_relation_suppressions` 保留端点决定，自动分析不得恢复该条联系；人工联系也不会被自动关系覆盖。迁移为 `a5e3c8d1f209_dual_processing_routes`，使用 Alembic 升级，不删除现有业务数据。
 
-以下路径均以 `/api/v1` 为前缀。请求体、返回类型和兼容接口见 [API 契约](api.md)。
+以上路线补充来自解析分支，本文其余部分以本地 `feat/debug-integration` 的 DocumentIR 与 Notebook 正文契约为准。
 
-| 开发方向 | 读取 | 写入或异步动作 | 约束 |
-| --- | --- | --- | --- |
-| 首页与知识树 | `GET /courses`、`GET /forest`、`GET /forest/courses/{course_id}/tree`、`GET /forest/search`、`GET /forest/relations` | `POST /courses/{course_id}/visit`、`PATCH /forest/courses/{course_id}`、培养方案导入与关系审核接口 | 森林目录是课程、笔记本和笔记的视图；不另存笔记正文。只有实际打开课程才调用 `visit`。 |
-| 课程与笔记 | 课程的笔记本、讲次、资料接口；`GET /notes/{note_id}`、来源及版本接口 | 课程和笔记本写入、资料上传、`PATCH /notes/{note_id}`、续读位置、建议审查 | 多本课程上传需明确 `notebook_id`；笔记保存带预期版本。目录不含正文。 |
-| 答疑桌宠与悬浮 Agent | 课程会话列表、`GET /conversations/{id}/messages`、当前课程及笔记上下文 | 创建课程会话，再 `POST /conversations/{id}/agent-messages` 读取 SSE；传统问答见 `POST /courses/{course_id}/assistant` | 会话限定单课程；材料和阅读笔记 ID 须属于该课程。AI 改笔记先产生可审查建议。 |
+## 权威数据流
 
-前端封装主要在 `apps/web/src/api/courses.ts`、`forest.ts`、`notebook.ts`、`notes.ts`、`conversations.ts`、`agent.ts`、`agentStream.ts`。SSE 用流式客户端读取，不能用只解析 JSON 的 `request<T>`。404 表示目标或归属无效，409 常用于修订冲突或重复提交，422 用于请求校验；具体错误以对应路由为准。
+```text
+Notebook
+  └─ Asset / Notebook 资源登记与持久上传批次
+      └─ Document Processing 与 DocumentParseRun
+          └─ 版本化 DocumentIR、来源位置和质量状态
+              └─ 生成任务快照、质量门禁和 revision/CAS 合并
+                  └─ Notebook.document_json（唯一正式可编辑正文）
+                      ├─ 编辑器读取、保存、历史版本与恢复
+                      ├─ NotebookSection 章节目录/文本投影
+                      ├─ retrieval_chunks 等检索派生数据
+                      ├─ 知识森林读取课程、Notebook、目录及关系
+                      └─ Agent 在课程/Notebook 范围内读取正文和证据
+```
 
-## 存储地址与数据归属
+当前主验收重点是 PDF、JPG、PNG；代码仍保留其他支持格式的兼容能力。具体白名单由 `GET /api/v1/config/capabilities` 与上传校验决定，不能仅由本段推断。
 
-`apps/backend/app/core/config.py` 把 `NOTEBOOK_DATA_DIR` 解析为绝对路径；默认是仓库根目录的 `./data`，相对配置也以仓库根目录为基准。运行时数据不提交 Git。
+| 对象 | 职责 | 正式正文？ |
+|---|---|---|
+| `Notebook.document_json` / `document_revision` | Tiptap/ProseMirror 正文及并发版本 | **是，唯一权威源** |
+| `NotebookDocumentRevision` | 正文版本快照、来源标记和保留策略 | 历史快照，不是独立当前源 |
+| `DocumentIR` / `DocumentParseRun` | 来源文件的解析版本、结构、位置、质量结果 | 否 |
+| `NotebookSection` | 从正文重建的目录和文本投影 | 否，可重建 |
+| `retrieval_chunks`、森林树/搜索数据 | 检索或导航派生索引 | 否，可重建/同步 |
+| 旧 `Note.content_markdown` / `NoteRevision` | 迁移、兼容、审计和历史引用；新旧读写边界依路由而异。前端仍调用的旧 NoteSuggestion API 在本轮路由审计中未找到后端注册，须单独核实 | 否，不得作为新正文源 |
+| `NotebookGenerationCandidate` | 非当前主要生成写入链；`notes/assets.py` 仍检查 pending 候选的附件引用，避免资源过早清理 | 否；清理前须审计历史行与资源保护 |
+| `NotebookEditSuggestion` | 对现有正文的待审修改及基准 revision | 否；必须通过审查/受控应用 |
 
-| 数据 | 当前持久化位置 | 主要模型或说明 |
-| --- | --- | --- |
-| 课程、笔记本、讲次元数据与续读位置 | `<NOTEBOOK_DATA_DIR>/notebook.sqlite3` | `courses`、`notebooks`、`materials`、`notebook_reading_positions` |
-| 笔记正文、版本、来源映射和建议 | 同一 SQLite | `notes.content_markdown`、`note_revisions`、`note_source_mappings`、`source_refs`、`note_suggestions`；正文不是独立 Markdown 文件 |
-| 课程内知识结构 | 同一 SQLite | `knowledge_nodes`、`knowledge_edges`；笔记通过 `knowledge_node_id` 关联概念 |
-| 森林配置、培养方案、跨课程关系和任务 | 同一 SQLite | `forest_course_profiles`、`curriculum_imports`、`cross_course_relations`、`forest_jobs`；树叶使用已有笔记 ID |
-| 答疑会话、用户提问、助手回答和证据 | 同一 SQLite | `conversations`、`conversation_messages`、`message_evidence`；两种会话传输共用这些表 |
-| 课件与培养方案原文件 | `<NOTEBOOK_DATA_DIR>/originals/` | 数据库记录 `stored_filename` 等元数据；服务端按配置目录访问文件 |
-| 派生目录、备份和检索索引 | `<NOTEBOOK_DATA_DIR>/derived/`、`<NOTEBOOK_DATA_DIR>/backups/`；`retrieval_chunks` 在 SQLite | 检索索引可重建，不承载用户笔记正文的业务真相 |
-| 知识树视口与页面快照 | 浏览器 `sessionStorage` | `apps/web/src/features/tree/snapshot.ts`；只是视图状态，不是业务数据 |
+单一正文源不意味着删除来源、资产、历史版本或派生表。不要删表或改已发布 Alembic migration。
 
-表结构由 `apps/backend/migrations/` 的 Alembic 迁移管理。新增持久字段或表应提供迁移并验证旧库升级，不以删除本地数据库代替迁移。课程与资料删除遵守现有软删除和检查点流程。
+## 代码核对状态
 
-### 对话历史的写入与读取
+| 主题 | 代码核对 | 自动/真实证据 |
+|---|---|---|
+| Notebook 正文和版本 | `app/db/models.py`、`app/notes/store.py`、`app/api/v1/notebook.py`：JSON、revision、版本快照及 CAS 写入 | 有相关自动测试；当前全量回归尚未执行 |
+| 章节派生索引 | `app/notes/index.py`：由 document 重建 | 有服务测试；索引不作为写入源 |
+| 资料解析 | `app/api/v1/materials.py`、`app/document_processing/`、Asset/ParseRun 模型 | 结构经代码核对；真实材料质量未在本次核实 |
+| 生成 | `app/api/v1/generation.py`、`app/generation/context.py`、`app/workers/notebook_generation_worker.py` | 任务快照、质量检查、revision 合并由代码核对；真实模型质量待验证 |
+| Agent 与森林 | `app/api/v1/agent.py`、`app/ai/agent_read_tools.py`、`app/forest/`、`app/notes/index.py` | 范围与读取路径代码核对；真实模型与完整浏览器体验待验证 |
+| 旧 API/迁移兼容 | `app/api/v1/materials.py`、`notes`、迁移模块及旧模型仍存在 | 具体调用面见 [API](api.md)；外部调用方覆盖待验证 |
 
-- 创建会话：`POST /courses/{course_id}/conversations` 在 `conversations` 保存课程 ID、标题和时间。`GET /courses/{course_id}/conversations` 只列出该课程的会话；会话所属课程已删除时不可继续读取。
-- 普通会话答疑 `POST /conversations/{id}/messages` 与 Agent 流式答疑 `POST /conversations/{id}/agent-messages` 都先保存用户提问，再生成回答。回答完成后保存助手正文和证据映射；生成失败时保留用户提问并保存 `status=failed` 的助手消息。Agent 的 `step`、`delta` 等 SSE 中间事件不写为历史消息。
-- `GET /conversations/{id}/messages` 从数据库读取双方消息，并通过 `message_evidence` 还原来源卡片。前端刷新或重开页面后从该接口恢复历史；浏览器状态不能替代后端历史。
-- 客户端应为发送动作提供 `idempotency_key`。普通会话端点对已完成的重复请求可返回原回答；Agent 流式端点对重复键返回 409。不要把重试生成当作新增用户问题。
-- 独立的 `POST /courses/{course_id}/assistant` 返回单次回答，不创建会话消息。需要连续追问、历史恢复或桌宠共享会话时，使用上述会话端点。
-- 当前历史正文保存在本地 SQLite，可能包含用户输入和模型回答。不要将数据库、备份或真实会话文本加入 Git、日志及测试样例；云端多用户存储与访问隔离须另行实现。
+## 路由与写入边界
 
-## 并行开发边界
+路由在 `app/api/v1/routes.py` 注册 `materials`、`notebook`、`generation`、`agent`、`forest` 等模块。主要路径包括：
 
-- 三个分支从同一个已确认的 `main` 提交建立。各工作区使用独立的 `NOTEBOOK_DATA_DIR` 和端口配置，避免不同实例同时写同一 SQLite。修改 Vite 代理时核对后端地址和 CORS。
-- 涉及共享模型、schema、API 路径或语义的变动，应先统一契约再同步各分支；不要在各分支建立重复的课程、笔记或知识树数据源。
-- 当前实现面向本地单用户工作区。云端持久化、身份和用户隔离需要单独实施与验证。
+- `GET/PUT /api/v1/courses/{course_id}/notebooks/{notebook_id}/document`：读取/写入正文；请求带 `expected_revision`，陈旧写入返回冲突，不应静默覆盖。
+- `GET/PUT /api/v1/notebooks/unbound/{notebook_id}/document`：无课程绑定 Notebook 的对应正文路径。
+- `POST /api/v1/notebooks/{notebook_id}/assets`：登记 Notebook 上传资源；`POST /api/v1/notebooks/{notebook_id}/upload-batches/{batch_id}/complete` 及对应 `GET` 状态路径：完成上传批次并查询处理状态。
+- `GET /api/v1/assets/{asset_id}/document` 与 `/document/runs/{run_id}`：读取当前或指定解析版本；ParseRun 与 Asset 关联，DocumentIR 保存在解析运行结果中。
+- `POST /api/v1/notebooks/{notebook_id}/generation-jobs`：创建持久生成任务；同组 GET、`/{job_id}`、`retry`、`cancel` 管理任务。
+- 森林、会话、Agent 与传统课程/资料/Note 路径见 [API 契约](api.md)，均以路由源码为准。
 
-实现入口：`apps/backend/app/core/config.py`、`app/db/models.py`、`app/db/forest_models.py`、`app/api/v1/routes.py`；运行、迁移和备份见 [运维](operations.md) 与 [迁移](migrations.md)。
+上传入口为 Notebook 资源 API；Asset、NotebookAsset、Material 及批次/任务记录维持资源归属与异步状态。传统 `POST /courses/{course_id}/materials` 仍由 `materials` 路由注册，属于保留的兼容路径。图片附件走 Notebook attachment/asset 路径；实际支持类型与限制由 capabilities、上传校验和设置决定。
+
+## 生成与冲突保护
+
+上传后初始/增量生成通过 `NotebookGenerationInput` 追踪每个 Asset 的幂等和恢复状态。Worker 使用持久化 ParseRun/DocumentIR 快照，先检查解析质量与来源；生成后验证结构、公式及引用，再按任务保存的 `base_document_revision` 对当前正文合并。revision 已变化时须处理冲突，不能覆盖用户新编辑。任务状态、重试和取消由持久 API/Worker 管理。实现声称的具体质量门禁以 Worker 与 generation/context 代码为准；本契约不声称真实模型输出已验收。
+
+失败任务的“未部分写入”行为应以事务边界和自动测试确认；不能从文档推定。若需要修改，应补测试覆盖截断、公式/表格/图片节点、无效来源、重试幂等、用户并发编辑和失败回滚。
+
+## 前端、森林和 Agent
+
+Notebook 页面从 document API 读 JSON 与 revision，编辑器提交预期版本；未知/不可渲染节点及数学错误的具体表现由当前编辑器组件负责，真实浏览器边界仍待验收。`NotebookSection` 由 `document_json` 重建，供树、搜索、阅读位置等定位；稳定 block ID 用于锚定正文。
+
+知识森林读课程/Notebook 及目录和关系，不另存正文。Agent 服务端工具按会话课程及可选 Notebook 范围加载现有正文、目录、已处理资料和证据；上传解析流程由后台任务处理，Agent 不应重复解析，也不应把浏览器临时内容当作权威。来源和范围须由服务端校验。
+
+## 备份、迁移与安全
+
+本地默认 SQLite 位于 `<NOTEBOOK_DATA_DIR>/notebook.sqlite3`，原始资源位于数据根目录管理的存储路径。备份应保留 Notebook 正文、revision、来源映射、资产和历史可读性；恢复先预览并恢复到隔离目录。迁移只在隔离库验证升级、重复执行和恢复，不得触碰用户真实库。运行时数据库、原始文件、`.env`、密钥和真实会话不得提交。
+
+详见 [架构说明](architecture.md)、[API](api.md)、[解析说明](parsing.md)、[迁移与恢复](migrations.md) 和 [验收矩阵](acceptance.md)。

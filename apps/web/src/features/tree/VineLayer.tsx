@@ -1,7 +1,11 @@
-import { memo, useEffect, useId, useMemo } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { FocusEvent, PointerEvent, KeyboardEvent } from 'react';
 import { buildVine, resolveVineLod, stableHash } from './vineGeometry';
 import type { VineInput, RelationLeaf, VineGeometry, Point, VineExclusionZone } from './vineGeometry';
+import { growthLedger, treeGrowthEnabled } from './growth/ledger';
+import { useGrowthBlocked } from './growth/useGrowthPlayback';
+import { playVineGrowth } from './growth/paint';
+import { growthVisible } from './growth/visibility';
 
 /** Layer is an SVG child. Parent owns camera transform, panel, tooltip and note routing. */
 export type VineLayerProps = {
@@ -33,10 +37,11 @@ export function VineDefinitions({ prefix }: { prefix: string }) {
   </defs>;
 }
 
-export function VineLeafPaint({ leaf, prefix, leafAtlasHref, details = true }: {
-  leaf: RelationLeaf; prefix: string; leafAtlasHref?: string; details?: boolean;
+export function VineLeafPaint({ leaf, prefix, leafAtlasHref, details = true, groupId }: {
+  leaf: RelationLeaf; prefix: string; leafAtlasHref?: string; details?: boolean; groupId?: string;
 }) {
   return <g transform={leaf.transform} pointerEvents="none" aria-hidden="true">
+    <g data-growth-relation-leaf={leaf.relationId} data-growth-vine-group={groupId} data-growth-origin="0px 0px">
     {leafAtlasHref
       ? <svg className="relation-leaf-texture" x={-17} y={-50} width={34} height={51}
           viewBox={`${leaf.variant * 418} 0 418 627`} preserveAspectRatio="xMidYMid meet" overflow="hidden">
@@ -45,11 +50,11 @@ export function VineLeafPaint({ leaf, prefix, leafAtlasHref, details = true }: {
       : <path className="relation-leaf-shape" d={leaf.outline} fill={`url(#${prefix}-leaf-${leaf.variant})`} />}
     <path className="relation-vein" d={leaf.vein} opacity={leafAtlasHref ? .35 : 1} />
     {details && leaf.sideVeins.map((d,i) => <path key={i} className="relation-side-vein" d={d} opacity={leafAtlasHref ? .3 : 1} />)}
-  </g>;
+    </g></g>;
 }
 
 export function VineStemPaint({ vine, details = true }: { vine: VineGeometry; details?: boolean }) {
-  return <g pointerEvents="none" aria-hidden="true">
+  return <g pointerEvents="none" aria-hidden="true" data-growth-vine-group={vine.id} data-growth-vine-path={vine.centerline}>
     <path className="vine-outline" d={vine.outline} />
     {vine.grain.map((d,i) => <path className="vine-grain" d={d} key={`grain-${i}`} />)}
     {details && vine.tendrils.map((d,i) => <path className="vine-tendril" d={d} key={`tendril-${i}`} />)}
@@ -60,6 +65,12 @@ export const VineLayer = memo(function VineLayer({
   groups, screenScale, selectedRelationId, selectedGroupId, leafAtlasHref,
   onRelation, onGroup, onPreview, relationLabel, groupLabel, groupMembers, previewId, previewItemId, onSelectedPoint, leafExclusions
 }: VineLayerProps) {
+  const root = useRef<SVGGElement>(null);
+  const activePlayback = useRef<(() => void) | null>(null);
+  const animatedStems = useRef(new Set<string>());
+  const blocked = useGrowthBlocked();
+  const ledgerVersion = useSyncExternalStore(growthLedger.subscribe, growthLedger.snapshot, () => 0);
+  const growthEnabled = treeGrowthEnabled(import.meta.env.VITE_TREE_GROWTH_ENABLED);
   const prefix = `nb-vine-${useId().replace(/:/g, '')}`;
   const vines = useMemo(() => {
     const populated=groups.filter(g=>g.relationIds.length>0);
@@ -71,6 +82,38 @@ export const VineLayer = memo(function VineLayer({
   }, [groups]);
   const lod = useMemo(() => resolveVineLod(vines, screenScale, selectedRelationId, leafExclusions), [vines,screenScale,selectedRelationId,leafExclusions]);
   useEffect(() => {
+    if (!growthEnabled || !root.current || blocked || document.querySelector('[role="dialog"], .modal-backdrop')) return;
+    const pending = growthLedger.pending().filter(event => event.kind === 'relation');
+    const visibleIds = new Set(pending.flatMap(event => {
+      const leaf = [...(root.current?.querySelectorAll<SVGGElement>('[data-growth-relation-leaf]') ?? [])]
+        .find(candidate => candidate.dataset.growthRelationLeaf === event.id);
+      return leaf && growthVisible(leaf) ? [event.id] : [];
+    }));
+    if (!visibleIds.size) return;
+    const stems = new Set(groups.filter(group => group.relationIds.some(id => visibleIds.has(id)) && !animatedStems.current.has(group.id)).slice(0, 2).map(group => group.id));
+    const animatedIds = new Set(groups.filter(group => stems.has(group.id) || animatedStems.current.has(group.id))
+      .flatMap(group => group.relationIds.filter(id => visibleIds.has(id))));
+    for (const id of stems) animatedStems.current.add(id);
+    activePlayback.current?.();
+    const element = root.current;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const playback = reduced?.matches ? null : playVineGrowth(element, animatedIds, stems);
+    const finish = () => {
+      playback?.finish();
+      element.removeEventListener('pointerdown', finish);
+      element.removeEventListener('focusin', finish);
+      reduced?.removeEventListener?.('change', finish);
+      if (activePlayback.current === finish) activePlayback.current = null;
+    };
+    activePlayback.current = finish;
+    element.addEventListener('pointerdown', finish, { once: true });
+    element.addEventListener('focusin', finish, { once: true });
+    reduced?.addEventListener?.('change', finish);
+    void playback?.finished.then(finish);
+    growthLedger.consume(pending.filter(event => event.kind === 'relation' && visibleIds.has(event.id)));
+  }, [ledgerVersion, vines, lod, groups, growthEnabled, blocked]);
+  useEffect(() => () => activePlayback.current?.(), []);
+  useEffect(() => {
     const leaf=vines.flatMap(v=>v.leaves).find(leaf=>leaf.relationId===selectedRelationId);
     if(leaf) onSelectedPoint?.(leaf.relationId,leaf.center);
   },[vines,selectedRelationId,onSelectedPoint]);
@@ -80,7 +123,7 @@ export const VineLayer = memo(function VineLayer({
   const activate = (fn: () => void) => (e: KeyboardEvent<SVGGElement>) => {
     if (e.key==='Enter'||e.key===' ') { e.preventDefault();e.stopPropagation();fn(); }
   };
-  return <g className="nb-vines" data-od-id="grouped-vines">
+  return <g ref={root} className="nb-vines" data-od-id="grouped-vines">
     <VineDefinitions prefix={prefix} />
     {/* All stem hit paths are below all leaf hit paths; no later stem masks a leaf. */}
     <g data-layer="stems">{vines.map(v => <g key={v.id}
@@ -108,7 +151,7 @@ export const VineLayer = memo(function VineLayer({
         onBlur={() => onPreview?.(null)} onPointerLeave={() => onPreview?.(null)}>
         <title>{relationLabel?.(l.relationId)}</title>
         <path className="vine-petiole" d={l.petiole} pointerEvents="none" />
-        <VineLeafPaint leaf={l} prefix={prefix} leafAtlasHref={leafAtlasHref} details={lod.decorations} />
+        <VineLeafPaint leaf={l} prefix={prefix} leafAtlasHref={leafAtlasHref} details={lod.decorations} groupId={vines.find(v => v.leaves.includes(l))?.id} />
         <circle cx={l.center.x} cy={l.center.y} r={lod.hitRadius} fill="transparent" />
         <circle className="relation-leaf-focus" cx={l.center.x} cy={l.center.y} r={lod.hitRadius+2/screenScale} pointerEvents="none" />
         {selectedRelationId===l.relationId && <circle className="selected-dot"

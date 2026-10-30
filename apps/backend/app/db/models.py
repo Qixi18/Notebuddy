@@ -160,6 +160,16 @@ class NotebookRelation(Base):
     )
 
 
+class NotebookRelationSuppression(Base):
+    """Keep deliberate removal from being undone by later model jobs."""
+    __tablename__ = 'notebook_relation_suppressions'
+    pair_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    left_notebook_id: Mapped[str] = mapped_column(ForeignKey('notebooks.id', ondelete='CASCADE'))
+    right_notebook_id: Mapped[str] = mapped_column(ForeignKey('notebooks.id', ondelete='CASCADE'))
+    anchors_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
 class NotebookReadingPosition(Base):
     __tablename__ = "notebook_reading_positions"
     notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True)
@@ -249,6 +259,7 @@ class Material(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parser_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    processing_route: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
     document_warning: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     chapter_order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
@@ -275,6 +286,7 @@ class NotebookUploadBatch(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    processing_route: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
 
 
 class NotebookGenerationInput(Base):
@@ -338,6 +350,24 @@ class Asset(Base):
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="ready", server_default="ready")
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    processing_route: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
+    processing_config_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}")
+
+
+class ProcessingStep(Base):
+    """Validated resumable work, reusable only for an identical input fingerprint."""
+
+    __tablename__ = "processing_steps"
+    __table_args__ = (UniqueConstraint("scope", "stage", "step_key", "fingerprint",
+                                      name="uq_processing_steps_identity"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    scope: Mapped[str] = mapped_column(String(100), index=True)
+    stage: Mapped[str] = mapped_column(String(40))
+    step_key: Mapped[str] = mapped_column(String(100))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    result_json: Mapped[str] = mapped_column(Text)
+    usage_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
 class AssetMigrationIssue(Base):
@@ -456,6 +486,9 @@ class AssetProcessingJob(Base):
     kind: Mapped[str] = mapped_column(String(30), nullable=False, default="image_parse")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    phase: Mapped[str] = mapped_column(String(30), default='parse', server_default='parse')
+    completed_pages: Mapped[int] = mapped_column(default=0, server_default='0')
+    total_pages: Mapped[int] = mapped_column(default=0, server_default='0')
     error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
@@ -510,6 +543,7 @@ class NotebookGenerationJob(Base):
     generator_version: Mapped[str] = mapped_column(String(40), default="1", server_default="1", nullable=False)
     knowledge_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_map_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    relation_job_id: Mapped[str | None] = mapped_column(ForeignKey('forest_jobs.id', ondelete='SET NULL'), nullable=True)
 
 
 class NotebookGenerationCandidate(Base):
@@ -771,6 +805,8 @@ class ProcessingJob(Base):
     kind: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False)
     progress: Mapped[int] = mapped_column(default=0, nullable=False)
+    completed_pages: Mapped[int] = mapped_column(default=0, server_default='0')
+    total_pages: Mapped[int] = mapped_column(default=0, server_default='0')
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     phase: Mapped[str] = mapped_column(String(30), default="queued", nullable=False)
     web_search_status: Mapped[str] = mapped_column(String(30), default="not_started", nullable=False)
@@ -1074,12 +1110,32 @@ class ConversationMessage(Base):
     model_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
     failure_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    process_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggestions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
     evidence: Mapped[list[MessageEvidence]] = relationship(
         back_populates="message", cascade="all, delete-orphan"
     )
+
+    @property
+    def process(self) -> dict | None:
+        import json
+        try:
+            value = json.loads(self.process_json) if self.process_json else None
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    @property
+    def suggestions(self) -> list | None:
+        import json
+        try:
+            value = json.loads(self.suggestions_json) if self.suggestions_json else None
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, list) else None
 
 
 class MessageEvidence(Base):
@@ -1184,6 +1240,10 @@ class NoteSuggestion(Base):
 
     note: Mapped[Note] = relationship()
 
+    @property
+    def note_title(self) -> str | None:
+        return self.note.title if self.note else None
+
 
 class Feedback(Base):
     __tablename__ = "feedback"
@@ -1204,6 +1264,84 @@ class Feedback(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
 
     course: Mapped[Course] = relationship(back_populates="feedback")
+
+
+class Quiz(Base):
+    __tablename__ = "quizzes"
+    __table_args__ = (Index("ix_quizzes_course_status", "course_id", "status"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    material_id: Mapped[str | None] = mapped_column(
+        ForeignKey("materials.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    items: Mapped[list[QuizItem]] = relationship(
+        back_populates="quiz", cascade="all, delete-orphan", order_by="QuizItem.seq"
+    )
+
+
+class QuizItem(Base):
+    __tablename__ = "quiz_items"
+    __table_args__ = (Index("ix_quiz_items_quiz_seq", "quiz_id", "seq"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"))
+    seq: Mapped[int] = mapped_column(nullable=False)
+    item_type: Mapped[str] = mapped_column(String(20), default="choice", nullable=False)
+    stem: Mapped[str] = mapped_column(Text, nullable=False)
+    options_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    difficulty: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    favorite: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    marked: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    dismissed: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    knowledge_node_id: Mapped[str | None] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    quiz: Mapped[Quiz] = relationship(back_populates="items")
+
+
+class QuizAttempt(Base):
+    __tablename__ = "quiz_attempts"
+    __table_args__ = (
+        Index("ix_quiz_attempts_item_created", "item_id", "created_at"),
+        # 请求级幂等键：同一次作答动作（含其网络重试）只能落一行；不同动作即使答案
+        # 相同也各算一次。NULL 在唯一索引里互不相同，因此不传键的旧客户端不受影响。
+        Index("uq_quiz_attempts_item_request", "item_id", "request_key", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"))
+    item_id: Mapped[str] = mapped_column(ForeignKey("quiz_items.id", ondelete="CASCADE"))
+    request_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    correct: Mapped[bool] = mapped_column(nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+
+
+class ReviewArtifact(Base):
+    __tablename__ = "review_artifacts"
+    __table_args__ = (Index("ix_review_artifacts_course_kind", "course_id", "kind"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    favorite: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    dismissed: Mapped[bool] = mapped_column(default=False, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
 
 
 class BackupRecord(Base):

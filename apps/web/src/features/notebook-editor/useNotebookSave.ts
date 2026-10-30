@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError } from '../../api'
 import { stableStringify, type DocNode, type NotebookDocumentResponse } from './document'
-import { clearDraft, writeDraft } from './draftStore'
+import { clearDraft, writeDraft, type NotebookDraft } from './draftStore'
 
 export type NotebookSaveState = 'saved' | 'unsaved' | 'saving' | 'error' | 'conflict'
 
@@ -58,6 +58,13 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     if (!contentRef.current) return false
     return stableStringify(contentRef.current) !== savedSnapshotRef.current
   }, [])
+
+  // Route changes unmount the editor without firing `beforeunload`. Preserve
+  // the current body immediately so a fast Notebook switch cannot cancel the
+  // only pending draft write.
+  useEffect(() => () => {
+    if (isDirty() && contentRef.current) persistDraft(contentRef.current, true)
+  }, [isDirty, persistDraft])
 
   const saveNow = useCallback(async (): Promise<boolean> => {
     if (!courseId || !notebookId || !contentRef.current) return false
@@ -156,6 +163,15 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     onDirtyChangeRef.current?.(false)
   }, [])
 
+  const restoreDraft = useCallback((draft: NotebookDraft) => {
+    if (!courseId || !notebookId || draft.key !== `notebook:${courseId}:${notebookId}`) return
+    // The draft's revision is the version it was edited against. Keeping the
+    // freshly loaded server revision here would silently overwrite newer text.
+    revisionRef.current = draft.revision
+    setRevision(draft.revision)
+    markEdited(draft.content)
+  }, [courseId, notebookId, markEdited])
+
   const retry = useCallback(() => {
     if (conflictRef.current) return
     failedRef.current = false
@@ -217,7 +233,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
 
   return {
     state, error, revision, lastSavedAt, conflictOpen, setConflictOpen,
-    reset, markEdited, saveNow: flush, retry, isDirty, getRevision: () => revisionRef.current,
+    reset, restoreDraft, markEdited, saveNow: flush, retry, isDirty, getRevision: () => revisionRef.current,
     fetchServer, applyServer, overwriteServer, keepLocalDraft,
   }
 }

@@ -43,6 +43,9 @@ class Settings:
     notebook_generator: str = "deepseek"
     generation_batch_chars: int = 18_000
     generation_max_chars: int = 120_000
+    document_processing_route: str = "standard"
+    llm_max_upload_bytes: int = 200 * 1024 * 1024
+    llm_max_pages: int = 2_000
     allowed_extensions: tuple[str, ...] = (".pptx", ".pdf", ".docx")
 
     @property
@@ -80,6 +83,9 @@ settings = Settings(
     notebook_generator=(os.getenv("NOTEBOOK_GENERATOR", "deepseek").strip().lower() or "deepseek"),
     generation_batch_chars=max(2_000, int(os.getenv("NOTEBOOK_GENERATION_BATCH_CHARS", "18000"))),
     generation_max_chars=max(10_000, int(os.getenv("NOTEBOOK_GENERATION_MAX_CHARS", "120000"))),
+    document_processing_route=os.getenv("NOTEBOOK_DOCUMENT_PROCESSING_ROUTE", "standard"),
+    llm_max_upload_bytes=int(os.getenv("NOTEBOOK_LLM_MAX_UPLOAD_MB", "200")) * 1024 * 1024,
+    llm_max_pages=max(1, int(os.getenv("NOTEBOOK_LLM_MAX_PAGES", "2000"))),
     allowed_extensions=tuple(
         item.strip().lower() for item in os.getenv("NOTEBOOK_ALLOWED_EXTENSIONS", ".pptx,.pdf,.docx").split(",") if item.strip()
     ) or (".pptx",),

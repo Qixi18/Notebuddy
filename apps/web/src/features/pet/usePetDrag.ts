@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Keyboar
 
 import {
   PET_DRAG_THRESHOLD,
-  PET_FLING_SPEED,
   PET_KEY_STEP,
   PET_SNAP_RANGE,
   PET_VIEWPORT_MARGIN,
@@ -17,11 +16,10 @@ import {
   type PetSize,
   type PetViewport,
 } from './petLayout'
-import { FlingTracker, speedOf, stepFling, type FlingState } from './petPhysics'
 import { loadPetPlacement, savePetPlacement } from './petStorage'
 
 /**
- * 页内桌宠的拖拽状态机：rail 拖出即 float，松手可甩抛 / 贴边半隐藏 / 拖回左栏。
+ * 页内桌宠的拖拽状态机：rail 拖出即 float，松手即停在落点（无惯性）/ 贴边半隐藏 / 拖回左栏。
  * 坐标只进 ref，逐帧只写 transform（dsh-whale-girl 踩过的流式卡顿教训）；
  * React state 仅用于拖拽中、贴边这类低频视觉态。
  */
@@ -44,7 +42,6 @@ type UsePetDragOptions = {
   size: PetSize
   /** 窄屏关闭拖拽与浮层 */
   enabled: boolean
-  reducedMotion: boolean
   /** rail 被拖出瞬间，取舞台视口位置作为浮层起点 */
   getRailOrigin: () => PetPoint | null
   /** 松手时判定「拖回左栏」的区域 */
@@ -64,7 +61,7 @@ function distanceToRect(point: PetPoint, rect: DOMRect): number {
 }
 
 export function usePetDrag(options: UsePetDragOptions): PetDragApi {
-  const { mode, size, enabled, reducedMotion } = options
+  const { mode, size, enabled } = options
 
   const floatRef = useRef<HTMLDivElement | null>(null)
   const posRef = useRef<PetPoint>({ x: 0, y: 0 })
@@ -82,8 +79,6 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
     fromRail: boolean
     origPos: PetPoint
   } | null>(null)
-  const trackerRef = useRef(new FlingTracker())
-  const flingRafRef = useRef(0)
   const glideTimerRef = useRef(0)
   const initializedRef = useRef(false)
   const lastDragAtRef = useRef(0)
@@ -94,8 +89,6 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
   sizeRef.current = size
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
-  const reducedRef = useRef(reducedMotion)
-  reducedRef.current = reducedMotion
   const railOriginRef = useRef(options.getRailOrigin)
   railOriginRef.current = options.getRailOrigin
   const railBoundsRef = useRef(options.getRailBounds)
@@ -121,8 +114,8 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
   }, [write])
 
   const persist = useCallback(() => {
-    const { xRatio, yRatio } = pointToRatio(posRef.current, viewport())
-    savePetPlacement({ version: 1, mode: 'float', xRatio, yRatio })
+    const { xRatio, yRatio } = pointToRatio(posRef.current, viewport(), sizeRef.current)
+    savePetPlacement({ version: 1, mode: 'float', xRatio, yRatio, size: sizeRef.current.height })
   }, [])
 
   const dockTo = useCallback((edge: PetEdge) => {
@@ -136,13 +129,6 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
     setDockEdge(null)
   }, [])
 
-  const stopFling = useCallback(() => {
-    if (flingRafRef.current) {
-      cancelAnimationFrame(flingRafRef.current)
-      flingRafRef.current = 0
-    }
-  }, [])
-
   const finishDrop = useCallback(() => {
     const vp = viewport()
     posRef.current = clampToViewport(posRef.current, sizeRef.current, vp)
@@ -152,27 +138,6 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
     write()
     persist()
   }, [dockTo, persist, undock, write])
-
-  const startFling = useCallback((state: FlingState) => {
-    let last = performance.now()
-    let current = state
-    const frame = (now: number) => {
-      const dt = (now - last) / 1000
-      last = now
-      const result = stepFling(current, dt, sizeRef.current, viewport())
-      current = result.state
-      posRef.current = { x: current.x, y: current.y }
-      write()
-      if (result.done) {
-        flingRafRef.current = 0
-        finishDrop()
-        return
-      }
-      flingRafRef.current = requestAnimationFrame(frame)
-    }
-    stopFling()
-    flingRafRef.current = requestAnimationFrame(frame)
-  }, [finishDrop, stopFling, write])
 
   const removeWindowListeners = useCallback(() => {
     window.removeEventListener('pointermove', handleWindowMove)
@@ -209,7 +174,6 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
       sizeRef.current,
       viewport(),
     )
-    trackerRef.current.push(event.clientX, event.clientY)
     write()
   }
 
@@ -232,17 +196,11 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
       onReturnRef.current()
       return
     }
-    const velocity = reducedRef.current ? null : trackerRef.current.velocity()
-    if (velocity && speedOf(velocity) > PET_FLING_SPEED) {
-      startFling({ ...posRef.current, ...velocity })
-      return
-    }
     finishDrop()
   }
 
   const onPointerDown = useCallback((event: ReactPointerEvent) => {
     if (event.button !== 0 || !enabledRef.current) return
-    stopFling()
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -253,18 +211,16 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
       fromRail: modeRef.current === 'rail',
       origPos: { ...posRef.current },
     }
-    trackerRef.current.reset()
     try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* 捕获失败不阻塞拖拽 */ }
     window.addEventListener('pointermove', handleWindowMove)
     window.addEventListener('pointerup', handleWindowUp)
     window.addEventListener('pointercancel', handleWindowUp)
-  }, [stopFling])
+  }, [])
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent) => {
     if (modeRef.current !== 'float') return
     if (event.key === 'Escape') {
       const drag = dragRef.current
-      stopFling()
       if (drag) {
         dragRef.current = null
         removeWindowListeners()
@@ -290,7 +246,6 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
     const delta = deltas[event.key]
     if (!delta) return
     event.preventDefault()
-    stopFling()
     undock()
     posRef.current = clampToViewport(
       { x: posRef.current.x + delta[0], y: posRef.current.y + delta[1] },
@@ -299,7 +254,7 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
     )
     write()
     persist()
-  }, [finishDrop, persist, removeWindowListeners, stopFling, undock, write])
+  }, [finishDrop, persist, removeWindowListeners, undock, write])
 
   const onDoubleClick = useCallback(() => {
     if (modeRef.current === 'float') onReturnRef.current()
@@ -318,12 +273,11 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
       { x: Math.max(PET_VIEWPORT_MARGIN, vp.width - sizeNow.width - PET_VIEWPORT_MARGIN), y: PET_VIEWPORT_MARGIN },
     ]
     const best = candidates.reduce((a, b) => (distanceToRect(b, rect) > distanceToRect(a, rect) ? b : a))
-    stopFling()
     undock()
     posRef.current = clampToViewport(best, sizeNow, vp)
     glideWrite()
     persist()
-  }, [glideWrite, persist, stopFling, undock])
+  }, [glideWrite, persist, undock])
 
   /* 进入浮层态：优先用存储位置（并恢复贴边），否则默认右下角 */
   useLayoutEffect(() => {
@@ -346,7 +300,6 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
   useEffect(() => {
     if (mode !== 'float') return
     const onResize = () => {
-      stopFling()
       posRef.current = clampToViewport(posRef.current, sizeRef.current, viewport())
       const edge = nearestEdge(posRef.current, sizeRef.current, viewport())
       if (edge) dockTo(edge)
@@ -356,13 +309,22 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [dockTo, mode, persist, stopFling, undock, write])
+  }, [dockTo, mode, persist, undock, write])
+
+  /* 桌宠大小变化：盒子变大后可能顶出视口，收进边界并重估贴边 */
+  useEffect(() => {
+    if (mode !== 'float') return
+    posRef.current = clampToViewport(posRef.current, sizeRef.current, viewport())
+    const edge = nearestEdge(posRef.current, sizeRef.current, viewport())
+    if (edge) dockTo(edge)
+    else undock()
+    write()
+  }, [dockTo, mode, size.width, size.height, undock, write])
 
   useEffect(() => () => {
     removeWindowListeners()
-    stopFling()
     window.clearTimeout(glideTimerRef.current)
-  }, [removeWindowListeners, stopFling])
+  }, [removeWindowListeners])
 
   return { floatRef, dragging, dockEdge, onPointerDown, onKeyDown, onDoubleClick, yieldFromRect, lastDragAt: lastDragAtRef }
 }

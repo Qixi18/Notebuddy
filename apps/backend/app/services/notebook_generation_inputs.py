@@ -41,6 +41,7 @@ def cancel_generation_inputs(db: Session, job_id: str) -> None:
 
 def ensure_upload_batch(
     db: Session, notebook_id: str, batch_id: str | None, *, close_if_new: bool = False,
+    processing_route: str | None = None,
 ) -> NotebookUploadBatch:
     now = datetime.now(UTC)
     identity = (batch_id or new_id()).strip()
@@ -52,11 +53,19 @@ def ensure_upload_batch(
             raise HTTPException(409, "上传批次不属于当前笔记")
         if batch.closed_at is not None:
             raise HTTPException(409, "上传批次已关闭")
+        if isinstance(processing_route, str) and processing_route != batch.processing_route:
+            raise HTTPException(409, "同一上传批次必须使用同一处理路线")
         batch.updated_at = now
         return batch
+    from app.document_processing.routes import resolve_route
+    try:
+        route = resolve_route(processing_route)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     batch = NotebookUploadBatch(
         id=identity, notebook_id=notebook_id, created_at=now, updated_at=now,
         closed_at=now if close_if_new else None,
+        processing_route=route,
     )
     db.add(batch)
     db.flush()
@@ -123,18 +132,31 @@ def batch_status(db: Session, batch: NotebookUploadBatch) -> dict:
         NotebookGenerationJob.notebook_id == batch.notebook_id,
         NotebookGenerationJob.id.in_([row.generation_job_id for row in rows if row.generation_job_id]),
     )).all() if any(row.generation_job_id for row in rows) else []
+    from app.db.models import ForestJob
+    relation_jobs = [db.get(ForestJob, job.relation_job_id) for job in jobs if job.relation_job_id]
+    def reading_progress(row):
+        model = ProcessingJob if row.parse_kind == 'material' else AssetProcessingJob
+        task = db.get(model, row.parse_job_id) if row.parse_job_id else None
+        return {'phase': getattr(task, 'phase', None),
+                'completed_pages': getattr(task, 'completed_pages', 0),
+                'total_pages': getattr(task, 'total_pages', 0)}
     return {
         "id": batch.id, "notebook_id": batch.notebook_id, "status": status,
         "created_at": batch.created_at, "updated_at": batch.updated_at,
         "closed_at": batch.closed_at,
+        "processing_route": batch.processing_route,
         "inputs": [{
             "asset_id": row.asset_id, "parse_job_id": row.parse_job_id,
             "parse_result_fingerprint": row.parse_result_fingerprint,
             "generation_job_id": row.generation_job_id, "status": row.status,
             "error_code": row.error_code, "error_message": row.error_message,
             "retry_count": row.retry_count,
+            "processing_route": db.get(Asset, row.asset_id).processing_route,
+            **reading_progress(row),
         } for row in rows],
         "generation_jobs": [{"id": job.id, "status": job.status} for job in jobs],
+        "relation_jobs": [{'id': job.id, 'status': job.status, 'error_message': job.error_message}
+                          for job in relation_jobs if job],
     }
 
 
@@ -285,52 +307,53 @@ def coordinate_generation_inputs(db: Session) -> int:
         ).order_by(NotebookGenerationInput.created_at, NotebookGenerationInput.asset_id)).all()
         if not ready:
             continue
-        asset_ids = [row.asset_id for row in ready]
-        fingerprint = hashlib.sha256("|".join(
-            f"{row.asset_id}:{row.parse_result_fingerprint}" for row in ready
-        ).encode()).hexdigest()
-        key = f"batch-{batch.id[:20]}-{fingerprint[:48]}"
-        try:
-            from app.api.v1.generation import create_generation_job
-            from app.schemas.generation import NotebookGenerationCreate
-
-            # The generation endpoint persists an immutable source snapshot.
-            # The same session owns the input status updates so a successful
-            # task can reconcile an interrupted link step by its source IDs.
-            response = create_generation_job(
-                batch.notebook_id, NotebookGenerationCreate(asset_ids=asset_ids), key, db,
-            )
-            task_id = response["id"]
-            task = db.get(NotebookGenerationJob, task_id)
-            for row in ready:
-                if task and task.status in {"failed", "conflict", "cancelled", "cancel_requested"}:
-                    row.status = "generation_failed"
-                    row.error_code = task.error_code or task.status
-                    row.error_message = task.error_message or "生成任务未完成，请重试"
-                else:
-                    row.status = "completed" if task and task.status == "completed" else "generating"
-                    row.error_code = row.error_message = None
-                row.generation_job_id = task_id
-                row.retry_count += 1
-                row.updated_at = now
-                if row.status == "completed":
-                    row.finished_at = now
-            db.commit()
-            enqueued += 1
-        except HTTPException as exc:
-            db.rollback()
-            failed = db.scalars(select(NotebookGenerationInput).where(
-                NotebookGenerationInput.asset_id.in_(asset_ids),
-                NotebookGenerationInput.status == "ready",
-            )).all()
-            for row in failed:
-                row.status = "parse_failed"
-                row.error_code = "generation_input_rejected"
-                row.error_message = str(exc.detail)[:1000]
-                row.updated_at = now
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
+        groups = {}
+        for row in ready:
+            asset = db.get(Asset, row.asset_id)
+            groups.setdefault(asset.processing_route, []).append(row)
+        for group in groups.values():
+            enqueued += _enqueue_ready_group(db, batch, group, now)
     db.commit()
     return enqueued
+
+
+def _enqueue_ready_group(db, batch, ready, now) -> int:
+    """A switched input keeps its upload history but gets a route-homogeneous job."""
+    asset_ids = [row.asset_id for row in ready]
+    fingerprint = hashlib.sha256('|'.join(
+        f'{row.asset_id}:{row.parse_result_fingerprint}' for row in ready
+    ).encode()).hexdigest()
+    key = f'batch-{batch.id[:20]}-{fingerprint[:48]}'
+    try:
+        from app.api.v1.generation import create_generation_job
+        from app.schemas.generation import NotebookGenerationCreate
+        response = create_generation_job(batch.notebook_id,
+            NotebookGenerationCreate(asset_ids=asset_ids), key, db)
+        task_id = response['id']
+        task = db.get(NotebookGenerationJob, task_id)
+        for row in ready:
+            if task and task.status in {'failed', 'conflict', 'cancelled', 'cancel_requested'}:
+                row.status = 'generation_failed'
+                row.error_code = task.error_code or task.status
+                row.error_message = task.error_message or '生成任务未完成，请重试'
+            else:
+                row.status = 'completed' if task and task.status == 'completed' else 'generating'
+                row.error_code = row.error_message = None
+            row.generation_job_id = task_id
+            row.retry_count += 1
+            row.updated_at = now
+            if row.status == 'completed':
+                row.finished_at = now
+        db.commit()
+        return 1
+    except HTTPException as exc:
+        db.rollback()
+        failed = db.scalars(select(NotebookGenerationInput).where(
+            NotebookGenerationInput.asset_id.in_(asset_ids), NotebookGenerationInput.status == 'ready')).all()
+        for row in failed:
+            row.status = 'parse_failed'
+            row.error_code = 'generation_input_rejected'
+            row.error_message = str(exc.detail)[:1000]
+            row.updated_at = now
+        db.commit()
+        return 0

@@ -21,6 +21,7 @@ class StorageSettings(SettingsSection):
     data_dir: str
     database: str
     max_upload_mb: int
+    processing_route: Literal["standard", "llm"] = "standard"
 
 
 class SettingsLimits(SettingsSection):
@@ -45,6 +46,7 @@ class SettingsStatus(SettingsSection):
 
 
 class SettingsUpdate(SettingsSection):
+    NOTEBOOK_DOCUMENT_PROCESSING_ROUTE: str | None = None
     DEEPSEEK_BASE_URL: str | None = None
     DEEPSEEK_MODEL: str | None = None
     DEEPSEEK_TIMEOUT_SECONDS: str | None = None

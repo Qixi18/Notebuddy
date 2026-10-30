@@ -180,7 +180,7 @@ def assess(
             message=f"第 {_ranges(rotated_pages)} 页存在旋转，阅读顺序可能受影响",
             page_numbers=rotated_pages,
         ))
-    if doc_type in {"pptx", "docx"}:
+    if doc_type in {"pptx", "docx"} and document.parser_name != 'llm-vision':
         issues.append(QualityIssue(
             code="office_limited", severity="warning",
             message="PPTX/DOCX 仅提供基础解析，本轮不保证公式、图表与版式质量",

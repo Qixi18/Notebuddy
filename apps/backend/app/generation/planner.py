@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.generation.budget import (
+    TARGET_OUTPUT_TOKENS,
+    UNIT_OUTPUT_OVERHEAD,
+    block_output_tokens,
+    unit_output_tokens,
+)
 from app.generation.context import _normalize, block_chars
 
 
@@ -28,6 +34,7 @@ class KnowledgeUnit:
     block_ids: list[str] = field(default_factory=list)
     chars: int = 0
     reason: str | None = None
+    output_tokens: int = 0  # Planning-only estimate; persisted plan contract is unchanged.
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +96,7 @@ def build_plan(snapshot: dict[str, Any]) -> dict[str, Any]:
                 block_ids=[block["block_id"] for block in blocks],
                 chars=sum(block_chars(block) for block in blocks),
                 reason=reason,
+                output_tokens=unit_output_tokens(blocks) if snapshot.get("generator") == "deepseek" else 0,
             )
             units.extend(_split_oversized(unit, blocks, snapshot))
     batches = _batch_units(units, int(snapshot.get("batch_chars") or 18_000))
@@ -114,24 +122,31 @@ def _split_oversized(
     unit: KnowledgeUnit, blocks: list[dict[str, Any]], snapshot: dict[str, Any],
 ) -> list[KnowledgeUnit]:
     limit = int(snapshot.get("batch_chars") or 18_000)
-    if unit.chars <= limit:
+    output_limit = TARGET_OUTPUT_TOKENS if snapshot.get("generator") == "deepseek" else None
+    if unit.chars <= limit and (output_limit is None or unit.output_tokens <= output_limit):
         return [unit]
     parts: list[KnowledgeUnit] = []
     current: list[str] = []
     chars = 0
+    tokens = UNIT_OUTPUT_OVERHEAD if output_limit else 0
     for block in blocks:
         size = block_chars(block)
-        if current and chars + size > limit:
-            parts.append(_clone(unit, len(parts), current, chars))
+        block_tokens = block_output_tokens(block) if output_limit else 0
+        if current and (chars + size > limit or (output_limit and tokens + block_tokens > output_limit)):
+            parts.append(_clone(unit, len(parts), current, chars, tokens))
             current, chars = [], 0
+            tokens = UNIT_OUTPUT_OVERHEAD if output_limit else 0
         current.append(block["block_id"])
         chars += size
+        tokens += block_tokens
     if current:
-        parts.append(_clone(unit, len(parts), current, chars))
+        parts.append(_clone(unit, len(parts), current, chars, tokens))
     return parts
 
 
-def _clone(unit: KnowledgeUnit, index: int, block_ids: list[str], chars: int) -> KnowledgeUnit:
+def _clone(
+    unit: KnowledgeUnit, index: int, block_ids: list[str], chars: int, output_tokens: int,
+) -> KnowledgeUnit:
     return KnowledgeUnit(
         unit_id=f"{unit.unit_id}-{index + 1}",
         title=unit.title if index == 0 else f"{unit.title}（续 {index + 1}）",
@@ -146,6 +161,7 @@ def _clone(unit: KnowledgeUnit, index: int, block_ids: list[str], chars: int) ->
         block_ids=block_ids,
         chars=chars,
         reason=unit.reason,
+        output_tokens=output_tokens,
     )
 
 
@@ -153,14 +169,17 @@ def _batch_units(units: list[KnowledgeUnit], limit: int) -> list[list[str]]:
     batches: list[list[str]] = []
     current: list[str] = []
     size = 0
+    tokens = 0
     for unit in units:
         if unit.intent == "skip":
             continue
-        if current and size + unit.chars > limit:
+        if current and (size + unit.chars > limit or tokens + unit.output_tokens > TARGET_OUTPUT_TOKENS):
             batches.append(current)
             current, size = [], 0
+            tokens = 0
         current.append(unit.unit_id)
         size += unit.chars
+        tokens += unit.output_tokens
     if current:
         batches.append(current)
     return batches

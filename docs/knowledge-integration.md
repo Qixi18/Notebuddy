@@ -1,3 +1,7 @@
+# 历史方案说明
+
+本文记录的是早期 KnowledgeProposal、NoteSuggestion 与 Note 数据模型，需按接口分别看待：`GET /courses/{course_id}/knowledge-proposals`、`POST /knowledge-proposals/{proposal_id}/review` 仍由 knowledge 路由提供；前端仍调用旧 Note suggestion 列表/审核路径，但本轮在 `apps/backend/app/api/v1/` 未找到对应后端路由，属于未解决的前后端契约差异，不能据此宣称该旧流程当前可用。它们都不是 Notebook 正文的权威实现。当前 Notebook 正文和编辑建议以 [backend-data-contract.md](backend-data-contract.md)、[architecture.md](architecture.md) 及 `apps/backend/app/api/v1/notebook.py` 为准；森林关系语义以当前 forest 路由、服务和测试为准。
+
 # 阶段三：知识整合与证据规则
 
 ## 数据边界

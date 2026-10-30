@@ -51,6 +51,10 @@ def build_snapshot(db: Session, notebook: Notebook, asset_ids: list[str]) -> dic
         message = "部分资料尚不能用于生成：" + "；".join(item["message"] for item in failures)
         code = failures[0]["code"] if len(failures) == 1 else "generation_input_invalid"
         raise GenerationInputError(message, code=code, details=failures)
+    routes = {source['processing_route'] for source in sources}
+    if len(routes) > 1:
+        raise GenerationInputError('不同处理路线的资料需分别生成', code='mixed_processing_routes')
+    route = next(iter(routes), 'standard')
     current = load_document(notebook.document_json)
     return {
         "notebook_id": notebook.id,
@@ -60,6 +64,8 @@ def build_snapshot(db: Session, notebook: Notebook, asset_ids: list[str]) -> dic
         "current_outline": current_outline(current.content),
         "sources": sources,
         "generator": settings.notebook_generator,
+        "processing_route": route,
+        "provider": sources[0].get('provider', {}) if sources else {},
         "batch_chars": settings.generation_batch_chars,
         "created_for_assets": list(asset_ids),
     }
@@ -85,7 +91,7 @@ def _source_snapshot(db: Session, asset: Asset) -> dict[str, Any]:
     for section in document.sections:
         blocks = []
         for block in document.section_blocks(section):
-            blocks.append(_block_payload(block))
+            blocks.append(_block_payload(block, full=asset.processing_route == 'llm'))
         sections.append({
             "section_id": section.section_id,
             "title": section.title,
@@ -96,7 +102,7 @@ def _source_snapshot(db: Session, asset: Asset) -> dict[str, Any]:
         })
     if not sections:
         # A document without sections still needs a stable grouping.
-        blocks = [_block_payload(block) for block in document.all_blocks() if block.searchable_text()]
+        blocks = [_block_payload(block, full=asset.processing_route == 'llm') for block in document.all_blocks() if block.searchable_text()]
         sections = [{
             "section_id": "sec-1", "title": asset.original_name, "level": 0,
             "page_start": 1, "page_end": max(1, document.page_count), "blocks": blocks,
@@ -111,15 +117,17 @@ def _source_snapshot(db: Session, asset: Asset) -> dict[str, Any]:
         "ir_fingerprint": run.fingerprint,
         "parser": f"{run.parser_name}@{run.parser_version}",
         "quality": quality.to_dict(),
+        "processing_route": json.loads(run.config_json or '{}').get('processing_route', 'standard'),
+        "provider": json.loads(run.config_json or '{}').get('provider', {}),
         "sections": sections,
     }
 
 
-def _block_payload(block) -> dict[str, Any]:
+def _block_payload(block, *, full: bool = False) -> dict[str, Any]:
     table = None
     if block.table:
         table = {
-            "rows": [row[:MAX_TABLE_COLS] for row in block.table.rows[:MAX_TABLE_ROWS]],
+            "rows": block.table.rows if full else [row[:MAX_TABLE_COLS] for row in block.table.rows[:MAX_TABLE_ROWS]],
             "header_rows": block.table.header_rows,
         }
     figure = None
@@ -137,7 +145,7 @@ def _block_payload(block) -> dict[str, Any]:
         "block_id": block.block_id,
         "page_number": block.page_number,
         "type": block.type,
-        "text": block.text[:MAX_BLOCK_CHARS],
+        "text": block.text if full else block.text[:MAX_BLOCK_CHARS],
         "latex": block.latex,
         "table": table,
         "figure": figure,

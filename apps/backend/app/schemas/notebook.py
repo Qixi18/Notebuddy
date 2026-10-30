@@ -9,6 +9,7 @@ from app.schemas.notes import NoteRead
 class SectionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    block_id: str | None = None
     notebook_id: str
     tree_slot: int
     knowledge_node_id: str
@@ -41,6 +42,7 @@ class NotebookSummary(BaseModel):
     is_default: bool
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None = None
     cover_url: str | None = None
 
 
@@ -173,6 +175,7 @@ class NotebookEditSuggestionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
     notebook_id: str
+    notebook_title: str | None = None
     base_revision: int
     rationale: str
     operations: list[dict[str, Any]] = Field(default_factory=list)
@@ -187,6 +190,11 @@ class NotebookEditSuggestionReview(BaseModel):
     decision: Literal["accept", "reject"]
     expected_revision: int = Field(ge=0)
     selected_operation_indices: list[int] | None = Field(default=None, max_length=8)
+
+
+class NotebookEditSuggestionBatchReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    suggestion_ids: list[str] = Field(min_length=1, max_length=200)
 
 
 class NotebookRevisionRead(NotebookRevisionSummary):

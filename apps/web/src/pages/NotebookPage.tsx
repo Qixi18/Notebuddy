@@ -4,6 +4,7 @@ import { api } from '../api'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useWorkspace } from '../components/AppLayout'
 import type { AssetResource, DeletionPreview, Material, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
+import { ProcessingRouteControl, useProcessingRoute } from '../features/notebook/useProcessingRoute'
 import type { AssetProcessingJob } from '../types'
 import {
   NotebookEditor, type AIAction, type NotebookEditorHandle, type SelectionAnchor,
@@ -13,9 +14,11 @@ import {
   type DocNode,
 } from '../features/notebook-editor/document'
 import { useNotebookSave } from '../features/notebook-editor/useNotebookSave'
+import { useDocumentReadingPosition } from '../features/notebook-editor/useDocumentReadingPosition'
 import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
 import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features/notebook-editor/NotebookBridge'
 import { DocumentSourcePreview } from '../features/notebook-editor/DocumentSourcePreview'
+import { historyOriginLabel, useHistoryDialog } from '../features/notebook-editor/historyDialog'
 import './NotebookPage.css'
 
 function serverDate(value: string): Date {
@@ -73,6 +76,7 @@ function NotebookPageBody() {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState<DocNode>({ type: 'doc', content: [] })
   const [loaded, setLoaded] = useState(false)
+  const [editorReady, setEditorReady] = useState(false)
   const [loadError, setLoadError] = useState<string>()
   const [documentWarning, setDocumentWarning] = useState<string>()
   const [uploadError, setUploadError] = useState<string>()
@@ -100,11 +104,24 @@ function NotebookPageBody() {
   const [assetJobs, setAssetJobs] = useState<Record<string, AssetProcessingJob>>({})
   const [assetUploadError, setAssetUploadError] = useState<string>()
   const [allowDuplicateUploads, setAllowDuplicateUploads] = useState(false)
+  const { route: processingRoute, setRoute: setProcessingRoute } = useProcessingRoute()
   const [assetRemoval, setAssetRemoval] = useState<AssetResource>()
   const [generationJob, setGenerationJob] = useState<NotebookGenerationJob | null>(null)
   const [generationBusy, setGenerationBusy] = useState(false)
   const [uploadBatchId, setUploadBatchId] = useState<string>()
   const [uploadBatch, setUploadBatch] = useState<NotebookUploadBatch | null>(null)
+  const aiReadingProgress = uploadBatch?.inputs.reduce((value, item) => item.processing_route === 'llm'
+    ? { count: value.count + 1, done: value.done + (item.completed_pages ?? 0), total: value.total + (item.total_pages ?? 0) }
+    : value, { count: 0, done: 0, total: 0 })
+  const relationsActive = uploadBatch?.relation_jobs?.some(item => ['pending', 'processing'].includes(item.status)) ?? false
+  useEffect(() => {
+    if (!notebookId || !uploadBatch?.id || !relationsActive) return
+    let active = true
+    const timer = window.setInterval(() => {
+      void api.getNotebookUploadBatch(notebookId, uploadBatch.id).then(next => { if (active) setUploadBatch(next) }).catch(() => {})
+    }, 2000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [notebookId, uploadBatch?.id, relationsActive])
   const [generationError, setGenerationError] = useState<string>()
   const [uploadProgress, setUploadProgress] = useState<UploadProgressState | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -231,6 +248,7 @@ function NotebookPageBody() {
     setDraftFound(null)
     setEditVersion(0)
     editorReadyRef.current = false
+    setEditorReady(false)
     void Promise.all([api.getNotebookById(courseId, notebookId), api.getNotebookDocument(courseId, notebookId)])
       .then(async ([nextOutline, document]) => {
         if (!active) return
@@ -388,7 +406,9 @@ function NotebookPageBody() {
         if (job.status === 'completed' && generationJob.status !== 'completed') {
           const trackedByUploadBatch = uploadBatchGenerationJobIds.split('|').includes(job.id)
           if (save.isDirty()) {
-            if (!trackedByUploadBatch) setNotice('AI 补充内容已写入服务器。当前有未保存的本地编辑，已保留草稿；保存冲突面板可用于合并服务器版本。')
+            const message = '当前有未保存的本地编辑，已保留草稿；保存后可重新载入最新内容。'
+            setNotice(`学习笔记已生成。${message}`)
+            if (trackedByUploadBatch && uploadBatch?.id) finishUploadProgress(uploadBatch.id, message, true)
             return
           }
           void api.getNotebookDocument(courseId!, notebookId).then((latest) => {
@@ -405,9 +425,14 @@ function NotebookPageBody() {
       })
     }, 1500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [courseId, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision, uploadBatchGenerationJobIds])
+  }, [courseId, finishUploadProgress, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision, uploadBatch?.id, uploadBatchGenerationJobIds])
 
   const headings = useMemo(() => extractOutline(content), [content])
+  useDocumentReadingPosition({
+    courseId, notebookId, editorRef, ready: loaded && editorReady,
+    explicitLink: Boolean(linkedSectionId || linkedChapterId),
+    onRestore: setActiveBlockId,
+  })
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
   const generationStatusCoveredByToast = Boolean(
     uploadProgress?.batchId && generationJob?.id && uploadBatchGenerationJobIds.split('|').includes(generationJob.id),
@@ -566,7 +591,7 @@ function NotebookPageBody() {
         const lectureTitle = file.name.replace(/\.[^.]+$/, '').trim() || '新资料'
         try {
           results.push({ status: 'fulfilled', value: await uploadMaterial(
-            file, lectureTitle, notebookId, '', allowDuplicateUploads, batchId,
+            file, lectureTitle, notebookId, '', allowDuplicateUploads, batchId, processingRoute,
           ) })
         } catch (reason) {
           results.push({ status: 'rejected', reason })
@@ -668,12 +693,12 @@ function NotebookPageBody() {
     if (!file || !notebookId) return
     setAssetUploadError(undefined)
     try {
-      const result = await api.uploadNotebookAsset(notebookId, file)
+      const result = await api.uploadNotebookAsset(notebookId, file, undefined, processingRoute)
       if (result.upload_batch_id) setUploadBatchId(result.upload_batch_id)
       await refreshAssetResources()
       setResourcesOpen(true)
       setNotice(result.processing_job?.status === 'pending'
-        ? '原始图片已保存，OCR 任务已排队。'
+        ? `原始图片已保存，${result.asset.processing_route === 'llm' ? 'AI 读取' : '本地解析'}任务已排队。`
         : `原始图片已保存${result.asset.state === 'ready' ? '，等待解析' : ''}。`)
     } catch (cause) {
       setAssetUploadError(cause instanceof Error ? cause.message : '图片资料上传失败')
@@ -715,7 +740,7 @@ function NotebookPageBody() {
     editorRef.current?.replaceContent(restored)
     setContent(restored)
     setEditVersion((value) => value + 1)
-    save.markEdited(restored)
+    save.restoreDraft({ ...draftFound, content: restored })
     setDraftFound(null)
     setNotice('已恢复本地草稿，保存成功后会清除草稿副本。')
   }
@@ -837,6 +862,9 @@ function NotebookPageBody() {
     </header>
 
     {notice && <div className="notebook-document-notice" role="status">{notice}<button type="button" onClick={() => setNotice(undefined)} aria-label="关闭提示">×</button></div>}
+    {uploadBatch?.relation_jobs?.map(item => <div className="notebook-document-notice" role="status" key={item.id}>知识联系：{item.status === 'completed' ? '藤蔓分析完成' : item.status === 'failed' ? item.error_message ?? '分析失败，笔记已保留' : '正在分析藤蔓关系'}{item.status === 'failed' && <button type="button" onClick={() => {
+      void api.retryForestJob(item.id).then(() => api.getNotebookUploadBatch(notebookId!, uploadBatch.id)).then(setUploadBatch).catch(cause => setMaterialActionError(String(cause)))
+    }}>重试联系分析</button>}</div>)}
     {save.error && <div className="notebook-document-banner is-error" role="alert">
       <span>{save.error}</span>
       {save.state === 'conflict'
@@ -854,9 +882,11 @@ function NotebookPageBody() {
       <aside className="notebook-document-sidebar" aria-label="资料与目录">
         <div className="notebook-document-sidebar-heading"><span>资料与目录</span><button type="button" aria-label={leftPanelCollapsed ? '展开资料与目录' : '收起资料与目录'} aria-expanded={!leftPanelCollapsed} onClick={() => setLeftPanelCollapsed((value) => !value)}>{leftPanelCollapsed ? '»' : '«'}</button></div>
         <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" multiple onChange={(event) => void handleUploadMaterial(event)} aria-label="选择课程资料" />
+        <ProcessingRouteControl value={processingRoute} onChange={setProcessingRoute} disabled={busy} />
+        {Boolean(aiReadingProgress?.count) && <p className="notebook-document-sidebar-empty" role="status">AI 读取：{aiReadingProgress!.total > 0 ? `${aiReadingProgress!.done} / ${aiReadingProgress!.total} 页` : '准备页面中'}</p>}
         <input ref={sourceImageInput} className="notebook-document-file-input" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={(event) => void handleUploadSourceImage(event)} aria-label="选择原始图片资料" />
         <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
-          <span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}
+          <span aria-hidden="true">＋</span>{uploadProgress?.phase === 'uploading' ? '上传中…' : '上传资料'}
         </button>
         <label className="notebook-document-duplicate-option">
           <input type="checkbox" checked={allowDuplicateUploads}
@@ -884,6 +914,12 @@ function NotebookPageBody() {
                 <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? '已整理' : material.status === 'failed' ? `处理失败${material.document_warning ? ` · ${material.document_warning}` : ''}` : '正在整理'}</small></span>
               </Link>
               <details className="notebook-document-material-actions"><summary aria-label={`管理${material.original_filename}`}>⋯</summary>
+                {material.status === 'failed' && material.asset_id && material.processing_route !== 'llm' && <button type="button" onClick={() => {
+                  void api.switchAssetProcessingRoute(material.asset_id!, 'llm').then(() => refreshCurrentMaterials()).catch(cause => setMaterialActionError(String(cause)))
+                }}>改用全程 AI</button>}
+                {['pending', 'processing'].includes(material.status) && material.asset_id && material.processing_route === 'llm' && <button type="button" onClick={() => {
+                  void api.cancelAssetProcessing(material.asset_id!).then(() => refreshCurrentMaterials()).catch(cause => setMaterialActionError(String(cause)))
+                }}>取消读取</button>}
                 <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void prepareMaterialRemoval(material)}>移除资料</button>
                 {material.status === 'failed'
                   ? <button type="button" disabled={Boolean(materialBusyId)} onClick={() => void runMaterialOperation(material.id, 'retry')}>重试解析</button>
@@ -986,6 +1022,7 @@ function NotebookPageBody() {
             onSaveShortcut={() => void save.saveNow()}
             onReady={(editor) => {
               editorReadyRef.current = true
+              setEditorReady(true)
               save.reset(editor.getJSON() as DocNode, save.revision, save.lastSavedAt)
             }}
           />
@@ -1085,6 +1122,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
   const [selectedRevision, setSelectedRevision] = useState<number | null>(null)
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const dialogRef = useHistoryDialog(onClose, busy)
 
   useEffect(() => {
     let active = true
@@ -1097,6 +1135,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
   }, [courseId, notebookId])
 
   async function loadPreview(revision: number) {
+    if (busy) return
     setBusy(true)
     setSelectedRevision(revision)
     try {
@@ -1108,7 +1147,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
   }
 
   async function restore() {
-    if (selectedRevision === null) return
+    if (selectedRevision === null || busy) return
     if (!window.confirm(`恢复 revision ${selectedRevision}？已保存的当前版本会保留在历史中，恢复操作会生成新修订。`)) return
     setBusy(true)
     try {
@@ -1124,16 +1163,16 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
     } finally { setBusy(false) }
   }
 
-  return <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="历史版本">
+  return <div ref={dialogRef} className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="历史版本" aria-busy={busy} tabIndex={-1}>
     <div className="nb-modal is-wide">
-      <div className="nb-modal-head"><h2>历史版本</h2><button type="button" onClick={onClose} aria-label="关闭">×</button></div>
+      <div className="nb-modal-head"><h2>历史版本</h2><button type="button" onClick={onClose} disabled={busy} aria-label="关闭">×</button></div>
       {error && <p className="notebook-document-error" role="alert">{error}</p>}
       <div className="notebook-document-history">
         <div className="notebook-document-history-list">
-          {items.length ? items.map((item) => <button key={item.revision} type="button" className={selectedRevision === item.revision ? 'is-active' : ''} onClick={() => void loadPreview(item.revision)}>
+          {items.length ? items.map((item) => <button key={item.revision} type="button" disabled={busy} className={selectedRevision === item.revision ? 'is-active' : ''} onClick={() => void loadPreview(item.revision)}>
             <strong>revision {item.revision}</strong>
             <span>{serverDate(item.created_at).toLocaleString('zh-CN')}</span>
-            <small>{item.origin === 'restore' ? '恢复生成' : item.origin === 'autosave' ? '自动保存' : item.origin}</small>
+            <small>{historyOriginLabel(item.origin)}</small>
           </button>) : <p className="notebook-document-sidebar-empty">还没有历史快照。</p>}
         </div>
         <div className="notebook-document-history-preview">
@@ -1141,7 +1180,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
         </div>
       </div>
       <div className="nb-modal-actions">
-        <button type="button" onClick={onClose}>关闭</button>
+        <button type="button" onClick={onClose} disabled={busy}>关闭</button>
         <button type="button" className="primary-button" disabled={selectedRevision === null || busy} onClick={() => void restore()}>恢复到此版本（生成新修订）</button>
       </div>
     </div>

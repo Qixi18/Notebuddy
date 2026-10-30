@@ -251,8 +251,8 @@ export function buildExtensions(): AnyExtension[] {
     TableHeader,
     TableCell,
     NotebookImage,
-    BlockMath.configure({ katexOptions: { displayMode: true, throwOnError: false, strict: false } }),
-    InlineMath.configure({ katexOptions: { displayMode: false, throwOnError: false, strict: false } }),
+    BlockMath.configure({ katexOptions: { displayMode: true, throwOnError: true, strict: false, trust: false } }),
+    InlineMath.configure({ katexOptions: { displayMode: false, throwOnError: true, strict: false, trust: false } }),
     Placeholder.configure({
       placeholder: ({ node }) => {
         if (node.type.name === 'heading') return '输入标题'

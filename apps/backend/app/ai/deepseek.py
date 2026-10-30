@@ -9,15 +9,24 @@ import httpx
 from app.core.config import Settings, settings
 
 
+def _retry_after(value: str | None) -> float | None:
+    try:
+        return max(0.0, float(value)) if value else None
+    except ValueError:
+        return None
+
+
 class DeepSeekError(RuntimeError):
     """Raised when the configured DeepSeek provider cannot return a result."""
 
     def __init__(
         self, message: str, *, status_code: int | None = None, code: str = "provider_error",
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
+        self.retry_after = retry_after
 
 
 class DeepSeekClient:
@@ -32,11 +41,12 @@ class DeepSeekClient:
 
     def complete(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         json_mode: bool = False,
         max_tokens: int = 3000,
         temperature: float = 0.2,
+        thinking: bool | None = None,
     ) -> str:
         if not self.configured:
             raise DeepSeekError("DEEPSEEK_API_KEY 未配置")
@@ -51,6 +61,8 @@ class DeepSeekClient:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if thinking is not None:
+            payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
 
         try:
             response = httpx.post(
@@ -74,8 +86,17 @@ class DeepSeekClient:
                 if isinstance(usage, dict) and isinstance(usage.get(key), (int, float))
             } or None
             content = body["choices"][0]["message"]["content"]
+            if self.last_finish_reason == "length" and json_mode:
+                # A thinking model may exhaust the budget before emitting any
+                # content. Even parseable JSON cannot prove the answer is whole.
+                raise DeepSeekError(
+                    "DeepSeek JSON 输出达到输出长度限制，结果可能被截断",
+                    code="output_truncated",
+                )
             if not isinstance(content, str) or not content.strip():
-                raise DeepSeekError("DeepSeek 返回了空内容")
+                if self.last_finish_reason == 'length':
+                    raise DeepSeekError('模型输出被截断，请减小批次后重试', code='output_truncated')
+                raise DeepSeekError("DeepSeek 返回了空内容", code='provider_empty')
             return content.strip()
         except httpx.HTTPStatusError as exc:
             self.last_usage = None
@@ -83,19 +104,24 @@ class DeepSeekClient:
             raise DeepSeekError(
                 f"DeepSeek 调用失败：HTTP {exc.response.status_code}",
                 status_code=exc.response.status_code,
+                retry_after=_retry_after(exc.response.headers.get('Retry-After')),
             ) from exc
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             self.last_usage = None
             self.last_finish_reason = None
-            raise DeepSeekError(f"DeepSeek 调用失败：{type(exc).__name__}") from exc
+            raise DeepSeekError(f"DeepSeek 调用失败：{type(exc).__name__}",
+                                code='provider_transport' if isinstance(exc, httpx.HTTPError) else 'provider_response_invalid') from exc
 
     def complete_json(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         max_tokens: int = 3000,
+        thinking: bool | None = None,
     ) -> dict[str, Any]:
-        content = self.complete(messages, json_mode=True, max_tokens=max_tokens)
+        content = self.complete(
+            messages, json_mode=True, max_tokens=max_tokens, thinking=thinking,
+        )
         try:
             decoded = json.loads(content)
         except json.JSONDecodeError as exc:

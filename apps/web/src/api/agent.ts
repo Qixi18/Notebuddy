@@ -1,4 +1,4 @@
-import { ApiError } from './http'
+import { ApiError, readApiError } from './http'
 import { parseAgentRemainder, parseAgentStream } from './agentStream'
 import type {
   AgentEvent,
@@ -18,6 +18,7 @@ export type {
   AgentScope,
   AgentStepEvent,
   AgentSuggestion,
+  AgentThinkingEvent,
   AgentStreamHandlers,
 } from './agentStream'
 
@@ -32,6 +33,7 @@ export type {
 function dispatchEvent(event: AgentEvent, handlers: AgentStreamHandlers): void {
   if (event.type === 'step') handlers.onStep?.(event)
   else if (event.type === 'delta') handlers.onDelta?.(event)
+  else if (event.type === 'thinking') handlers.onThinking?.(event)
   else if (event.type === 'notice') handlers.onNotice?.(event)
   else if (event.type === 'final') handlers.onFinal?.(event)
   else if (event.type === 'error') handlers.onError?.(event)
@@ -50,14 +52,9 @@ export async function streamAgentMessage(
     signal,
   })
   if (!response.ok) {
-    const body = await response.text()
-    let detail = body
-    try {
-      detail = (JSON.parse(body) as { detail?: string }).detail ?? body
-    } catch {
-      // 保持原文可读
-    }
-    throw new ApiError(detail || `请求失败：${response.status}`, response.status)
+    // 复用 http.ts 的可读化：FastAPI 的 detail 可能是数组，直接 new Error(String(detail))
+    // 会把每个对象变成 [object Object]，用户看不到是哪一字段不合法。
+    throw await readApiError(response)
   }
   if (!response.body) throw new ApiError('响应缺少流内容', response.status)
 
@@ -71,8 +68,24 @@ export async function streamAgentMessage(
     if (event.type === 'final') finalEvent = event
     if (event.type === 'error') errorMessage = event.message
   }
+  /* 空闲超时（v6 P2）：连接开着但服务端不发数据时，reader.read() 会永久 pending，
+      用户只能干等。每次读都限 30s，超时取消读取并给出可操作的错误。 */
+  const IDLE_TIMEOUT_MS = 30_000
   for (;;) {
-    const { done, value } = await reader.read()
+    let idleTimer: ReturnType<typeof setTimeout> | undefined
+    const idle = new Promise<never>((_, reject) => {
+      idleTimer = setTimeout(() => reject(new ApiError('连接长时间没有响应，请重试', response.status)), IDLE_TIMEOUT_MS)
+    })
+    let chunk: Awaited<ReturnType<typeof reader.read>>
+    try {
+      chunk = await Promise.race([reader.read(), idle])
+    } catch (cause) {
+      void reader.cancel().catch(() => {})
+      throw cause
+    } finally {
+      clearTimeout(idleTimer)
+    }
+    const { done, value } = chunk
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const parsed = parseAgentStream(buffer)

@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>沃雅妮莎的窝 · 角色考据版</title>
+<style>
+  :root{
+    --ink:#211D24;
+    --sticker:#F4F3F8;
+    --paper:#F6F7F4;
+    --card:#FFFFFF;
+    --text:#26302C;
+    --muted:#6C7A74;
+    --line:#DFE4DE;
+    --green:#3F6B5C;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:52px 56px 72px;
+    background:var(--paper);
+    color:var(--text);
+    font:15px/1.75 "PingFang SC","Microsoft YaHei","Hiragino Sans GB",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  .kicker{margin:0 0 10px;font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--green);font-weight:600}
+  h1{margin:0 0 12px;font-size:34px;line-height:1.25;letter-spacing:-.02em;font-weight:700}
+  .lede{margin:0;color:var(--muted);max-width:660px;font-size:15px}
+  h2{margin:56px 0 18px;font-size:19px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  h2::after{content:"";flex:1;height:1px;background:var(--line)}
+  h3{margin:0 0 4px;font-size:16px;font-weight:700}
+  p{margin:0 0 12px}
+  code{font:13px/1.4 "SFMono-Regular",Consolas,monospace;background:#EDF0EC;padding:1px 5px;border-radius:4px;color:#37463F}
+
+  .facts{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 32px;margin:0;padding:0;list-style:none}
+  .facts li{padding-left:16px;position:relative;font-size:14.5px;color:#31403A}
+  .facts li::before{content:"";position:absolute;left:0;top:.62em;width:6px;height:6px;border-radius:50%;background:var(--green);opacity:.55}
+  .facts b{color:#1D2A25}
+  .src{margin-top:16px;font-size:12.5px;color:#8A968F}
+
+  table{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{padding:12px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+  th{font-weight:600;color:#4C5C55;background:#F3F5F1;font-size:13px;letter-spacing:.02em}
+  tr:last-child td{border-bottom:none}
+  td.no{color:#9A6A62}
+  td.yes{color:#31614F}
+
+  .callout{margin:20px 0 0;padding:18px 22px;border-radius:12px;background:#EEF3EE;border-left:3px solid var(--green);font-size:14.5px;color:#2A3A33}
+  .callout b{color:#1C2B25}
+
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .card-head{padding:16px 16px 8px}
+  .tag{display:inline-block;font-size:11px;letter-spacing:.08em;font-weight:700;color:#5B6B63;background:#EEF2ED;border-radius:999px;padding:2px 9px;margin-bottom:8px}
+  .tag.best{color:#2C5B49;background:#DDEAE2}
+  .card-head p{margin:0;font-size:13px;line-height:1.6;color:var(--muted)}
+
+  .stage{position:relative;width:240px;height:230px;margin:4px auto 0;overflow:hidden;border-radius:10px;
+         background:radial-gradient(120% 78% at 50% 84%,#F0F3EE 0%,#FAFBF9 62%,#FBFCFA 100%)}
+  .stage::after{content:"";position:absolute;left:24px;right:24px;bottom:10px;height:14px;border-radius:50%;
+                background:radial-gradient(closest-side,rgba(60,80,70,.13),transparent 74%)}
+  .stage > svg{position:absolute;left:50%;transform:translateX(-50%)}
+  .nest{width:236px;bottom:2px}
+  .nest-front{width:236px;bottom:2px}
+  .pet{width:104px;bottom:40px;
+       filter:drop-shadow(2.6px 0 0 var(--sticker)) drop-shadow(-2.6px 0 0 var(--sticker))
+              drop-shadow(0 2.6px 0 var(--sticker)) drop-shadow(0 -2.6px 0 var(--sticker));
+       transition:opacity .3s ease}
+  .pet.sleep{width:104px;bottom:38px}
+
+  .stage[data-state="stand"] .when-sleep,
+  .stage[data-state="stand"] .when-empty,
+  .stage[data-state="sleep"] .when-stand,
+  .stage[data-state="sleep"] .when-empty,
+  .stage[data-state="empty"] .when-stand,
+  .stage[data-state="empty"] .when-sleep{opacity:0;pointer-events:none}
+  .when-stand,.when-sleep,.when-empty{transition:opacity .3s ease}
+
+  .switcher{display:flex;gap:6px;justify-content:center;padding:10px 12px 4px}
+  .switcher button{font:12px/1 inherit;padding:7px 11px;border-radius:999px;cursor:pointer;
+                   border:1px solid var(--line);background:#FFF;color:#5F6E67}
+  .switcher button[aria-pressed="true"]{background:#2F4B44;border-color:#2F4B44;color:#FFF}
+  .notes{margin:6px 0 0;padding:0 16px 18px;list-style:none}
+  .notes li{font-size:12.5px;line-height:1.65;color:#5E6C66;padding-left:11px;position:relative;margin-top:6px}
+  .notes li::before{content:"";position:absolute;left:0;top:.7em;width:4px;height:4px;border-radius:50%;background:#BFC9C2}
+  .notes li.warn::before{background:#C9917F}
+
+  .spec{display:grid;grid-template-columns:1fr 1fr;gap:28px}
+  .spec table{font-size:13px}
+  .spec th,.spec td{padding:9px 13px}
+  .swatches{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+  .swatch{width:96px}
+  .swatch i{display:block;height:44px;border-radius:8px;border:1px solid rgba(0,0,0,.07)}
+  .swatch span{display:block;font-size:11.5px;line-height:1.5;color:#6C7A74;margin-top:5px;font-family:"SFMono-Regular",Consolas,monospace}
+
+  .prompt{margin-top:18px;background:#20272A;color:#D8E2DC;border-radius:12px;padding:20px 24px;
+          font:13px/1.85 "SFMono-Regular",Consolas,monospace;white-space:pre-wrap}
+  .prompt b{color:#9FD3B4;font-weight:600}
+
+  footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);font-size:12.5px;color:#8A968F}
+  footer a{color:#4A6A5E;text-decoration:none;border-bottom:1px solid #C9D6CE}
+
+  @media (max-width:900px){
+    body{padding:32px 20px 56px}
+    .facts,.cards,.spec{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="kicker">桌宠的窝 · 角色考据版</p>
+  <h1>沃雅妮莎的窝</h1>
+  <p class="lede">先把人查清楚，再决定窝长什么样。三个方案都按 240px 真实栏宽、粗描边 + 冷白贴纸边画，每张卡片可切「站着 / 趴睡 / 空窝」。</p>
+
+  <h2>一、她是谁</h2>
+  <ul class="facts">
+    <li><b>水妖，不是人类</b>：本名 Vodyanitsa，至冬水妖一族；水元素神之眼，命之座「金鳍座」，称号「幽歌萦渊」。</li>
+    <li><b>科洛列夫茨基剧团首席女高音</b>：族人散去之后，她仍留在剧院登台，是少数没离开舞台的歌者。</li>
+    <li><b>外形</b>：墨绿长卷发、蓝眼、右眼被刘海遮住、鳍状耳、肩腿有青蓝鳞纹；白色十字花 + 珍珠头链，白色立领下挂着圆形话筒。</li>
+    <li><b>水妖形态</b>：双腿变青绿水晶鱼尾，尾端浮着金属圆环，两胯装饰白色薄纱。</li>
+    <li><b>性格</b>：心思细腻，怕自己「不被需要」。每次动了回家的念头，就找十个至冬人问是否爱听她唱——只要有一个需要，她就留下。</li>
+    <li><b>场景</b>：剧院、后台、演出准备室。台词里念着「帕拉斯科娃」「谢尼娅，你的曲子」——她的世界是排练、乐谱、开演前的独处。</li>
+  </ul>
+  <p class="src">来源：原神官方角色情报（2026-08-18）、百度百科「沃雅妮莎」、Fandom 中文 Wiki。已与 <code>frame_000000.png</code> 逐项对照：墨绿卷发、白十字花、淡蓝羽纱、银白鞋，全部吻合。</p>
+
+  <h2>二、故事能拿什么，不能拿什么</h2>
+  <table>
+    <thead><tr><th style="width:22%">她的设定</th><th style="width:39%">不能做</th><th>应该做</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><b>水妖 / 鱼尾 / 鳞纹</b></td>
+        <td class="no">木架、藤编、棉麻、暖棕陶土——那是林间小屋，不是水生生物</td>
+        <td class="yes">贝壳、珍珠母内衬、水面、鳞片状叠压；圆润、湿润、半透明</td>
+      </tr>
+      <tr>
+        <td><b>首席女高音 / 剧院</b></td>
+        <td class="no">红丝绒大幕、金色雕花、满墙乐谱——太重，240px 下只剩噪点</td>
+        <td class="yes">香槟金滚边、丝绒的哑光质感；一处乐谱或话筒的暗示，够了</td>
+      </tr>
+      <tr>
+        <td><b>至冬 / 寒地</b></td>
+        <td class="no">暖黄灯光、炉火、夕照——温度错了</td>
+        <td class="yes">冷白、霜、冰晶、冷蓝阴影；光是「舞台脚灯 + 雪光」</td>
+      </tr>
+      <tr>
+        <td><b>她的配色</b></td>
+        <td class="no">暖奶油、原木、砖红，以及——<b>整片墨绿</b></td>
+        <td class="yes">珍珠白 + 雾蓝打底，墨绿只做小面积，金只做点睛</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout">
+    <b>最要紧的一条：窝不能用墨绿。</b>她体量最大的是那头墨绿卷发（原图最深处 <code>#436465</code>）。上一版我画的深绿碗，她一坐进去，头发和窝底就糊成一块，人反而没了。把窝做成<b>珍珠白 / 雾蓝</b>，她的深发才跳得出来——这是从她的配色反推的，不是审美偏好。
+  </div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="chibi" viewBox="0 0 120 170">
+        <path d="M18 78 C14 34 34 8 60 8 C86 8 106 34 102 78 C102 100 96 118 88 128 L32 128 C24 118 18 100 18 78 Z" fill="#436465" stroke="#211D24" stroke-width="3.4" stroke-linejoin="round"/>
+        <path d="M27 92 C18 118 21 142 32 154 C40 140 37 112 42 98 Z" fill="#3B5A5B" stroke="#211D24" stroke-width="3.2" stroke-linejoin="round"/>
+        <path d="M93 92 C102 118 99 142 88 154 C80 140 83 112 78 98 Z" fill="#3B5A5B" stroke="#211D24" stroke-width="3.2" stroke-linejoin="round"/>
+        <ellipse cx="60" cy="63" rx="22" ry="24" fill="#F7EEE6" stroke="#211D24" stroke-width="3"/>
+        <path d="M38 47 C44 27 76 27 82 47 C76 38 70 56 60 54 C50 56 44 38 38 47 Z" fill="#436465" stroke="#211D24" stroke-width="2.6" stroke-linejoin="round"/>
+        <ellipse cx="51" cy="66" rx="4" ry="5" fill="#6F7D98"/>
+        <ellipse cx="69" cy="66" rx="4" ry="5" fill="#6F7D98"/>
+        <path d="M46 100 L74 100 L90 148 L30 148 Z" fill="#F5F2F6" stroke="#211D24" stroke-width="3.2" stroke-linejoin="round"/>
+        <path d="M60 100 L60 148" stroke="#CFD2DC" stroke-width="2"/>
+        <ellipse cx="34" cy="112" rx="7" ry="12" fill="#F5F2F6" stroke="#211D24" stroke-width="2.8"/>
+        <ellipse cx="86" cy="112" rx="7" ry="12" fill="#F5F2F6" stroke="#211D24" stroke-width="2.8"/>
+        <ellipse cx="48" cy="153" rx="9" ry="5" fill="#EAE7EF" stroke="#211D24" stroke-width="2.6"/>
+        <ellipse cx="72" cy="153" rx="9" ry="5" fill="#EAE7EF" stroke="#211D24" stroke-width="2.6"/>
+        <circle cx="30" cy="52" r="6" fill="#FBF8F2" stroke="#211D24" stroke-width="2.2"/>
+        <circle cx="90" cy="52" r="6" fill="#FBF8F2" stroke="#211D24" stroke-width="2.2"/>
+      </symbol>
+
+      <symbol id="chibi-sleep" viewBox="0 0 120 170">
+        <path d="M10 136 C12 110 38 92 62 92 C88 92 110 108 112 132 C113 146 98 152 62 152 C24 152 9 148 10 136 Z" fill="#436465" stroke="#211D24" stroke-width="3.4" stroke-linejoin="round"/>
+        <path d="M30 128 C26 112 42 100 58 100 C74 100 86 112 84 126 C82 140 66 144 56 144 C44 144 33 140 30 128 Z" fill="#F7EEE6" stroke="#211D24" stroke-width="3"/>
+        <path d="M30 128 C36 116 48 110 58 110 C68 110 80 116 84 126" fill="none" stroke="#436465" stroke-width="8" stroke-linecap="round"/>
+        <path d="M38 129 q5 4 10 0" fill="none" stroke="#211D24" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M62 129 q5 4 10 0" fill="none" stroke="#211D24" stroke-width="2.4" stroke-linecap="round"/>
+        <path d="M4 138 C-2 150 4 160 16 158 C12 148 11 142 10 136 Z" fill="#3B5A5B" stroke="#211D24" stroke-width="3"/>
+        <path d="M116 138 C122 150 116 160 104 158 C108 148 109 142 110 136 Z" fill="#3B5A5B" stroke="#211D24" stroke-width="3"/>
+      </symbol>
+
+      <linearGradient id="nacre" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#E7EEF5"/><stop offset=".45" stop-color="#C3CDE9"/>
+        <stop offset=".78" stop-color="#EADFE7"/><stop offset="1" stop-color="#D6E4EC"/>
+      </linearGradient>
+      <linearGradient id="shellg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#F3F0F8"/><stop offset="1" stop-color="#D2CCE0"/>
+      </linearGradient>
+      <linearGradient id="velvg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#4A6E66"/><stop offset="1" stop-color="#2F4B46"/>
+      </linearGradient>
+      <radialGradient id="waterg" cx=".42" cy=".28" r=".86">
+        <stop offset="0" stop-color="#B7D1DE"/><stop offset=".55" stop-color="#7FA9BF"/>
+        <stop offset="1" stop-color="#4E7488"/>
+      </radialGradient>
+    </defs>
+  </svg>
+
+  <h2>三、三套方案</h2>
+  <div class="cards">
+
+    <!-- ================= A ================= -->
+    <div class="card">
+      <div class="card-head">
+        <span class="tag best">推荐</span>
+        <h3>A · 珍珠贝软榻</h3>
+        <p>水妖睡贝壳，设定里最省力也最准的一张牌。贝壳天生后高前低，前瓣抬起来就是被子。</p>
+      </div>
+      <div class="stage" data-state="stand">
+        <svg class="nest" viewBox="0 0 240 230" aria-hidden="true">
+          <g fill="#F1EDF7">
+            <g transform="translate(120 150) rotate(-60) scale(.78)"><path d="M0 0 C-22 -26 -21 -70 0 -92 C21 -70 22 -26 0 0 Z" fill="#EDE8F3" stroke="#211D24" stroke-width="4.6" stroke-linejoin="round"/></g>
+            <g transform="translate(120 150) rotate(-40) scale(.95)"><path d="M0 0 C-22 -26 -21 -70 0 -92 C21 -70 22 -26 0 0 Z" fill="#F2EFF8" stroke="#211D24" stroke-width="4.2" stroke-linejoin="round"/></g>
+            <g transform="translate(120 150) rotate(-20) scale(1.12)"><path d="M0 0 C-22 -26 -21 -70 0 -92 C21 -70 22 -26 0 0 Z" fill="#EDE8F3" stroke="#211D24" stroke-width="3.9" stroke-linejoin="round"/></g>
+            <g transform="translate(120 150) scale(1.25)"><path d="M0 0 C-22 -26 -21 -70 0 -92 C21 -70 22 -26 0 0 Z" fill="#F2EFF8" stroke="#211D24" stroke-width="3.6" stroke-linejoin="round"/></g>
+            <g transform="translate(120 150) rotate(20) scale(1.12)"><path d="M0 0 C-22 -26 -21 -70 0 -92 C21 -70 22 -26 0 0 Z" fill="#EDE8F3" stroke="#211D24" stroke-width="3.9" stroke-linejoin="round"/></g>
+            <g transform="translate(120 150) rotate(40) scale(.95)"><path d="M0 0 C-22 -26 -21 -70 0 -92 C21 -70 22 -26 0 0 Z" fill="#F2EFF8" stroke="#211D24" stroke-width="4.2" stroke-linejoin="round"/></g>
+            <g transform="translate(120 150) rotate(60) scale(.78)"><path d="M0 0 C-22 -26 -21 -70 0 -92 C21 -70 22 -26 0 0 Z" fill="#EDE8F3" stroke="#211D24" stroke-width="4.6" stroke-linejoin="round"/></g>
+          </g>
+          <g fill="#FBFDFE" opacity=".95">
+            <path d="M120 30 l3.4 -7 3.4 7 -3.4 7 Z"/>
+            <path d="M92 50 l3 -6 3 6 -3 6 Z"/>
+            <path d="M148 50 l3 -6 3 6 -3 6 Z"/>
+          </g>
+          <ellipse cx="120" cy="158" rx="94" ry="56" fill="url(#shellg)" stroke="#211D24" stroke-width="5"/>
+          <ellipse cx="120" cy="150" rx="76" ry="30" fill="url(#nacre)" stroke="#211D24" stroke-width="4"/>
+          <g class="when-empty">
+            <ellipse cx="120" cy="152" rx="44" ry="13" fill="#AEB8D6" opacity=".32"/>
+            <circle cx="120" cy="152" r="9" fill="#FDFBF6" stroke="#211D24" stroke-width="2.8"/>
+            <circle cx="117" cy="149" r="2.6" fill="#FFF"/>
+            <text x="120" y="122" text-anchor="middle" font-size="11" fill="#7E8C94">点窝召回</text>
+          </g>
+        </svg>
+
+        <svg class="pet when-stand" viewBox="0 0 120 170"><use href="#chibi"/></svg>
+        <svg class="pet sleep when-sleep" viewBox="0 0 120 170"><use href="#chibi-sleep"/></svg>
+
+        <svg class="nest-front" viewBox="0 0 240 230" aria-hidden="true">
+          <g class="when-sleep">
+            <path d="M24 158 C28 196 62 216 120 216 C178 216 212 196 216 158 C212 192 176 186 120 186 C64 186 28 192 24 158 Z"
+                  fill="url(#shellg)" stroke="#211D24" stroke-width="4.4" stroke-linejoin="round"/>
+            <path d="M36 172 C42 196 76 208 120 208 C164 208 198 196 204 172"
+                  fill="none" stroke="#C3CDE9" stroke-width="3" opacity=".8"/>
+            <path d="M74 184 C64 198 70 213 84 215 C76 200 76 192 82 184 Z"
+                  fill="#3B5A5B" stroke="#211D24" stroke-width="2.8" stroke-linejoin="round"/>
+            <path d="M166 184 C176 198 170 213 156 215 C164 200 164 192 158 184 Z"
+                  fill="#3B5A5B" stroke="#211D24" stroke-width="2.8" stroke-linejoin="round"/>
+          </g>
+          <g class="when-stand">
+            <path d="M26 158 C28 196 62 216 120 216 C178 216 212 196 214 158 C210 186 176 180 120 180 C64 180 30 186 26 158 Z"
+                  fill="url(#shellg)" stroke="#211D24" stroke-width="4.6" stroke-linejoin="round"/>
+            <path d="M32 172 C36 198 74 210 120 210 C166 210 204 198 208 172"
+                  fill="none" stroke="#DCC49A" stroke-width="2.4" opacity=".85"/>
+            <g>
+              <circle cx="56" cy="192" r="5.8" fill="#FDFBF6" stroke="#211D24" stroke-width="2.4"/>
+              <circle cx="84" cy="203" r="5" fill="#F6F2EC" stroke="#211D24" stroke-width="2.2"/>
+              <circle cx="112" cy="208" r="6" fill="#FDFBF6" stroke="#211D24" stroke-width="2.4"/>
+              <circle cx="140" cy="208" r="5.2" fill="#F6F2EC" stroke="#211D24" stroke-width="2.2"/>
+              <circle cx="167" cy="203" r="5.8" fill="#FDFBF6" stroke="#211D24" stroke-width="2.4"/>
+              <circle cx="190" cy="190" r="4.8" fill="#F6F2EC" stroke="#211D24" stroke-width="2.2"/>
+              <circle cx="53" cy="185" r="2" fill="#FFF"/>
+              <circle cx="108" cy="202" r="2" fill="#FFF"/>
+              <circle cx="163" cy="197" r="2" fill="#FFF"/>
+            </g>
+            <g transform="translate(40 174) rotate(-16)">
+              <g fill="#FBF9F2" stroke="#211D24" stroke-width="2.2" stroke-linejoin="round">
+                <path d="M0 -3 C7 -13 15 -11 12 -2 C11 4 4 5 0 -3 Z"/>
+                <path d="M3 1 C13 5 15 13 6 12 C0 11 -1 5 3 1 Z"/>
+                <path d="M-1 3 C-6 12 -14 12 -12 4 C-10 -1 -4 -1 -1 3 Z"/>
+                <path d="M-4 -1 C-13 -6 -12 -14 -3 -11 C2 -9 1 -3 -4 -1 Z"/>
+                <path d="M1 -4 C-1 -13 5 -16 7 -8 C8 -4 4 -3 1 -4 Z"/>
+              </g>
+              <circle cx="1" cy="0" r="2.8" fill="#DCC49A" stroke="#211D24" stroke-width="1.6"/>
+            </g>
+          </g>
+        </svg>
+
+        <g class="when-sleep">
+          <text x="176" y="94" font-size="21" fill="#3F6B5C" font-family="Georgia,serif" opacity=".7">♪</text>
+          <text x="194" y="68" font-size="14" fill="#3F6B5C" font-family="Georgia,serif" opacity=".45">♪</text>
+        </g>
+      </div>
+      <div class="switcher">
+        <button data-set="stand" aria-pressed="true">站着</button>
+        <button data-set="sleep">趴睡</button>
+        <button data-set="empty">空窝</button>
+      </div>
+      <ul class="notes">
+        <li>前瓣抬 12° 就是被子，不用另画毯子</li>
+        <li>头发溢出壳沿，是「真的被装进去」的唯一信号</li>
+        <li class="warn">贝壳不能是墨绿，会和头发糊成一块</li>
+      </ul>
+    </div>
+
+    <!-- ================= B ================= -->
+    <div class="card">
+      <div class="card-head">
+        <span class="tag">剧院向</span>
+        <h3>B · 后台丝绒榻</h3>
+        <p>把「首席女高音」直接演出来：墨绿丝绒、香槟金滚边、一张摊开的乐谱。</p>
+      </div>
+      <div class="stage" data-state="stand">
+        <svg class="nest" viewBox="0 0 240 230" aria-hidden="true">
+          <path d="M30 172 C30 112 58 86 120 86 C182 86 210 112 210 172 Z"
+                fill="url(#velvg)" stroke="#211D24" stroke-width="4.5" stroke-linejoin="round"/>
+          <g stroke="#6D8F86" stroke-width="2" fill="none" opacity=".5">
+            <path d="M70 98 C86 116 86 142 76 162"/>
+            <path d="M120 90 C120 116 120 144 120 166"/>
+            <path d="M170 98 C154 116 154 142 164 162"/>
+          </g>
+          <g fill="#2A423D" stroke="#211D24" stroke-width="1.6">
+            <circle cx="92" cy="110" r="3"/><circle cx="120" cy="104" r="3"/><circle cx="148" cy="110" r="3"/>
+          </g>
+          <path d="M30 170 C30 110 58 84 120 84 C182 84 210 110 210 170"
+                fill="none" stroke="#DCC49A" stroke-width="3.4" stroke-linecap="round"/>
+          <path d="M18 174 C18 162 48 154 120 154 C192 154 222 162 222 174 C222 200 180 210 120 210 C60 210 18 200 18 174 Z"
+                fill="#527A70" stroke="#211D24" stroke-width="4.5"/>
+          <path d="M18 174 C18 188 60 198 120 198 C180 198 222 188 222 174" fill="none" stroke="#DCC49A" stroke-width="3" opacity=".85"/>
+          <path d="M44 204 l-6 12 12 -2 Z" fill="#DCC49A" stroke="#211D24" stroke-width="2.6"/>
+          <path d="M196 204 l6 12 -12 -2 Z" fill="#DCC49A" stroke="#211D24" stroke-width="2.6"/>
+          <g transform="translate(26 128) rotate(-12)">
+            <path d="M0 0 L26 0 L26 22 L0 22 Z" fill="#FBF9F2" stroke="#211D24" stroke-width="2.4"/>
+            <g stroke="#9AA9A2" stroke-width="1.2">
+              <path d="M4 6 L22 6"/><path d="M4 10 L22 10"/><path d="M4 14 L22 14"/><path d="M4 18 L18 18"/>
+            </g>
+          </g>
+          <g class="when-empty">
+            <g transform="translate(94 160) rotate(-5)">
+              <path d="M0 0 L52 0 L52 32 L0 32 Z" fill="#FBF9F2" stroke="#211D24" stroke-width="2.4"/>
+              <g stroke="#9AA9A2" stroke-width="1.2">
+                <path d="M7 10 L45 10"/><path d="M7 17 L45 17"/><path d="M7 24 L32 24"/>
+              </g>
+            </g>
+            <text x="120" y="140" text-anchor="middle" font-size="11" fill="#7E8C94">点窝召回</text>
+          </g>
+        </svg>
+
+        <svg class="pet when-stand" viewBox="0 0 120 170"><use href="#chibi"/></svg>
+        <svg class="pet sleep when-sleep" viewBox="0 0 120 170"><use href="#chibi-sleep"/></svg>
+
+        <svg class="nest-front" viewBox="0 0 240 230" aria-hidden="true">
+          <g class="when-sleep">
+            <path d="M18 170 C22 202 58 218 120 218 C182 218 218 202 222 170 C216 198 180 192 120 192 C60 192 24 198 18 170 Z"
+                  fill="#3F6059" stroke="#211D24" stroke-width="4.2"/>
+            <path d="M30 182 C36 198 76 206 120 206 C164 206 204 198 210 182"
+                  fill="none" stroke="#DCC49A" stroke-width="3"/>
+          </g>
+          <g class="when-stand">
+            <path d="M16 176 C20 198 60 212 120 212 C180 212 220 198 224 176 C218 202 178 210 120 210 C62 210 22 202 16 176 Z"
+                  fill="#527A70" stroke="#211D24" stroke-width="4.2" stroke-linejoin="round"/>
+            <path d="M22 186 C40 198 76 204 120 204 C164 204 200 198 218 186"
+                  fill="none" stroke="#DCC49A" stroke-width="2.6" opacity=".8"/>
+          </g>
+        </svg>
+      </div>
+      <div class="switcher">
+        <button data-set="stand" aria-pressed="true">站着</button>
+        <button data-set="sleep">趴睡</button>
+        <button data-set="empty">空窝</button>
+      </div>
+      <ul class="notes">
+        <li>剧院身份最直白，一眼知道她是谁</li>
+        <li class="warn">丝绒墨绿和她的头发同色，人和窝容易黏在一起</li>
+        <li class="warn">靠背太挺，像家具不像窝</li>
+      </ul>
+    </div>
+
+    <!-- ================= C ================= -->
+    <div class="card">
+      <div class="card-head">
+        <span class="tag">轻量向</span>
+        <h3>C · 冰湖水面</h3>
+        <p>不给她做一个窝，给她一汪水：水妖本来就该待在水里，睡在涟漪中间。</p>
+      </div>
+      <div class="stage" data-state="stand">
+        <svg class="nest" viewBox="0 0 240 230" aria-hidden="true">
+          <ellipse cx="120" cy="164" rx="110" ry="58" fill="#DCEAF2" stroke="#211D24" stroke-width="4.5"/>
+          <ellipse cx="120" cy="162" rx="97" ry="48" fill="url(#waterg)" stroke="#211D24" stroke-width="3.6"/>
+          <g fill="none" stroke="#EAF4F8" stroke-width="2.2" opacity=".6">
+            <ellipse cx="120" cy="164" rx="66" ry="30"/>
+            <ellipse cx="120" cy="166" rx="38" ry="17"/>
+          </g>
+          <g fill="none" stroke="#F4FAFC" stroke-width="2" opacity=".75">
+            <path d="M56 152 q16 -8 34 -6"/>
+            <path d="M146 180 q18 4 34 -4"/>
+          </g>
+          <g stroke="#F2FAFD" stroke-width="2.2" opacity=".9" fill="none">
+            <path d="M18 144 l14 8 -6 10"/>
+            <path d="M212 138 l-12 10 7 8"/>
+          </g>
+          <g fill="#FBF9F2" stroke="#211D24" stroke-width="2.2">
+            <circle cx="48" cy="152" r="5.6"/><circle cx="192" cy="172" r="5"/>
+          </g>
+          <g class="when-empty">
+            <g fill="none" stroke="#EAF4F8" stroke-width="2" opacity=".85">
+              <ellipse cx="120" cy="166" rx="28" ry="12"/>
+              <ellipse cx="120" cy="166" rx="50" ry="21" opacity=".5"/>
+            </g>
+            <text x="120" y="140" text-anchor="middle" font-size="11" fill="#7E8C94">点水召回</text>
+          </g>
+        </svg>
+
+        <svg class="pet when-stand" viewBox="0 0 120 170"><use href="#chibi"/></svg>
+        <svg class="pet sleep when-sleep" viewBox="0 0 120 170"><use href="#chibi-sleep"/></svg>
+
+        <svg class="nest-front" viewBox="0 0 240 230" aria-hidden="true">
+          <g class="when-sleep">
+            <g fill="none" stroke="#EAF4F8" stroke-width="2" opacity=".55">
+              <ellipse cx="120" cy="172" rx="84" ry="38"/>
+              <ellipse cx="120" cy="176" rx="60" ry="26"/>
+            </g>
+          </g>
+          <g class="when-stand">
+            <path d="M14 168 C18 196 62 214 120 214 C178 214 222 196 226 168 C220 198 178 208 120 208 C62 208 20 198 14 168 Z"
+                  fill="#8FB4C6" stroke="#211D24" stroke-width="3.6" stroke-linejoin="round"/>
+            <path d="M40 190 q14 6 30 8" fill="none" stroke="#DCF0F7" stroke-width="2.4" opacity=".8"/>
+          </g>
+        </svg>
+      </div>
+      <div class="switcher">
+        <button data-set="stand" aria-pressed="true">站着</button>
+        <button data-set="sleep">趴睡</button>
+        <button data-set="empty">空窝</button>
+      </div>
+      <ul class="notes">
+        <li>画风最省：只要椭圆 + 两道涟漪，天然是软的</li>
+        <li>睡在水面上、头发散开，是这套里最好看的一帧</li>
+        <li class="warn">「窝」的容器感最弱，更像一个站位</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout" style="margin-top:24px">
+    <b>选 A，但把 B 的金线拿过来用。</b>A 的贝壳给出容器和睡眠几何，B 的香槟金滚边给出「剧院」的身份线索——沿贝壳前沿加那道金线，一克就够。C 的涟漪可以当 A 里的水面反光，叠在内衬下方。
+  </div>
+
+  <h2>四、推荐方案的规格</h2>
+  <div class="spec">
+    <div>
+      <h3 style="font-size:14px;margin-bottom:10px;color:#4C5C55">分层与尺寸</h3>
+      <table>
+        <tr><th style="width:34%">层</th><th>用途</th></tr>
+        <tr><td><code>nest-back</code></td><td>背瓣 + 后沿，常驻，叠在角色下方</td></tr>
+        <tr><td><code>nest-front</code></td><td>前沿 + 珍珠 + 金线，叠在角色上方，压住脚踝约 8px</td></tr>
+        <tr><td><code>nest-lid</code></td><td>抬起的前瓣，仅 sleeping 时淡入 200ms</td></tr>
+        <tr><td><code>nest-empty</code></td><td>人形凹陷 + 一颗珍珠，角色浮出时显示</td></tr>
+      </table>
+      <p style="margin-top:12px;font-size:13px;color:#6C7A74">
+        画布和角色同源：<b>720×960、同机位、脚底锚点对齐</b>。不要另出一张窝图再缩放拼，否则每次改尺寸都会漂。<br>
+        显示尺寸：栏宽 240，角色宽约 120，窝外沿约 <b>180 × 76</b>（源图 540 × 228）。
+      </p>
+    </div>
+    <div>
+      <h3 style="font-size:14px;margin-bottom:10px;color:#4C5C55">配色（取自原图 / 按原图推导）</h3>
+      <div class="swatches">
+        <div class="swatch"><i style="background:#211D24"></i><span>#211D24<br>描边（原图最暗）</span></div>
+        <div class="swatch"><i style="background:#F4F3F8"></i><span>#F4F3F8<br>冷白贴纸边</span></div>
+        <div class="swatch"><i style="background:#E7EEF5"></i><span>#E7EEF5<br>珍珠母·亮</span></div>
+        <div class="swatch"><i style="background:#C3CDE9"></i><span>#C3CDE9<br>珍珠母·雾蓝</span></div>
+        <div class="swatch"><i style="background:#EADFE7"></i><span>#EADFE7<br>珍珠母·虹粉</span></div>
+        <div class="swatch"><i style="background:#DCC49A"></i><span>#DCC49A<br>香槟金（花心同色）</span></div>
+        <div class="swatch"><i style="background:#436465"></i><span>#436465<br>她的头发（避开）</span></div>
+        <div class="swatch"><i style="background:#B7C0E2"></i><span>#B7C0E2<br>她的羽纱</span></div>
+      </div>
+      <p style="margin-top:12px;font-size:13px;color:#6C7A74">
+        描边 <b>4.5px @720</b>（缩到 120px 显示约 0.75px，刚好不糊）；贴纸边 <b>12px @720</b>，只包外轮廓，不描内部结构。金色只出现在<b>一处滚边 + 花心</b>，多了就俗。
+      </p>
+    </div>
+  </div>
+
+  <h2>五、睡眠这一帧怎么定</h2>
+  <table>
+    <thead><tr><th style="width:24%">项</th><th>做法</th></tr></thead>
+    <tbody>
+      <tr><td><b>姿态</b></td><td>蜷在贝壳里，侧卧偏趴，膝盖收向胸口；头枕壳沿内侧，脸朝画面右下（观众看得见闭眼的脸）</td></tr>
+      <tr><td><b>头发</b></td><td>铺满壳内、溢出前沿 10–16px。头发是她最大的体量，不铺开就看不出「装进去了」</td></tr>
+      <tr><td><b>被子</b></td><td>前瓣抬 12°，遮到腰。不用另画毯子——贝壳本身就是被子，这是这个方案最值钱的地方</td></tr>
+      <tr><td><b>呼吸</b></td><td>身体起伏 2px，叠加前瓣 1.5px，同步 2.4s；头发滞后 2 帧</td></tr>
+      <tr><td><b>提示符号</b></td><td>冒 <b>♪</b> 不冒 <b>Z</b>。她连打盹都在唱歌，这一笔比任何表情都更像她</td></tr>
+      <tr><td><b>触发</b></td><td>60s 无输入且无任务；点一下或有请求立刻醒——先抬头，再回 idle，不要直接跳</td></tr>
+      <tr><td><b>时长</b></td><td>进入 8 帧 / 循环 32 帧（≈2.7s）/ 醒来 10 帧</td></tr>
+    </tbody>
+  </table>
+
+  <h2>六、给生成器的提示词</h2>
+  <div class="prompt"><b>主体</b>
+a chibi anime pet bed shaped like a giant pearl shell, deep open bowl, back valve raised high,
+low front lip, iridescent mother-of-pearl interior, scattered pearls along the front rib,
+champagne-gold piping on the rim, one small white five-petal flower with a gold center on the left rim,
+delicate frost crystals on the outer back edge
+
+<b>画风（必须写死，否则拼不上）</b>
+thick near-black outlines (#211D24), soft rounded cartoon shapes,
+flat cel shading with two tones only, subtle cold-white sticker rim outside the silhouette,
+cool palette only: pearl white, mist blue, pale lavender, champagne gold,
+no warm brown, no wood, no wicker, no texture photo
+
+<b>构图</b>
+three-quarter front view, opening facing camera, empty inside, symmetrical, centered,
+same 720x960 canvas as the character, feet anchor aligned, transparent background
+
+<b>不要</b>
+no red velvet, no ornate gold carving, no pile of sheet music, no seaweed, no sand, no water splash,
+no dark green shell body</div>
+
+  <footer>
+    资料来源：<a href="https://baike.baidu.com/item/沃雅妮莎/67451944">百度百科 · 沃雅妮莎</a> ·
+    <a href="https://genshin-impact.fandom.com/zh/wiki/沃雅妮莎">Fandom 中文 Wiki</a> ·
+    原神官方角色情报「纵鳍梭跃，澄波吟咏」（2026-08-18：称号 / 神之眼 / 命之座 / 至冬水妖背景）<br>
+    配色采样自 <code>D:/王金赛/wo待机/frame_000000.png</code>（720×960，尚未去背）；卡片内角色为按她配色绘制的占位人形，只用来看比例与遮挡。
+  </footer>
+</div>
+
+<script>
+  document.querySelectorAll('.card').forEach(card => {
+    const stage = card.querySelector('.stage');
+    card.querySelectorAll('.switcher button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        stage.dataset.state = btn.dataset.set;
+        card.querySelectorAll('.switcher button').forEach(b => b.setAttribute('aria-pressed', String(b === btn)));
+      });
+    });
+  });
+  const m = new URLSearchParams(location.search).get('state');
+  if (m) document.querySelectorAll('.stage').forEach(s => s.dataset.state = m);
+</script>
+</body>
+</html>

@@ -25,6 +25,7 @@ from app.services.course_scope import materials_for_course, notebooks_for_course
 from app.services.deletion import (
     DeletionConflict,
     impact_preview,
+    permanently_delete_course,
     soft_delete_course,
 )
 
@@ -44,7 +45,7 @@ def create_course(payload: CourseCreate, db: Session = Depends(get_db)) -> Cours
     course = Course(name=payload.name.strip(), description=payload.description)
     db.add(course)
     db.flush()
-    ensure_profile(db, course)
+    ensure_profile(db, course, auto_home=True)
     db.commit()
     db.refresh(course)
     return course
@@ -175,3 +176,14 @@ def restore_course(course_id: str, db: Session = Depends(get_db)) -> Course:
     db.commit()
     db.refresh(course)
     return course
+
+
+@router.delete("/courses/{course_id}/permanent", status_code=204)
+def purge_deleted_course(course_id: str, db: Session = Depends(get_db)) -> None:
+    course = db.get(Course, course_id)
+    if course is None or course.deleted_at is None:
+        raise HTTPException(404, "回收站中没有这门课程")
+    try:
+        permanently_delete_course(db, course)
+    except DeletionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
