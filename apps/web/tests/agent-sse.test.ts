@@ -37,3 +37,21 @@ test('parseAgentStream 忽略坏帧与非 data 行，不断流', () => {
   )
   assert.deepEqual(events, [{ type: 'delta', text: 'ok' }])
 })
+
+test('parseAgentStream 兼容被规范化成 \r\n\r\n 的帧边界（v6 P2）', () => {
+  const buffer = 'data: {"type":"delta","text":"你"}\r\n\r\ndata: {"type":"delta","text":"好"}\r\n\r\ndata: {"type"'
+  const { events, rest } = parseAgentStream(buffer)
+
+  assert.deepEqual(events, [
+    { type: 'delta', text: '你' },
+    { type: 'delta', text: '好' },
+  ])
+  assert.equal(rest, 'data: {"type"')
+})
+
+test('parseAgentStream 混合行尾也能逐帧拆出', () => {
+  const { events } = parseAgentStream(
+    'data: {"type":"delta","text":"a"}\n\ndata: {"type":"delta","text":"b"}\r\n\r\ndata: {"type":"delta","text":"c"}\n\r\n',
+  )
+  assert.deepEqual(events.map((event) => (event as { text: string }).text), ['a', 'b', 'c'])
+})

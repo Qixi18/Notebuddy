@@ -5,7 +5,6 @@ import { api } from '../../api'
 import { useConversation } from '../conversation/useConversation'
 import { useNoteEditor } from '../notes/useNoteEditor'
 import { mergeNotebookNotes } from '../notebook/navigation'
-import { useTeacherCharacter } from '../persona/useTeacherCharacter'
 import { resolveConversationCourseId } from './currentCourse'
 import type { Course, Job, KnowledgeGraph, Material, Note, Page } from '../../types'
 
@@ -44,8 +43,6 @@ export function useWorkspaceState() {
   const [error, setError] = useState<string>()
   const [documentDirty, setDocumentDirty] = useState(false)
 
-  const [teacherPersona, setTeacherPersona] = useTeacherCharacter()
-
   const course = courses.find((item) => item.id === courseId)
   const selectedNote = notes.find((note) => note.id === selectedNoteId)
   const { noteDraft, setNoteDraft, editingNote, setEditingNote, noteSaving, noteDirty, saveNote, reloadNote } = useNoteEditor(selectedNote, setNotes, setError)
@@ -55,7 +52,7 @@ export function useWorkspaceState() {
     () => resolveConversationCourseId(courseId, courses, (key) => localStorage.getItem(key)),
     [courseId, courses],
   )
-  const conversation = useConversation(conversationCourseId, teacherPersona)
+  const conversation = useConversation(conversationCourseId)
 
   useEffect(() => {
     if (!courseId || !course) return
@@ -276,8 +273,6 @@ export function useWorkspaceState() {
     setEditingNote,
     graph,
     job,
-    teacherPersona,
-    setTeacherPersona,
     conversation,
     busy: busy || conversation.busy,
     noteSaving,
@@ -296,7 +291,7 @@ export function useWorkspaceState() {
     refreshCourses,
     refreshCurrentMaterials: () => courseId ? refreshMaterials(courseId) : Promise.resolve(),
     refreshCurrentNotes: () => courseId ? refreshNotes(courseId) : Promise.resolve(),
-  }), [courses, courseId, conversationCourseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, teacherPersona, conversation, busy, noteSaving, noteDirty, documentDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
+  }), [courses, courseId, conversationCourseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, conversation, busy, noteSaving, noteDirty, documentDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
 
   return workspace
 }

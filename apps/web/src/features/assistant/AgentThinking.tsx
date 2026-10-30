@@ -2,11 +2,9 @@ import { useState } from 'react'
 
 /**
  * 思维链展示：执行中实时滚动最新思考（限高、只留尾部），结束后折叠成「已深度思考」。
- * 纯展示：内容是模型思维链增量，不进入回答正文与证据；随 final 的 process 落库，
- * 历史消息里由「过程记录」展开回看。
+ * 纯展示：内容是模型思维链增量，不进入回答正文、历史与证据。
  */
 
-/** 实时态只渲染尾部这么多字：思维链可能很长，全量渲染会让容器一直抖动 */
 const LIVE_TAIL_CHARS = 600
 
 function liveTail(thinking: string): string {

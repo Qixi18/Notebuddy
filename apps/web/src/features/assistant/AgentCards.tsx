@@ -4,11 +4,9 @@ import { api } from '../../api'
 import type { AgentSuggestion } from '../../api/agentStream'
 import type { QuizDto } from '../../api/quiz'
 import { readStorage, writeStorage } from '../../utils/safeStorage'
-import { DiffView } from './DiffView'
 import { AssistantMessageMarkdown } from './AssistantMessageContent'
+import { DiffView } from './DiffView'
 import { applySelected, diffRows, hunksOf } from './noteDiff'
-import type { NotebookEditSuggestion } from '../../types'
-import { docToMarkdown } from '../notebook-editor/document'
 
 /**
  * agent 产生的待确认项卡片：
@@ -29,14 +27,15 @@ export type PendingNoteSuggestion = {
 
 export function NoteSuggestionCards({
   suggestions,
-  currentContent,
+  currentContentByNoteId,
   busyId,
   adoptedContents,
   onReview,
   onUndo,
 }: {
   suggestions: PendingNoteSuggestion[]
-  currentContent: string
+  /** 每篇笔记的当前正文：diff 基准按 suggestion.note_id 取，多目标下绝不共用单一正文 */
+  currentContentByNoteId: Record<string, string>
   busyId?: string
   /** 已采纳建议 id → 采纳前正文（撤销时回写） */
   adoptedContents: Record<string, string>
@@ -49,7 +48,7 @@ export function NoteSuggestionCards({
 
   return (
     <div className="agent-cards" role="list" aria-label="待确认的笔记修改建议">
-      <small className="agent-cards-title">📝 笔记修改建议 · 勾选要应用的变更块，确认后才会写入</small>
+      <small className="agent-cards-title">笔记修改建议 · 勾选要应用的变更块，确认后才会写入</small>
       {suggestions.map((suggestion) => {
         const adopted = adoptedContents[suggestion.id] !== undefined
         if (adopted) {
@@ -67,6 +66,8 @@ export function NoteSuggestionCards({
             </article>
           )
         }
+        /* 数据安全红线：diff 基准必须是这条建议自己的那篇笔记 */
+        const currentContent = currentContentByNoteId[suggestion.note_id] ?? ''
         const rows = diffRows(currentContent, suggestion.proposed_markdown)
         const hunks = hunksOf(rows)
         const skipSet = skipped[suggestion.id] ?? new Set<string>()
@@ -83,7 +84,10 @@ export function NoteSuggestionCards({
         }
         return (
           <article key={suggestion.id} className="agent-card" role="listitem">
-            <p className="agent-card-body">{suggestion.impact || 'AI 提出的修改建议'}</p>
+            <p className="agent-card-body">
+              {suggestion.note_title && <small className="agent-card-note">《{suggestion.note_title}》</small>}
+              {suggestion.impact || 'AI 提出的修改建议'}
+            </p>
             <DiffView rows={rows} skipped={skipSet} onToggle={toggle} />
             <div className="agent-card-actions">
               <button
@@ -110,56 +114,17 @@ export function KnowledgeProposalCards({ suggestions }: { suggestions: Array<{ t
   if (suggestions.length === 0) return null
   return (
     <div className="agent-cards" role="list" aria-label="知识节点提议">
-      <small className="agent-cards-title">🌿 旧版知识提议 · 不会写入 Notebook 正文或当前知识森林</small>
+      <small className="agent-cards-title">知识节点提议 · 到课程知识图谱审核后才会进入图谱</small>
       {suggestions.map((proposal) => (
         <article key={proposal.id} className="agent-card agent-card-info" role="listitem">
-          <p className="agent-card-body">提议新增知识点「{proposal.name}」。该提议仅保留在历史记录中；当前知识结构由 Notebook 正文生成。</p>
+          <p className="agent-card-body">提议新增知识点「{proposal.name}」</p>
         </article>
       ))}
     </div>
   )
 }
 
-export function NotebookEditSuggestionCards({ suggestions, busyId, onReview }: {
-  suggestions: NotebookEditSuggestion[]
-  busyId?: string
-  onReview: (suggestion: NotebookEditSuggestion, decision: 'accept' | 'reject', selectedIndices?: number[]) => void
-}) {
-  const [selected, setSelected] = useState<Record<string, Set<number>>>({})
-  if (!suggestions.length) return null
-  return <div className="agent-cards" role="list" aria-label="待审核的 Notebook 修改建议">
-    <small className="agent-cards-title">📝 Notebook 修改建议 · 选择要应用的结构化操作，确认后写入</small>
-    {suggestions.map((item) => {
-      const selectedIndices = selected[item.id] ?? new Set(item.operations.map((_, index) => index))
-      return <article key={item.id} className="agent-card" role="listitem">
-        <p className="agent-card-body">《{item.notebook_title ?? 'Notebook'}》· {item.rationale || 'AI 提出的修改建议'}</p>
-        <fieldset className="notebook-edit-operations">
-          <legend>修改操作</legend>
-          {item.operations.map((operation, index) => <label key={`${index}-${operation.op}`}>
-            <input type="checkbox" checked={selectedIndices.has(index)} onChange={() => setSelected((current) => {
-              const next = new Set(current[item.id] ?? item.operations.map((_, i) => i))
-              next.has(index) ? next.delete(index) : next.add(index)
-              return { ...current, [item.id]: next }
-            })} />
-            <span>{operation.op} · {operation.anchor || '文末'}{operation.content ? `：${operation.content}` : ''}</span>
-          </label>)}
-        </fieldset>
-        {item.proposed_content ? <details className="notebook-edit-preview">
-          <summary>查看完整建议正文（预览）</summary>
-          <pre>{docToMarkdown(item.proposed_content)}</pre>
-        </details> : null}
-        <div className="agent-card-actions">
-          <button type="button" className="agent-card-confirm" disabled={busyId === item.id || selectedIndices.size === 0}
-            onClick={() => onReview(item, 'accept', [...selectedIndices].sort((a, b) => a - b))}>
-            {busyId === item.id ? '写入中…' : `采纳所选操作（${selectedIndices.size}/${item.operations.length}）`}
-          </button>
-          <button type="button" className="agent-card-reject" disabled={busyId === item.id}
-            onClick={() => onReview(item, 'reject')}>忽略</button>
-        </div>
-      </article>
-    })}
-  </div>
-}
+/** QuizCards（v6 P10）：agent 出的自测卷——拉题目、作答、服务端判分讲评。 */
 export function QuizCards({ quizzes, courseId, onAsk }: {
   quizzes: Array<{ type: 'quiz'; id: string; quiz_id: string; title: string; item_count: number }>
   courseId?: string
@@ -256,12 +221,7 @@ function QuizCard({ quiz, onAsk }: { quiz: QuizDto; onAsk?: (prompt: string) => 
     if (graded[item.id] || busyId || !answer.trim()) return
     setBusyId(item.id)
     setError(undefined)
-    /* 每次作答动作一个 request_key：网络重试复用同一个键（服务端 exactly-once），
-       而用户改天重新作答是新的动作，即使选了同一个选项也会如实记成一次新作答。 */
-    const requestKey = typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `quiz-${item.id}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-    void api.submitAttempts(quiz.id, [{ item_id: item.id, answer, request_key: requestKey }])
+    void api.submitAttempts(quiz.id, [{ item_id: item.id, answer }])
       .then((result) => {
         const verdict = result.results.find((entry) => entry.item_id === item.id)
         if (verdict) setGraded((current) => ({ ...current, [item.id]: verdict }))

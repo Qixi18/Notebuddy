@@ -1,0 +1,87 @@
+{
+  "character": "pet",
+  "canvas": [
+    408,
+    544
+  ],
+  "fps": 12,
+  "actions": {
+    "error": {
+      "id": "error",
+      "file": "error.webp",
+      "loop": "none",
+      "once": true,
+      "outputFrames": 60,
+      "duration": 5.0,
+      "width": 408,
+      "height": 544,
+      "bytes": 1308532
+    },
+    "explaining": {
+      "id": "explaining",
+      "file": "explaining.webp",
+      "loop": "none",
+      "once": true,
+      "outputFrames": 120,
+      "duration": 10.0,
+      "width": 408,
+      "height": 544,
+      "bytes": 2698354
+    },
+    "explaining-loop": {
+      "id": "explaining-loop",
+      "file": "explaining-loop.webp",
+      "loop": "pingpong-reverse",
+      "once": false,
+      "outputFrames": 24,
+      "duration": 2.0,
+      "width": 408,
+      "height": 544,
+      "bytes": 540316
+    },
+    "greet": {
+      "id": "greet",
+      "file": "greet.webp",
+      "loop": "none",
+      "once": true,
+      "outputFrames": 60,
+      "duration": 5.0,
+      "width": 408,
+      "height": 544,
+      "bytes": 1285852
+    },
+    "idle": {
+      "id": "idle",
+      "file": "idle.webp",
+      "loop": "pingpong",
+      "once": false,
+      "outputFrames": 70,
+      "duration": 5.83,
+      "width": 408,
+      "height": 544,
+      "bytes": 1556162
+    },
+    "thinking-intro": {
+      "id": "thinking-intro",
+      "file": "thinking-intro.webp",
+      "loop": "none",
+      "once": true,
+      "outputFrames": 38,
+      "duration": 3.17,
+      "width": 408,
+      "height": 544,
+      "bytes": 855058
+    },
+    "thinking-loop": {
+      "id": "thinking-loop",
+      "file": "thinking-loop.webp",
+      "loop": "pingpong-reverse",
+      "once": false,
+      "outputFrames": 52,
+      "duration": 4.33,
+      "width": 408,
+      "height": 544,
+      "bytes": 1163940
+    }
+  }
+}

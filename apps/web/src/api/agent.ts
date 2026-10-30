@@ -1,4 +1,4 @@
-import { ApiError, readApiError } from './http'
+import { ApiError } from './http'
 import { parseAgentRemainder, parseAgentStream } from './agentStream'
 import type {
   AgentEvent,
@@ -52,7 +52,14 @@ export async function streamAgentMessage(
     signal,
   })
   if (!response.ok) {
-    throw await readApiError(response)
+    const body = await response.text()
+    let detail = body
+    try {
+      detail = (JSON.parse(body) as { detail?: string }).detail ?? body
+    } catch {
+      // 保持原文可读
+    }
+    throw new ApiError(detail || `请求失败：${response.status}`, response.status)
   }
   if (!response.body) throw new ApiError('响应缺少流内容', response.status)
 
@@ -66,6 +73,8 @@ export async function streamAgentMessage(
     if (event.type === 'final') finalEvent = event
     if (event.type === 'error') errorMessage = event.message
   }
+  /* 空闲超时（v6 P2）：连接开着但服务端不发数据时，reader.read() 会永久 pending，
+      用户只能干等。每次读都限 30s，超时取消读取并给出可操作的错误。 */
   const IDLE_TIMEOUT_MS = 30_000
   for (;;) {
     let idleTimer: ReturnType<typeof setTimeout> | undefined

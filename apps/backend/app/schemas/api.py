@@ -15,6 +15,7 @@ from app.schemas.backup import (
 from app.schemas.conversations import (
     AgentMessageCreate,
     ConversationCreate,
+    ConversationMessageHit,
     ConversationMessageCreate,
     ConversationMessageHit,
     ConversationMessageRead,

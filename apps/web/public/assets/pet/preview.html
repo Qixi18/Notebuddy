@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>pet · 动作预览</title>
+<style>
+  body { margin: 0; padding: 32px; background: #F4F6F3; color: #1B2A22;
+         font: 14px/1.6 system-ui, "Microsoft YaHei", sans-serif; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  p.meta { color: #55635A; margin: 0 0 24px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .card { margin: 0; background: #fff; border: 1px solid #E6EAE4; border-radius: 12px; overflow: hidden; }
+  .stage { height: 220px; display: grid; place-items: end center;
+           background-color: #fff;
+           background-image: linear-gradient(45deg, #EDF1EC 25%, transparent 25%),
+                             linear-gradient(-45deg, #EDF1EC 25%, transparent 25%),
+                             linear-gradient(45deg, transparent 75%, #EDF1EC 75%),
+                             linear-gradient(-45deg, transparent 75%, #EDF1EC 75%);
+           background-size: 16px 16px;
+           background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+  .stage img { max-height: 200px; max-width: 90%; }
+  figcaption { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+               border-top: 1px solid #EFF3EE; }
+  figcaption strong { font-size: 13px; }
+  figcaption span { flex: 1; color: #6B7A6E; font-size: 11px; }
+  button { border: 1px solid #CFE0D6; background: #F2F8F4; color: #174534;
+           border-radius: 7px; padding: 4px 9px; font-size: 11px; cursor: pointer; }
+</style>
+<h1>pet · 动作预览</h1>
+<p class="meta">408 × 544 · 12 fps · 棋盘格即透明区域</p>
+<div class="grid">
+    <figure class="card">
+      <div class="stage"><img src="error.webp" alt="error" loading="lazy"></div>
+      <figcaption>
+        <strong>error</strong>
+        <span>60 帧 · 5.0s · 1278 KB</span>
+        <button type="button" onclick="replay(this)">重播</button>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="stage"><img src="explaining.webp" alt="explaining" loading="lazy"></div>
+      <figcaption>
+        <strong>explaining</strong>
+        <span>120 帧 · 10.0s · 2635 KB</span>
+        <button type="button" onclick="replay(this)">重播</button>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="stage"><img src="explaining-loop.webp" alt="explaining-loop" loading="lazy"></div>
+      <figcaption>
+        <strong>explaining-loop</strong>
+        <span>24 帧 · 2.0s · 528 KB</span>
+        <button type="button" onclick="replay(this)">重播</button>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="stage"><img src="greet.webp" alt="greet" loading="lazy"></div>
+      <figcaption>
+        <strong>greet</strong>
+        <span>60 帧 · 5.0s · 1256 KB</span>
+        <button type="button" onclick="replay(this)">重播</button>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="stage"><img src="idle.webp" alt="idle" loading="lazy"></div>
+      <figcaption>
+        <strong>idle</strong>
+        <span>70 帧 · 5.83s · 1520 KB</span>
+        <button type="button" onclick="replay(this)">重播</button>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="stage"><img src="thinking-intro.webp" alt="thinking-intro" loading="lazy"></div>
+      <figcaption>
+        <strong>thinking-intro</strong>
+        <span>38 帧 · 3.17s · 835 KB</span>
+        <button type="button" onclick="replay(this)">重播</button>
+      </figcaption>
+    </figure>
+    <figure class="card">
+      <div class="stage"><img src="thinking-loop.webp" alt="thinking-loop" loading="lazy"></div>
+      <figcaption>
+        <strong>thinking-loop</strong>
+        <span>52 帧 · 4.33s · 1137 KB</span>
+        <button type="button" onclick="replay(this)">重播</button>
+      </figcaption>
+    </figure>
+</div>
+<script>
+function replay(button) {
+  const img = button.closest('.card').querySelector('img');
+  const src = img.src.split('?')[0];
+  img.src = '';
+  requestAnimationFrame(() => { img.src = src + '?t=' + Date.now(); });
+}
+</script>
+</html>

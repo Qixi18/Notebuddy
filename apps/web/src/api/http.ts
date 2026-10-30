@@ -46,3 +46,42 @@ export class ApiError extends Error {
     this.name = 'ApiError'
   }
 }
+
+/**
+ * 同步版可读化：把 FastAPI 的错误体解析成人能读的句子。
+ *
+ * FastAPI 的参数校验错误长这样：`{"detail":[{"loc":["body","teacher_persona"],"msg":"..."}]}`，
+ * 旧实现把 `detail` 直接丢给 Error 构造函数，数组里的对象被 String() 成
+ * `[object Object]`，用户只看到这串天书。这里按结构拼装；解析不了就原样返回。
+ *
+ * 与上面的 {@link readApiError} 并存：后者是请求路径实际使用的（异步读 body），
+ * 本函数供需要先拿到 body 再自行拼装的调用方使用。
+ */
+export function readableDetail(body: string): string {
+  if (!body) return ''
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return body // 网关返回的纯文本 / HTML 片段，保持原样
+  }
+  const detail = (parsed as { detail?: unknown } | null)?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (typeof item === 'string') return item
+      const entry = item as { loc?: unknown; msg?: unknown } | null
+      const loc = Array.isArray(entry?.loc)
+        ? entry.loc.filter((part) => part !== 'body' && part !== 'query').join('.')
+        : ''
+      const msg = typeof entry?.msg === 'string' ? entry.msg : ''
+      if (msg && loc) return `${loc} ${msg}`
+      return msg
+    }).filter(Boolean)
+    return parts.length ? `请求参数不合法：${parts.join('；')}` : ''
+  }
+  if (detail && typeof detail === 'object' && typeof (detail as { msg?: unknown }).msg === 'string') {
+    return (detail as { msg: string }).msg
+  }
+  return ''
+}

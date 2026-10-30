@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 
-import type { Conversation, Course } from '../../types'
 import { api } from '../../api'
+import type { ConversationMessageHit } from '../../api/conversations'
+import type { Conversation, Course } from '../../types'
 import { buildHistory, conversationTime, conversationTimeLabel } from '../conversation/conversationGroups'
 import {
   ConversationContextMenu,
@@ -292,6 +293,7 @@ function HighlightedSnippet({ snippet, keyword }: { snippet: string; keyword: st
 export function ConversationSearch({ conversations, conversationId, courseId, onSelect, onSelectMessage, onClose }: {
   conversations: Conversation[]
   conversationId?: string
+  /** 传入才启用消息全文搜索（P6，课程内） */
   courseId?: string
   onSelect: (id: string) => void
   /** 点消息命中：打开该会话并定位高亮该条消息 */
@@ -299,37 +301,36 @@ export function ConversationSearch({ conversations, conversationId, courseId, on
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
-  const [messageResults, setMessageResults] = useState<Awaited<ReturnType<typeof api.searchMessages>>>([])
-  const [messageSearchBusy, setMessageSearchBusy] = useState(false)
+  const [hits, setHits] = useState<ConversationMessageHit[]>([])
+  const [hitsLoading, setHitsLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
-  useEffect(() => {
-    const value = query.trim()
-    if (!courseId || value.length < 2) { setMessageResults([]); setMessageSearchBusy(false); return }
-    let active = true
-    setMessageSearchBusy(true)
-    const timer = window.setTimeout(() => {
-      void api.searchMessages(courseId, value).then((results) => {
-        if (active) setMessageResults(results)
-      }).catch(() => {
-        if (active) setMessageResults([])
-      }).finally(() => {
-        if (active) setMessageSearchBusy(false)
-      })
-    }, 180)
-    return () => { active = false; window.clearTimeout(timer) }
-  }, [courseId, query])
-
+  const keyword = query.trim()
   const results = useMemo(() => {
     const sorted = [...conversations].sort((a, b) => conversationTime(b) - conversationTime(a))
-    const keyword = query.trim().toLowerCase()
-    const matched = keyword
-      ? sorted.filter((item) => (item.title || '').toLowerCase().includes(keyword))
+    const lowered = keyword.toLowerCase()
+    const matched = lowered
+      ? sorted.filter((item) => (item.title || '').toLowerCase().includes(lowered))
       : sorted
     return matched.slice(0, 8)
-  }, [conversations, query])
+  }, [conversations, keyword])
+
+  /* 消息搜索：300ms 防抖；请求级守门（递增序号）防晚到的旧响应覆盖新结果（v6 P5） */
+  const searchSeqRef = useRef(0)
+  useEffect(() => {
+    if (!courseId || !keyword) { setHits([]); setHitsLoading(false); return }
+    setHitsLoading(true)
+    const timer = window.setTimeout(() => {
+      const requestId = ++searchSeqRef.current
+      void api.searchMessages(courseId, keyword)
+        .then((items) => { if (searchSeqRef.current === requestId) setHits(items) })
+        .catch(() => { if (searchSeqRef.current === requestId) setHits([]) })
+        .finally(() => { if (searchSeqRef.current === requestId) setHitsLoading(false) })
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [courseId, keyword])
 
   return (
     <div className="workspace-palette-backdrop" onClick={onClose}>
@@ -345,55 +346,65 @@ export function ConversationSearch({ conversations, conversationId, courseId, on
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="搜索会话标题或消息内容…"
-          aria-label="搜索会话标题或消息内容"
+          aria-label="搜索会话标题"
           maxLength={120}
           onKeyDown={(event) => {
             if (event.key === 'Escape') { onClose(); return }
-            if (event.key !== 'Enter') return
-            /* 与会话标题命中优先，其次才是消息命中；消息命中要带上 messageId 才能定位 */
-            if (results[0]) { onSelect(results[0].id); onClose(); return }
-            const hit = messageResults[0]
-            if (hit) { onSelectMessage(hit.conversation_id, hit.message_id); onClose() }
+            if (event.key === 'Enter') {
+              if (results[0]) { onSelect(results[0].id); onClose(); return }
+              if (hits[0]) { onSelectMessage(hits[0].conversation_id, hits[0].message_id); onClose() }
+            }
           }}
         />
-        {results.length === 0 ? (
-          <p className="workspace-palette-empty">没有匹配的会话</p>
+        {results.length === 0 && hits.length === 0 ? (
+          <p className="workspace-palette-empty">
+            {!courseId || !keyword ? '没有匹配的会话' : hitsLoading ? '正在搜索消息…' : '没有匹配的会话或消息'}
+          </p>
         ) : (
-          <ul className="workspace-palette-list">
-            {results.map((item) => {
-              const active = item.id === conversationId
-              return (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    className={active ? 'is-active' : undefined}
-                    aria-current={active ? 'true' : undefined}
-                    onClick={() => { onSelect(item.id); onClose() }}
-                  >
-                    <span>{item.title || '未命名会话'}</span>
-                    <small>{conversationTimeLabel(item)}</small>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-        {query.trim().length >= 2 && (
-          <section className="workspace-palette-messages" aria-label="消息内容匹配">
-            <strong>消息内容{messageSearchBusy ? ' · 搜索中…' : ''}</strong>
-            {messageResults.length === 0 && !messageSearchBusy
-              ? <p className="workspace-palette-empty">没有匹配的消息</p>
-              : <ul className="workspace-palette-list">
-                {messageResults.map((hit) => (
-                  <li key={hit.message_id}>
-                    <button type="button" onClick={() => { onSelectMessage(hit.conversation_id, hit.message_id); onClose() }}>
-                      <span>{hit.conversation_title} · {hit.message_role === 'user' ? '你' : 'AI'}</span>
-                      <HighlightedSnippet snippet={hit.snippet} keyword={query.trim()} />
-                    </button>
-                  </li>
-                ))}
-              </ul>}
-          </section>
+          <div className="workspace-palette-list">
+            {results.length > 0 && (
+              <>
+                <p className="workspace-palette-group">会话</p>
+                <ul>
+                  {results.map((item) => {
+                    const active = item.id === conversationId
+                    return (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          className={active ? 'is-active' : undefined}
+                          aria-current={active ? 'true' : undefined}
+                          onClick={() => { onSelect(item.id); onClose() }}
+                        >
+                          <span>{item.title || '未命名会话'}</span>
+                          <small>{conversationTimeLabel(item)}</small>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            )}
+            {hits.length > 0 && (
+              <>
+                <p className="workspace-palette-group">消息</p>
+                <ul>
+                  {hits.map((hit) => (
+                    <li key={hit.message_id}>
+                      <button
+                        type="button"
+                        onClick={() => { onSelectMessage(hit.conversation_id, hit.message_id); onClose() }}
+                      >
+                        <span className="workspace-palette-hit-title">{hit.conversation_title || '未命名会话'}</span>
+                        <HighlightedSnippet snippet={hit.snippet} keyword={keyword} />
+                        <small>{hit.message_role === 'user' ? '提问' : '回答'}</small>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
         )}
         <p className="workspace-palette-hint">Enter 打开第一条 · Esc 关闭</p>
       </div>

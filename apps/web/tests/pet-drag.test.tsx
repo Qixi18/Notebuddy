@@ -7,6 +7,9 @@ vi.mock('../src/api', () => ({
   api: {
     getWebSearchStatus: vi.fn(async () => ({ configured: false, provider: 'none', status: 'ok' })),
     saveFeedback: vi.fn(async () => ({ id: 'fb1' })),
+    /* 答疑页挂载即按课程拉待确认建议（P4） */
+    listCourseSuggestions: vi.fn(async () => []),
+    getNote: vi.fn(),
   },
 }))
 
@@ -47,6 +50,7 @@ function renderPage() {
     ready: true,
     error: undefined as string | undefined,
     agentRun: null,
+    agentSuggestionsByMessage: {},
     selectConversation: vi.fn(async () => {}),
     startNewConversation: vi.fn(async () => {}),
     ask: vi.fn(async () => true),

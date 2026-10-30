@@ -14,29 +14,46 @@ export type AgentStepEvent = {
   tool: string
   detail: string
   status: 'running' | 'done'
-  duration_ms?: number | null
-  /** Tool artifacts already created, preserved if the stream ends before `final`. */
-  suggestions?: AgentSuggestion[]
 }
 
 export type AgentDeltaEvent = { type: 'delta'; text: string }
 
-/** 思考边界信号：后端只告知「进入/离开思考」，从不携带思维链原文。 */
 export type AgentThinkingEvent = { type: 'thinking'; text: string }
 
 export type AgentNoticeEvent = { type: 'notice'; text: string }
 
 export type AgentSuggestion =
-  | { type: 'notebook_edit_suggestion'; id: string; notebook_id: string; notebook_title: string; base_revision: number; impact: string }
+  | { type: 'note_suggestion'; id: string; note_id: string; note_title: string; impact: string }
   | { type: 'knowledge_proposal'; id: string; name: string }
   | { type: 'quiz'; id: string; quiz_id: string; title: string; item_count: number }
-  | { type: 'review_outline'; id: string; artifact_id?: string; favorite?: boolean; title: string; module_count: number; item_count: number; modules: { title: string; priority: 'high' | 'medium' | 'low'; items: { point: string; ref?: string }[] }[] }
-  | { type: 'concept_contrast'; id: string; artifact_id?: string; pair_count: number; pairs: { a: string; b: string; core: string; dimensions: { name: string; a: string; b: string }[]; anchor?: string }[] }
+  | {
+      type: 'review_outline'
+      id: string
+      /** 复习产物实体 id（技能产出已落库；旧消息里的建议没有此字段，收藏/删除按钮不渲染） */
+      artifact_id?: string
+      favorite?: boolean
+      title: string
+      module_count: number
+      item_count: number
+      modules: { title: string; priority: 'high' | 'medium' | 'low'; items: { point: string; ref?: string }[] }[]
+    }
+  | {
+      type: 'concept_contrast'
+      id: string
+      artifact_id?: string
+      favorite?: boolean
+      pair_count: number
+      pairs: {
+        a: string
+        b: string
+        core: string
+        dimensions: { name: string; a: string; b: string }[]
+        anchor?: string
+      }[]
+    }
 
 export type AgentProcessTrace = {
-  /** 思维链全文（后端落库前截断 2 万字符）。历史「过程记录」展开时回看 */
-  thinking?: string
-  /** 思考耗时（毫秒） */
+  thinking: string
   thinking_ms?: number
   steps: { tool: string; detail: string; duration_ms?: number | null }[]
 }
@@ -51,6 +68,7 @@ export type AgentFinalEvent = {
   message_id?: string
   fallback?: boolean
   reason?: string
+  /** agent 过程轨迹（服务端计时持久化），前端随消息渲染成可展开折叠块 */
   process?: AgentProcessTrace | null
   /** 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表 */
   conversation_title?: string
@@ -74,7 +92,7 @@ export type AgentReadingContext = {
 }
 
 export type AgentNotebookContext = {
-  course_id: string | null
+  course_id: string
   notebook_id: string
   revision: number
   title?: string
@@ -88,11 +106,15 @@ export type AgentQuestionPayload = {
   teacher_persona?: string
   material_id?: string
   allow_web?: boolean
-  allow_quiz?: boolean
-  learning_mode?: 'direct' | 'guided'
   idempotency_key?: string
   reading_context?: AgentReadingContext
   notebook_context?: AgentNotebookContext
+  /** P4 发现开关：允许 agent 自主定位课程内任意笔记并提交修改建议；只有答疑页传 true */
+  allow_note_discovery?: boolean
+  /** P10 出题开关：允许 agent 调 generate_quiz 出自测卷；只有答疑页传 true */
+  allow_quiz?: boolean
+  /** P9 学习模式：guided=引导式答疑（先诊断再分步提示）；默认 direct */
+  learning_mode?: 'direct' | 'guided'
 }
 
 export type AgentStreamHandlers = {
@@ -104,17 +126,18 @@ export type AgentStreamHandlers = {
   onError?: (event: AgentErrorEvent) => void
 }
 
-/** 解析一段 SSE 缓冲为事件列表，返回未成帧的余量。 */
-const FRAME_BOUNDARY = /\r?\n\r?\n/
+/** SSE 帧边界：兼容 \n\n 与被中间层规范化成 \r\n\r\n 的行尾（v6 P2）。 */
+const SSE_FRAME_BOUNDARY = /\r?\n\r?\n/
 
+/** 解析一段 SSE 缓冲为事件列表，返回未成帧的余量。 */
 export function parseAgentStream(buffer: string): { events: AgentEvent[]; rest: string } {
   const events: AgentEvent[] = []
   let rest = buffer
-  let boundary = FRAME_BOUNDARY.exec(rest)
+  let boundary = SSE_FRAME_BOUNDARY.exec(rest)
   while (boundary) {
     const frame = rest.slice(0, boundary.index).trim()
     rest = rest.slice(boundary.index + boundary[0].length)
-    boundary = FRAME_BOUNDARY.exec(rest)
+    boundary = SSE_FRAME_BOUNDARY.exec(rest)
     if (!frame.startsWith('data:')) continue
     try {
       events.push(JSON.parse(frame.slice(5).trim()) as AgentEvent)

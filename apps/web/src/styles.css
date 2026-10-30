@@ -101,19 +101,8 @@ a { color: inherit; text-decoration: none; }
 .page-heading-block p { margin-top: 9px; color: var(--muted); font-size: 13px; line-height: 1.7; }
 .page-count-pill { display: inline-flex; align-items: center; gap: 9px; border: 1px solid var(--line); border-radius: 999px; padding: 9px 13px; color: #637b91; background: white; font-size: 11px; white-space: nowrap; }
 .teacher-character { position: relative; z-index: 1; display: grid; width: 230px; height: 258px; flex: none; place-items: center; align-self: flex-end; }
-.teacher-character-halo { position: absolute; top: 15px; width: 210px; height: 210px; border: 1px solid rgba(255,255,255,.86); border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.92), rgba(211,236,253,.75) 70%, rgba(198,229,250,.25)); box-shadow: 0 16px 35px rgba(80, 139, 185, .13); }
-.teacher-character-halo::after { position: absolute; inset: 14px; border: 1px dashed rgba(96, 158, 203, .24); border-radius: 50%; content: ''; }
-.teacher-character-stage { position: relative; z-index: 1; align-self: end; justify-self: center; height: 252px; aspect-ratio: 1024 / 1536; transform-origin: 50% 100%; }
-.teacher-character-image { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; max-width: none; object-fit: contain; object-position: center bottom; filter: drop-shadow(0 12px 14px rgba(80, 139, 185, .12)); }
-.teacher-character-fx { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; overflow: visible; }
-.teacher-character-label { position: absolute; bottom: 0; z-index: 2; max-width: calc(100% - 12px); overflow: hidden; border: 1px solid #dbeefa; border-radius: 999px; padding: 5px 10px; color: #5c91b8; background: rgba(255,255,255,.94); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.teacher-character-thinking .teacher-character-halo { animation: teacher-thinking-pulse 1.8s ease-in-out infinite; }
-.teacher-character-thinking:not(.teacher-character-compact) .teacher-character-image { animation: teacher-thinking-float 2.4s ease-in-out infinite; }
-.teacher-character-explaining:not(.teacher-character-compact) .teacher-character-image { animation: teacher-explaining-float 3s ease-in-out infinite; }
-.teacher-character-error .teacher-character-halo { border-color: rgba(218, 172, 153, .52); background: radial-gradient(circle, rgba(255,255,255,.92), rgba(252,233,224,.66) 72%, rgba(247,220,207,.22)); }
-@keyframes teacher-thinking-pulse { 50% { box-shadow: 0 16px 42px rgba(75, 147, 197, .2); transform: scale(1.025); } }
-@keyframes teacher-thinking-float { 50% { transform: translateY(-3px); } }
-@keyframes teacher-explaining-float { 50% { transform: translateY(-4px) rotate(.4deg); } }
+.teacher-character-stage { position: relative; z-index: 1; display: grid; width: 100%; height: 100%; place-items: center; }
+.teacher-character-image { width: 100%; height: 100%; max-width: none; object-fit: contain; object-position: center bottom; filter: drop-shadow(0 12px 14px rgba(80, 139, 185, .12)); -webkit-user-drag: none; user-select: none; }
 .materials-list-section { margin-top: 34px; }
 .section-heading-row { align-items: flex-end; margin-bottom: 15px; }
 .section-heading-row h2 { margin-top: 6px; color: #2d4e6d; font-size: 19px; letter-spacing: -.02em; }
@@ -322,11 +311,7 @@ button.source-card:hover { transform: translateY(-1px); border-color: #b9d9ef; b
 .proposal-card p { margin: 0; }
 .proposal-card .secondary-button, .proposal-card .text-button { font-size: 11px; }
 .teacher-character.teacher-character-compact { width: 48px; height: 48px; overflow: hidden; border-radius: 50%; background: #eaf5fd; }
-.teacher-character.teacher-character-compact .teacher-character-halo { top: 4px; width: 40px; height: 40px; }
-.teacher-character.teacher-character-compact .teacher-character-stage { align-self: start; height: 67px; margin-top: 1px; }
-.teacher-character.teacher-character-compact .teacher-character-fx { display: none; }
-.teacher-character-compact .teacher-character-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.teacher-character-compact.teacher-character-thinking .teacher-character-halo { animation: teacher-thinking-pulse 1.8s ease-in-out infinite; }
+.teacher-character.teacher-character-compact .teacher-character-stage { width: 100%; height: 140%; margin-top: 1px; align-self: start; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(30, 57, 79, .28); backdrop-filter: blur(3px); }
 .course-gate-modal { position: relative; width: min(100%, 510px); max-height: min(88vh, 700px); overflow-y: auto; border: 1px solid #e3eef6; border-radius: 20px; padding: 27px; background: white; box-shadow: 0 24px 80px rgba(28, 64, 95, .2); }
 .modal-close { position: absolute; top: 14px; right: 17px; color: #91a2b1; }
@@ -370,9 +355,6 @@ button.source-card:hover { transform: translateY(-1px); border-color: #b9d9ef; b
   .sidebar-link-icon { width: 17px; font-size: 14px; }
   .app-main { padding: 21px 14px 40px; }
   .teacher-character { width: 142px; height: 178px; margin-left: -10px; }
-  .teacher-character-halo { top: 10px; width: 132px; height: 132px; }
-  .teacher-character-stage { height: 174px; }
-  .teacher-character-label { bottom: -1px; }
   .page-heading-block { align-items: flex-start; }
   .page-heading-block { flex-direction: column; }
   .note-detail-panel { padding: 17px; }
@@ -425,11 +407,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .page-heading-block p { color: #788176; }
 .page-count-pill { border-color: #e5e5d9; color: #687469; background: #fffefa; }
 .teacher-character { width: 210px; height: 232px; }
-.teacher-character-halo { top: 12px; width: 190px; height: 190px; background: radial-gradient(circle,#fff,#e2e8d3 72%,#d2ddbe 100%); box-shadow: 0 15px 35px rgba(84,110,69,.1); }
-.teacher-character-halo::after { border-color: rgba(101,132,85,.2); }
-.teacher-character-stage { height: 228px; }
 .teacher-character-image { filter: drop-shadow(0 11px 14px rgba(56,83,52,.12)); }
-.teacher-character-label { border-color: #dce3d2; color: #567354; }
 .materials-list-section { margin-top: 30px; }
 .section-heading-row { align-items: center; }
 .section-heading-row h2 { margin-top: 4px; color: #334537; font-size: 19px; letter-spacing: -.025em; }
@@ -530,8 +508,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
   .app-main { padding: 20px 14px 36px; }
   .app-sidebar { padding: 8px 10px; }
   .teacher-character { width: 130px; height: 164px; }
-  .teacher-character-halo { top: 9px; width: 122px; height: 122px; }
-  .teacher-character-stage { height: 158px; }
   .knowledge-tree-layout, .materials-browser { grid-template-columns: minmax(0,1fr); }
   .note-evidence-sidebar { display: none; grid-template-columns: minmax(0,1fr); border: 0; padding: 0; }
   .note-evidence-sidebar-open { display: grid; }
@@ -539,8 +515,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 @media (max-width: 480px) {
   .page-heading-block { align-items: flex-start; flex-direction: column; }
   .teacher-character { width: 102px; height: 132px; margin-left: -20px; }
-  .teacher-character-halo { width: 96px; height: 96px; }
-  .teacher-character-stage { height: 128px; }
   .note-detail-panel { padding: 15px; }
 }
 
@@ -1041,176 +1015,25 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .notice { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 16px; border: 1px solid #cdece7; border-radius: 12px; padding: 11px 13px; color: #1f7a6d; background: #f2fdfa; font-size: 12px; }
 .notice button { border: 0; color: inherit; background: transparent; cursor: pointer; }
 
-/* ===== AI 教师立绘动效：身体微动作 + SVG 特效层 ===== */
-.teacher-character-idle:not(.teacher-character-compact) .teacher-character-stage { animation: tfx-stage-breathe 4.8s ease-in-out infinite; }
-.teacher-character-thinking:not(.teacher-character-compact) .teacher-character-stage { animation: tfx-stage-think 2.6s ease-in-out infinite; }
-.teacher-character-explaining:not(.teacher-character-compact) .teacher-character-stage { animation: tfx-stage-sway 3.4s ease-in-out infinite; }
-.teacher-character-error:not(.teacher-character-compact) .teacher-character-stage { animation: tfx-stage-shake .9s ease-in-out infinite; }
-.teacher-character-error .teacher-character-halo { animation: tfx-halo-warn 1.6s ease-in-out infinite; }
-.teacher-character-halo::after { animation: tfx-orbit-spin 40s linear infinite; }
-
-.tfx-sparkle { transform-box: fill-box; transform-origin: center; animation: tfx-sparkle-twinkle 2.8s ease-in-out infinite; }
-.tfx-bubble { transform-box: fill-box; transform-origin: center; animation: tfx-bubble-rise 3.4s ease-in-out infinite; }
-.tfx-bubble-mark { fill: #5c91b8; font-weight: 700; }
-.tfx-orb-halo { transform-box: fill-box; transform-origin: center; animation: tfx-halo-breathe 2.6s ease-in-out infinite; }
-.tfx-orb-ring { fill: none; stroke: rgba(255, 255, 255, .9); stroke-width: 4; transform-box: fill-box; transform-origin: center; animation: tfx-ring-pulse 2.4s ease-out infinite; }
-.tfx-orb-ring-slow { animation-delay: -1.2s; stroke: rgba(214, 236, 251, .75); }
-.tfx-orbit { transform-box: view-box; transform-origin: 795px 195px; animation: tfx-orbit-spin 9s linear infinite; }
-.tfx-warn { transform-box: fill-box; transform-origin: center; animation: tfx-warn-pop 1.4s ease-in-out infinite; }
-.tfx-warn-mark { fill: #b45a3d; font-size: 52px; font-weight: 800; }
-
-@keyframes tfx-stage-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
-@keyframes tfx-stage-think { 0%, 100% { transform: rotate(0deg) translateY(0); } 45%, 65% { transform: rotate(1.4deg) translateY(-2px); } }
-@keyframes tfx-stage-sway { 0%, 100% { transform: rotate(-.8deg); } 50% { transform: rotate(.8deg) translateY(-3px); } }
-@keyframes tfx-stage-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-3px); } 40% { transform: translateX(3px); } 60% { transform: translateX(-2px); } 80% { transform: translateX(2px); } }
-@keyframes tfx-halo-warn { 50% { box-shadow: 0 16px 42px rgba(196, 108, 78, .22); transform: scale(1.02); } }
-@keyframes tfx-sparkle-twinkle { 0%, 100% { opacity: 0; transform: scale(.35) rotate(0deg); } 50% { opacity: .95; transform: scale(1) rotate(50deg); } }
-@keyframes tfx-bubble-rise { 0% { opacity: 0; transform: translateY(40px); } 25% { opacity: 1; } 70% { opacity: .9; } 100% { opacity: 0; transform: translateY(-90px); } }
-@keyframes tfx-ring-pulse { 0% { opacity: 0; transform: scale(.72); } 30% { opacity: .9; } 100% { opacity: 0; transform: scale(1.18); } }
-@keyframes tfx-halo-breathe { 0%, 100% { opacity: .55; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.06); } }
-@keyframes tfx-warn-pop { 0%, 100% { transform: scale(1); opacity: .92; } 50% { transform: scale(1.1); opacity: 1; } }
-@keyframes tfx-orbit-spin { to { transform: rotate(360deg); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .teacher-character-stage, .teacher-character-image, .teacher-character-sprite, .tfx-sparkle, .tfx-bubble, .tfx-orb-halo, .tfx-orb-ring, .tfx-orbit, .tfx-warn, .teacher-character-halo, .teacher-character-halo::after { animation: none; }
-}
-
-/* ===== 首页待机连续帧：10×6 网格雪碧图，60 帧 @12fps = 5s 循环 ===== */
-.teacher-character-sprite { position: absolute; bottom: 0; left: 0; right: 0; z-index: 1; margin-inline: auto; width: auto; aspect-ratio: 720 / 960; background-image: url('/assets/teacher/teacher-idle-sheet.webp'); background-size: 1000% 600%; background-repeat: no-repeat; animation: teacher-idle-frames 5s step-end infinite; will-change: background-position; }
-/* label 跟随人物脚下，不再压在人物身上 */
-/* 舞台层限宽：窄框下图与雪碧图都在框内 contain，不再右侧溢出裁剪。
-   轨道必须 minmax(0,1fr)——auto 轨道会被 aspect-ratio 撑宽，max-width 百分比在循环尺寸下失效 */
-/* 雪碧图自带角色动画，关闭舞台呼吸避免动作叠加（侧边答疑坞同样用雪碧图，故同规则） */
-
-@keyframes teacher-idle-frames {
-  0.0000% { background-position: 0.0000% 0.0000%; }
-  1.6667% { background-position: 11.1111% 0.0000%; }
-  3.3333% { background-position: 22.2222% 0.0000%; }
-  5.0000% { background-position: 33.3333% 0.0000%; }
-  6.6667% { background-position: 44.4444% 0.0000%; }
-  8.3333% { background-position: 55.5556% 0.0000%; }
-  10.0000% { background-position: 66.6667% 0.0000%; }
-  11.6667% { background-position: 77.7778% 0.0000%; }
-  13.3333% { background-position: 88.8889% 0.0000%; }
-  15.0000% { background-position: 100.0000% 0.0000%; }
-  16.6667% { background-position: 0.0000% 20.0000%; }
-  18.3333% { background-position: 11.1111% 20.0000%; }
-  20.0000% { background-position: 22.2222% 20.0000%; }
-  21.6667% { background-position: 33.3333% 20.0000%; }
-  23.3333% { background-position: 44.4444% 20.0000%; }
-  25.0000% { background-position: 55.5556% 20.0000%; }
-  26.6667% { background-position: 66.6667% 20.0000%; }
-  28.3333% { background-position: 77.7778% 20.0000%; }
-  30.0000% { background-position: 88.8889% 20.0000%; }
-  31.6667% { background-position: 100.0000% 20.0000%; }
-  33.3333% { background-position: 0.0000% 40.0000%; }
-  35.0000% { background-position: 11.1111% 40.0000%; }
-  36.6667% { background-position: 22.2222% 40.0000%; }
-  38.3333% { background-position: 33.3333% 40.0000%; }
-  40.0000% { background-position: 44.4444% 40.0000%; }
-  41.6667% { background-position: 55.5556% 40.0000%; }
-  43.3333% { background-position: 66.6667% 40.0000%; }
-  45.0000% { background-position: 77.7778% 40.0000%; }
-  46.6667% { background-position: 88.8889% 40.0000%; }
-  48.3333% { background-position: 100.0000% 40.0000%; }
-  50.0000% { background-position: 0.0000% 60.0000%; }
-  51.6667% { background-position: 11.1111% 60.0000%; }
-  53.3333% { background-position: 22.2222% 60.0000%; }
-  55.0000% { background-position: 33.3333% 60.0000%; }
-  56.6667% { background-position: 44.4444% 60.0000%; }
-  58.3333% { background-position: 55.5556% 60.0000%; }
-  60.0000% { background-position: 66.6667% 60.0000%; }
-  61.6667% { background-position: 77.7778% 60.0000%; }
-  63.3333% { background-position: 88.8889% 60.0000%; }
-  65.0000% { background-position: 100.0000% 60.0000%; }
-  66.6667% { background-position: 0.0000% 80.0000%; }
-  68.3333% { background-position: 11.1111% 80.0000%; }
-  70.0000% { background-position: 22.2222% 80.0000%; }
-  71.6667% { background-position: 33.3333% 80.0000%; }
-  73.3333% { background-position: 44.4444% 80.0000%; }
-  75.0000% { background-position: 55.5556% 80.0000%; }
-  76.6667% { background-position: 66.6667% 80.0000%; }
-  78.3333% { background-position: 77.7778% 80.0000%; }
-  80.0000% { background-position: 88.8889% 80.0000%; }
-  81.6667% { background-position: 100.0000% 80.0000%; }
-  83.3333% { background-position: 0.0000% 100.0000%; }
-  85.0000% { background-position: 11.1111% 100.0000%; }
-  86.6667% { background-position: 22.2222% 100.0000%; }
-  88.3333% { background-position: 33.3333% 100.0000%; }
-  90.0000% { background-position: 44.4444% 100.0000%; }
-  91.6667% { background-position: 55.5556% 100.0000%; }
-  93.3333% { background-position: 66.6667% 100.0000%; }
-  95.0000% { background-position: 77.7778% 100.0000%; }
-  96.6667% { background-position: 88.8889% 100.0000%; }
-  98.3333% { background-position: 100.0000% 100.0000%; }
-}
-
-/* ===== 首页人物切换按钮 ===== */
-
-/* ===== 肥鱼待机连续帧:与精灵同构 10×6/60 帧,复用 teacher-idle-frames,仅换图与纵向比例 ===== */
-.teacher-character-sprite-feiyu { background-image: url('/assets/teacher/feiyu-idle-sheet.webp'); aspect-ratio: 720 / 1280; }
-
-/* ===== 豆包待机连续帧:10×4 网格,40 帧 @12fps ≈ 3.33s 循环 ===== */
-.teacher-character-sprite-doubao { background-image: url('/assets/teacher/doubao-idle-sheet.webp'); background-size: 1000% 400%; animation-name: doubao-idle-frames; animation-duration: 3.3333s; }
-@keyframes doubao-idle-frames {
-  0.0000% { background-position: 0.0000% 0.0000%; }
-  2.5000% { background-position: 11.1111% 0.0000%; }
-  5.0000% { background-position: 22.2222% 0.0000%; }
-  7.5000% { background-position: 33.3333% 0.0000%; }
-  10.0000% { background-position: 44.4444% 0.0000%; }
-  12.5000% { background-position: 55.5556% 0.0000%; }
-  15.0000% { background-position: 66.6667% 0.0000%; }
-  17.5000% { background-position: 77.7778% 0.0000%; }
-  20.0000% { background-position: 88.8889% 0.0000%; }
-  22.5000% { background-position: 100.0000% 0.0000%; }
-  25.0000% { background-position: 0.0000% 33.3333%; }
-  27.5000% { background-position: 11.1111% 33.3333%; }
-  30.0000% { background-position: 22.2222% 33.3333%; }
-  32.5000% { background-position: 33.3333% 33.3333%; }
-  35.0000% { background-position: 44.4444% 33.3333%; }
-  37.5000% { background-position: 55.5556% 33.3333%; }
-  40.0000% { background-position: 66.6667% 33.3333%; }
-  42.5000% { background-position: 77.7778% 33.3333%; }
-  45.0000% { background-position: 88.8889% 33.3333%; }
-  47.5000% { background-position: 100.0000% 33.3333%; }
-  50.0000% { background-position: 0.0000% 66.6667%; }
-  52.5000% { background-position: 11.1111% 66.6667%; }
-  55.0000% { background-position: 22.2222% 66.6667%; }
-  57.5000% { background-position: 33.3333% 66.6667%; }
-  60.0000% { background-position: 44.4444% 66.6667%; }
-  62.5000% { background-position: 55.5556% 66.6667%; }
-  65.0000% { background-position: 66.6667% 66.6667%; }
-  67.5000% { background-position: 77.7778% 66.6667%; }
-  70.0000% { background-position: 88.8889% 66.6667%; }
-  72.5000% { background-position: 100.0000% 66.6667%; }
-  75.0000% { background-position: 0.0000% 100.0000%; }
-  77.5000% { background-position: 11.1111% 100.0000%; }
-  80.0000% { background-position: 22.2222% 100.0000%; }
-  82.5000% { background-position: 33.3333% 100.0000%; }
-  85.0000% { background-position: 44.4444% 100.0000%; }
-  87.5000% { background-position: 55.5556% 100.0000%; }
-  90.0000% { background-position: 66.6667% 100.0000%; }
-  92.5000% { background-position: 77.7778% 100.0000%; }
-  95.0000% { background-position: 88.8889% 100.0000%; }
-  97.5000% { background-position: 100.0000% 100.0000%; }
-}
-
-/* ===== 非首页静态形象:豆包/肥鱼复用同一张待机雪碧图的首帧 =====
-   - 停掉逐帧动画,只显示左上角第一帧
-   - 按舞台高度定尺寸(帧内容纵向满幅,与 teacher-*.png 一致),角色大小与莉艾尔对齐,
-     .teacher-character-fx 的 1024×1536 坐标因此仍然对得上
-   - 现在只有首页会用 animated 精灵图,所以这些规则不会影响首页 */
-.teacher-character-sprite-static {
-  top: auto;
-  bottom: 0;
-  left: 50%;
-  right: auto;
-  width: auto;
+/* ===== 教师/桌宠形象：只保留沃雅妮莎 ===== */
+/* 素材自带循环动画，不再叠加任何 CSS 状态动效。
+   尺寸唯一来源是外层盒子（栏内拖拽盒 / 浮层宿主的内联 width×height），
+   形象本身只负责填满它；素材是 408×544 的竖图，若给舞台设 aspect-ratio，
+   grid 隐式轨道会按 max-content 撑到比容器宽，图像只往右溢出、看起来就偏了，
+   所以统一交给 img 的 object-fit: contain + object-position: center 做等比居中。 */
+.teacher-character-pet { width: 100%; height: 100%; }
+.teacher-character-pet .teacher-character-stage {
+  width: 100%;
   height: 100%;
-  margin-inline: 0;
-  transform: translateX(-50%);
-  animation: none;
-  background-position: 0 0;
+}
+/* 绝对定位铺满舞台，尺寸只由舞台决定（否则 grid 自动轨道会按图片固有比例反推高度、
+   把舞台撑高，人物上下越出容器）。等比与居中交给 object-fit/object-position。 */
+.teacher-character-pet .teacher-character-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-position: center;
 }
 
 @media (max-width: 720px) {
@@ -1280,15 +1103,40 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .assistant-dock-quick button:hover:not(:disabled) { border-color: #c9d6c4; color: #315e43; background: #f1f4ed; }
 .assistant-dock-quick button:disabled { cursor: not-allowed; opacity: .5; }
 
-/* ===== agent 智能模式（悬浮坞）：执行时间线 / 流式光标 / 建议-确认卡片 ===== */
-/* 执行时间线：折叠展示 agent 每一步工具调用，「…」为进行中、「✓」为完成 */
-.agent-steps { display: grid; gap: 3px; margin: 0 0 6px; padding: 6px 9px; border: 1px dashed #dde3d5; border-radius: 8px; background: #f6f8f1; }
+/* ===== agent 智能模式（悬浮坞）：执行时间线 / 思维链 / 流式光标 / 建议-确认卡片 ===== */
+/* 执行时间线：每个工具一行，执行中转圈、完成打勾并显示耗时 */
+.agent-steps { display: grid; gap: 2px; margin: 0 0 6px; padding: 7px 10px; border: 1px dashed #dde3d5; border-radius: 8px; background: #f6f8f1; }
 .agent-steps-empty { margin: 0; color: #8a9a86; font-size: 11px; font-style: italic; }
-.agent-steps .agent-step { display: flex; gap: 6px; align-items: baseline; color: #5c6f5b; font-size: 11px; line-height: 1.55; }
-.agent-steps .agent-step-icon { flex: none; color: #6f8f6d; font-weight: 600; }
+.agent-steps .agent-step { display: flex; gap: 7px; align-items: center; color: #5c6f5b; font-size: 11px; line-height: 1.55; }
+.agent-steps .agent-step-icon { flex: none; display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; color: #6f8f6d; }
 .agent-steps .agent-step-running .agent-step-icon { animation: agent-step-pulse 1.1s ease-in-out infinite; }
 .agent-steps .agent-step-running .agent-step-text { color: #47614a; }
 @keyframes agent-step-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+.agent-steps .agent-step-icon svg { width: 12px; height: 12px; }
+.agent-steps .agent-step-text { display: flex; gap: 6px; align-items: baseline; flex: 1; min-width: 0; }
+.agent-steps .agent-step-text strong { font-weight: 500; color: #47614a; }
+.agent-steps .agent-step-text em { font-style: normal; color: #8a9a86; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-steps .agent-step-duration { flex: none; color: #9aa398; font-size: 10.5px; }
+.agent-steps .agent-step-running .agent-step-text strong { color: #2f5e3f; }
+/* 加载圈：agent「正在做某事」的统一指示（时间线、思考流共用） */
+.agent-spinner { display: inline-block; width: 11px; height: 11px; border: 2px solid #c9d8c6; border-top-color: #4c7a55; border-radius: 50%; animation: agent-spin .7s linear infinite; }
+@keyframes agent-spin { to { transform: rotate(360deg); } }
+/* 思维链：执行中限高只留尾部实时滚动；结束后折叠成「已深度思考」开关 */
+.agent-thinking { margin: 0 0 6px; }
+.agent-thinking-head { display: inline-flex; gap: 6px; align-items: center; color: #7a8a76; font-size: 11px; }
+.agent-thinking-head strong { font-weight: 500; color: #5c6f5b; }
+.agent-thinking-body { margin: 4px 0 0; max-height: 88px; overflow-y: auto; padding: 6px 9px; border: 1px dashed #e2e8dc; border-radius: 7px; background: #fbfcf8; color: #8a9a86; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; font-family: inherit; }
+.agent-thinking-body-open { max-height: 240px; }
+.agent-thinking-done .agent-thinking-toggle { display: inline-flex; gap: 5px; align-items: center; padding: 3px 8px; border: 0; border-radius: 7px; background: transparent; color: #8a9a86; font-size: 11px; }
+.agent-thinking-done .agent-thinking-toggle:hover { background: #f1f4ec; }
+.agent-thinking-check { color: #4c7a55; font-weight: 600; }
+/* 历史回答的过程折叠块：思考 + 工具步骤随消息持久化，点击展开回看 */
+.message-process { margin: 2px 0 6px; }
+.message-process-toggle { display: inline-flex; gap: 5px; align-items: center; padding: 3px 9px; border: 1px dashed #dde3d5; border-radius: 999px; background: #f6f8f1; color: #5c6f5b; font-size: 11px; }
+.message-process-toggle:hover { background: #eef3ea; }
+.message-process-body { display: grid; gap: 6px; margin-top: 5px; padding: 7px 9px; border: 1px dashed #e2e8dc; border-radius: 8px; background: #fbfcf8; }
+.message-process-body .agent-steps { margin: 0; padding: 0; border: 0; background: transparent; }
+.message-process-body .agent-thinking-body { margin: 0; }
 /* 流式回答：正文逐字出现，末尾光标闪烁 */
 .assistant-dock-live { border-radius: 8px; }
 .assistant-dock-streaming { position: relative; }
@@ -1320,6 +1168,45 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .agent-diff-added::before { content: '+'; font-weight: 700; color: #1d6b3c; margin-right: 4px; }
 .agent-diff-removed::before { content: '−'; font-weight: 700; color: #a3291c; margin-right: 4px; }
 .agent-card-adopted { border-color: #cfe3d2; background: #f2f8f1; }
+/* 复习提纲技能卡：模块清单 + 勾选进度（进度存 localStorage） */
+.agent-card-outline { gap: 8px; }
+.outline-head { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.outline-head strong { color: #3f4c3b; font-size: 12.5px; }
+.outline-progress { display: inline-flex; gap: 6px; align-items: center; color: #8a9a86; font-size: 11px; }
+.outline-progress-track { display: inline-block; width: 72px; height: 5px; border-radius: 3px; background: #e4e9dd; overflow: hidden; }
+.outline-progress-fill { display: block; height: 100%; border-radius: 3px; background: #4c7a55; transition: width .25s ease; }
+.outline-module { display: grid; gap: 4px; }
+.outline-module-title { display: flex; gap: 6px; align-items: center; margin: 0; color: #47614a; font-size: 12px; font-weight: 500; }
+.outline-priority { flex: none; padding: 1px 6px; border-radius: 999px; font-size: 10px; }
+.outline-priority.is-high { color: #8c3d33; background: #fbe9e7; }
+.outline-priority.is-medium { color: #7c6f46; background: #f4efdc; }
+.outline-priority.is-low { color: #6c6552; background: #eef0e8; }
+.outline-items { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.outline-items li { display: flex; gap: 8px; align-items: center; justify-content: space-between; padding: 2px 4px; border-radius: 6px; }
+.outline-items li:hover { background: #f4f6ee; }
+.outline-items li.is-checked .outline-item-point { color: #9aa398; text-decoration: line-through; }
+.outline-item-row { display: inline-flex; gap: 7px; align-items: baseline; min-width: 0; }
+.outline-item-row input { accent-color: #4c7a55; }
+.outline-item-point { color: #574f33; font-size: 12px; line-height: 1.55; }
+.outline-item-actions { flex: none; display: inline-flex; gap: 8px; align-items: center; }
+.outline-item-ref { color: #a8b0a2; font-size: 10.5px; }
+.outline-item-ask, .contrast-quiz { border: 1px solid #d8e0d2; border-radius: 7px; padding: 2px 8px; background: #fbfcf8; color: #4c7a55; font-size: 11px; }
+.outline-item-ask:hover, .contrast-quiz:hover { background: #eef4ea; }
+/* 易混概念技能卡：A vs B 左右分栏对比表 + 记忆锚点 */
+.agent-card-contrast { gap: 10px; }
+.contrast-pair { display: grid; gap: 6px; }
+.contrast-pair-head { display: flex; gap: 8px; align-items: center; }
+.contrast-name { color: #3f4c3b; font-size: 12.5px; }
+.contrast-vs { padding: 0 6px; border: 1px solid #dcd7c6; border-radius: 999px; color: #8a9a86; font-size: 10px; font-style: normal; }
+.contrast-core { margin: 0; padding: 5px 9px; border-left: 3px solid #4c7a55; border-radius: 4px; background: #f0f6ee; color: #2f5e3f; font-size: 12px; line-height: 1.6; }
+.contrast-table { display: grid; border: 1px solid #e7e3d6; border-radius: 7px; overflow: hidden; font-size: 11.5px; }
+.contrast-row { display: grid; grid-template-columns: 76px 1fr 1fr; }
+.contrast-row + .contrast-row { border-top: 1px solid #eee9da; }
+.contrast-row > span { padding: 5px 8px; color: #574f33; line-height: 1.5; }
+.contrast-row-head { color: #7c6f46; background: #f4f1e6; font-size: 10.5px; }
+.contrast-dim { color: #8a9a86; background: #faf9f3; }
+.contrast-pair-foot { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.contrast-anchor { color: #7c6f46; font-size: 11.5px; }
 /* 笔记原位建议：红删绿增直接嵌在阅读视图正文区 */
 .note-inline-suggestions { display: grid; gap: 10px; }
 .note-inline-banner { margin: 0; padding: 8px 11px; border: 1px solid #dce8d8; border-radius: 9px; color: #35553d; background: #f0f6ee; font-size: 12.5px; line-height: 1.7; }
@@ -1338,3 +1225,11 @@ input:not([type="checkbox"]):not([type="radio"]):focus, textarea:focus, select:f
 .markdown-preview th { background: #f1f3ec; }
 /* 「如何打开笔记」提示：未选中任何小节时出现在作用范围下方 */
 .assistant-dock-open-hint { margin: -3px 0 9px; color: #98a094; font-size: 10.5px; line-height: 1.6; }
+/* 重点句/结论句（==标记==）渲染为强调——用主题现成的陶土砖红（与加粗强调同色系） */
+.assistant-key-point { color: var(--nb-clay-ink, #9a553c); font-weight: 600; }
+/* 复习面板是 .modal-card：里面的通用 input 规则（宽 100% 高 44px）会罩到提纲复选框，
+   收藏的提纲在面板里会出现巨型方块——把 checkbox 排除回正常尺寸 */
+.modal-card .outline-item-row input[type="checkbox"] {
+  width: 14px; height: 14px; min-height: 0; flex: none;
+  margin: 4px 0 0; padding: 0; accent-color: var(--nb-forest, #477a5c);
+}
