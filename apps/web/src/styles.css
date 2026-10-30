@@ -1,29 +1,14 @@
 :root {
   font-family: var(--nb-sans);
-  color: #23354b;
-  background: #f6faff;
+  color: var(--nb-ink);
+  background: var(--nb-paper);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --blue: #3e85c8;
-  --blue-deep: #266daE;
-  --blue-ink: #244768;
-  --blue-soft: #dceffc;
-  --blue-light: #eaf5ff;
-  --blue-pale: #f4f9ff;
-  --ink: #23354b;
-  --muted: #708198;
-  --line: #e4edf5;
-  --panel: #ffffff;
-  --success: #2d8a6a;
-  --warning: #a87828;
-  --danger: #b7564d;
-  --shadow: 0 18px 50px rgba(42, 89, 132, .08);
-  --shadow-soft: 0 8px 24px rgba(42, 89, 132, .055);
 }
 
 * { box-sizing: border-box; }
 html, body, #root { min-width: 360px; min-height: 100%; margin: 0; }
-body { min-height: 100vh; background: #f6faff; }
+body { min-height: 100vh; background: var(--nb-paper); }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid #a9d2f5; outline-offset: 2px; }

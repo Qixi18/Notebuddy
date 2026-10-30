@@ -1,18 +1,18 @@
 /* Watercolor scenery, limestone course markers, and quiet field-journal controls. */
 .app-shell-garden:is(.app-shell-home, .app-shell-forest) {
-  --garden-paper: #faf8f0;
-  --garden-green: #294636;
-  --garden-muted: #69715f;
-  --garden-line: #dedecf;
-  --botanical-surface: #fffdf6;
-  --botanical-wash: #edf0e1;
+  --garden-paper: var(--nb-paper);
+  --garden-green: var(--nb-forest);
+  --garden-muted: var(--nb-muted);
+  --garden-line: var(--nb-line);
+  --botanical-surface: var(--nb-white);
+  --botanical-wash: var(--nb-mist);
   --botanical-shadow: 0 3px 12px #3549330a, 0 1px 2px #35493308;
   --botanical-ease: 150ms ease;
   --botanical-serif: 'STSong', 'SimSun', 'Songti SC', Georgia, serif;
 }
 
-/* Dark, quiet frame, like the left edge of a botanical field journal. */
-.app-shell-garden:is(.app-shell-home, .app-shell-forest) .app-sidebar {
+/* One shared dark, botanical frame for the global navigation. */
+.app-shell-garden .app-sidebar {
   background: radial-gradient(ellipse at 5% 0, #49624866, transparent 65%), linear-gradient(165deg, #263e32, #213d30 70%, #294435);
   border-right: 1px solid #61705455;
   box-shadow: inset -1px 0 #ffffff0b;
