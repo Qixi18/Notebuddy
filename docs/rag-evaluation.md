@@ -6,7 +6,7 @@
 
 `retrieval.index.rebuild_course_index` 可以从活动页面块重建派生块；重建失败不会删除 SQLite 页面、来源或笔记。`retrieval.evaluation.evaluate` 接受人工标注的 `RetrievalExample`，输出命中率、MRR、页码和当前检索模式。
 
-手动重建命令示例：`cd apps/backend; uv run python -m app.retrieval.index --course-id <课程 ID>`，或使用 `--material-id <资料 ID>` 只重建一份资料。
+在 Windows PowerShell 中，从仓库根目录使用项目环境重建：`& .\apps\backend\.venv-document\Scripts\python.exe -m app.retrieval.index --course-id <课程 ID>`，或增加 `--material-id <资料 ID>` 只重建一份资料。仅对隔离数据目录执行重建评估，避免误改用户数据。
 
 ## 推荐人工集
 

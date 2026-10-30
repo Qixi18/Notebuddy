@@ -1,12 +1,16 @@
 # NoteBuddy
 
-NoteBuddy 是以课程为中心的学习工作区。用户可以导入 PPTX、PDF、DOCX，按讲次整理和编辑笔记，在知识树中定位小节，并基于课程资料进行检索答疑。当前仓库以本地 Web 应用为主要运行形态；Electron 包装仍需完整联调。公共开发约定见 [agent.md](agent.md)。
+NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、整理和编辑笔记，在知识树中定位内容，并基于课程资料进行检索答疑。当前仓库以本地 Web 应用为主要运行形态；Electron 包装仍需完整联调。Agent 入口见 [AGENTS.md](AGENTS.md)，详细规则见 [agent.md](agent.md)。
+
+## 当前架构基线 / 重大变更
+
+当前正式可编辑 Notebook 正文以 `Notebook.document_json` 为唯一权威源，并通过 revision/CAS 保存。原始资料解析结果、目录、检索块和森林视图属于来源或派生数据，不是第二套正文。架构决策入口见 [ADR 索引](docs/architecture-decisions/README.md)；基线记录 ADR-0001 当前为 Proposed，尚未获协作者审核。任何全局架构变更必须按根目录 [AGENTS.md](AGENTS.md) 公示并同步契约、测试和跨 Agent 影响。
 
 ## 当前能力与边界
 
 - 一门课程可有多本笔记本；笔记按讲次、章节和小节组织，知识树叶子定位到具体笔记小节。课程、资料、笔记、会话及修改记录保存在本地 SQLite。
 - 资料上传后进入持久任务队列，由独立执行器解析。解析结果保留来源位置与告警；扫描 PDF 等缺少可提取文字的情况需要检查或启用 OCR。
-- 笔记支持用户编辑、版本与锁定保护。AI 修改以建议形式供用户审查；课程内整合与跨课程关系保留来源和版本约束。
+- Notebook 上传后的初始/增量生成通过质量门禁后可写入正式正文；Agent 主动编辑已有正文则通过待审建议或受控操作，保留用户修改与 revision 保护。旧 Note 路径另有兼容建议流程。
 - 课程答疑支持持久会话、资料检索、来源展示与可选的网络搜索。未配置外部模型时存在本地降级路径；降级结果不代表真实模型质量。
 - 首页展示近期课程知识树，森林页浏览全部课程。培养方案先预览再确认导入。
 
@@ -42,7 +46,7 @@ pwsh -NoProfile -File .\scripts\dev.ps1
 pwsh -NoProfile -File .\scripts\dev.ps1 -Check
 ```
 
-`dev.ps1` 优先使用 `.venv-document` 与项目内 Node；保留旧 `.venv` 的兼容回退，依赖不完整时会提示重新执行 setup。正式启动会先迁移数据库，再启动资料执行器、API 与 Web 服务。浏览器访问 `http://127.0.0.1:5173`；健康检查为 `http://127.0.0.1:8000/api/v1/health`。启动日志在 `data/logs/dev-日期-进程号`。保持脚本运行以处理上传任务，按 `Ctrl+C` 只结束该脚本启动的服务；端口已被使用时直接退出。
+`dev.ps1` 使用 `.venv-document` 与项目内 Node；依赖不完整时提示重新执行 setup。正式启动会先迁移数据库，再启动资料执行器、API 与 Web 服务。浏览器访问 `http://localhost:5173`；健康检查为 `http://localhost:8000/api/v1/health`。启动日志在 `data/logs/dev-日期-进程号`。保持脚本运行以处理上传任务，按 `Ctrl+C` 只结束该脚本启动的服务；端口已被使用时直接退出。
 
 如需打开 Electron，在上述服务运行期间另开终端执行：
 

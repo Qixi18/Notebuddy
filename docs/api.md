@@ -1,3 +1,22 @@
+# API 路由现状（2026-10-30 源码核对）
+
+前缀为 `/api/v1`，路由模块以 `apps/backend/app/api/v1/routes.py` 实际注册为准。此处的主路径/兼容分类不意味着兼容 API 已废弃，也不代表每个响应字段均已完成文档化。
+
+| 类别 | 方法/路径 | 用途与边界 |
+|---|---|---|
+| 当前主路径 | `GET/PUT /courses/{course_id}/notebooks/{notebook_id}/document`；无绑定 Notebook 对应 `/notebooks/unbound/{notebook_id}/document` | 读写 Notebook JSON 正文；PUT 校验预期 revision，冲突不覆盖 |
+| 当前主路径 | `POST /notebooks/{notebook_id}/assets`、`/upload-batches/{batch_id}`、`/complete` | 登记资源、查询/完成持久上传批次 |
+| 当前主路径 | `GET /notebooks/{notebook_id}/revisions`、`/revisions/{revision}`；`POST .../restore` | 正文版本查询与受 revision 保护的恢复 |
+| 当前主路径 | `POST /courses/{course_id}/notebooks/{notebook_id}/attachments`、`POST /notebooks/{notebook_id}/attachments` | Notebook 正文附件上传；注意它与来源资料 Asset 上传不同 |
+| 当前主路径 | `GET /assets/{asset_id}/document`、`/document/runs/{run_id}` | 读取当前或指定 DocumentIR/解析版本 |
+| 当前主路径 | `/notebooks/{notebook_id}/generation-jobs` 及 job 查询、重试、取消 | 持久生成任务；基准 revision 和输入快照用于安全合并 |
+| 当前/兼容能力 | `GET /courses/{course_id}/knowledge-graph`、`GET /courses/{course_id}/knowledge-structure`、`GET /courses/{course_id}/knowledge-proposals`、`GET /courses/{course_id}/knowledge-changes`、`POST /knowledge-proposals/{proposal_id}/review` | `knowledge.py` 仍注册；图和结构从 NotebookSection 派生，提案 API 保留课程知识提案工作流 |
+| 当前主路径 | `/agent`、`/conversations`、`/forest`、`/quiz` 等模块 | 会话/Agent、森林、测验等接口；服务端校验课程或 Notebook 范围 |
+| 保留兼容 | `/courses/{course_id}/materials`、`/materials/{material_id}/...`、旧 `/notes/...` | 传统资料/Note 兼容接口仍由已注册模块提供；不构成新正文源，不应仅凭新 Notebook 流程将其称为已撤销 |
+| 历史/撤销 | 本轮未发现并逐项证明的撤销路由 | 不作废弃清单推断；需有代码与调用方证据后再列 |
+
+以下历史分阶段内容含仍注册的当前/兼容 API，也含已演进的旧设计描述，不能整段视为已废弃。`knowledge` 模块仍提供课程 KnowledgeProposal 查询与审核；但前端 `api/notes.ts` 仍请求 `/courses/{course_id}/note-suggestions` 与 `/notes/{note_id}/suggestions`，本轮在 `apps/backend/app/api/v1/` 未找到相应路由，属于待确认的前后端不一致，不能记为已提供或已验收接口。它们不改变 Notebook 正文以 `document_json` 为唯一权威源的契约。当前路由是 `config, courses, materials, jobs, knowledge, notebook, generation, assistant, conversations, agent, feedback, backup, terms, forest, forest_imports, quiz`。详细参数请对照路由 schema；此页分组尚未逐端点补全权限、响应字段和自动测试覆盖。
+
 # API 契约
 
 三条并行开发线的调用顺序、共享约束和业务数据存储位置见 [后端调用与业务数据存储契约](backend-data-contract.md)。本页记录各接口的详细行为。
