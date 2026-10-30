@@ -4,7 +4,18 @@
  * （阈值参考 dsh-whale-girl，学习场景下调了吸附范围）。
  */
 
-export const PET_FLOAT_SIZE = 120
+/** 素材宽高比（408×544）：宽度一律由高度换算，保证栏内与浮层同一比例 */
+export const PET_ASPECT_RATIO = 408 / 544
+/** 默认高度：比旧浮层(120)大、比旧栏内(232)小，两处共用同一个值 */
+export const PET_SIZE_DEFAULT = 184
+export const PET_SIZE_MIN = 112
+export const PET_SIZE_MAX = 240
+/** 右键菜单里的三档预设 */
+export const PET_SIZE_PRESETS: ReadonlyArray<{ key: 'small' | 'medium' | 'large'; label: string; height: number }> = [
+  { key: 'small', label: '小', height: 144 },
+  { key: 'medium', label: '中', height: 184 },
+  { key: 'large', label: '大', height: 224 },
+]
 /** 位移低于该值按点击处理，不进入拖拽 */
 export const PET_DRAG_THRESHOLD = 6
 /** 距边缘小于该值吸附半隐藏 */
@@ -37,9 +48,9 @@ export function clampToViewport(point: PetPoint, size: PetSize, viewport: PetVie
   }
 }
 
-export function pointToRatio(point: PetPoint, viewport: PetViewport): PetRatio {
-  const width = Math.max(1, viewport.width - sizeReserve(viewport.width))
-  const height = Math.max(1, viewport.height - sizeReserve(viewport.height))
+export function pointToRatio(point: PetPoint, viewport: PetViewport, size: PetSize): PetRatio {
+  const width = Math.max(1, viewport.width - sizeReserve(viewport.width, size.width))
+  const height = Math.max(1, viewport.height - sizeReserve(viewport.height, size.height))
   return {
     xRatio: clamp(point.x / width, 0, 1),
     yRatio: clamp(point.y / height, 0, 1),
@@ -47,14 +58,26 @@ export function pointToRatio(point: PetPoint, viewport: PetViewport): PetRatio {
 }
 
 export function ratioToPoint(ratio: PetRatio, size: PetSize, viewport: PetViewport): PetPoint {
-  const width = Math.max(1, viewport.width - sizeReserve(viewport.width))
-  const height = Math.max(1, viewport.height - sizeReserve(viewport.height))
+  const width = Math.max(1, viewport.width - sizeReserve(viewport.width, size.width))
+  const height = Math.max(1, viewport.height - sizeReserve(viewport.height, size.height))
   return clampToViewport({ x: ratio.xRatio * width, y: ratio.yRatio * height }, size, viewport)
 }
 
-function sizeReserve(viewportLength: number): number {
+function sizeReserve(viewportLength: number, reserve: number): number {
   // 比例换算时给浮层自身和边距留出空间，避免贴边比值算出 1 之后越界
-  return Math.min(PET_FLOAT_SIZE + PET_VIEWPORT_MARGIN * 2, Math.max(0, viewportLength - 1))
+  return Math.min(reserve + PET_VIEWPORT_MARGIN * 2, Math.max(0, viewportLength - 1))
+}
+
+/** 桌宠高度收紧到可调范围内（脏数据 / 极端值一律夹住） */
+export function clampPetSize(height: number): number {
+  if (!Number.isFinite(height)) return PET_SIZE_DEFAULT
+  return Math.round(clamp(height, PET_SIZE_MIN, PET_SIZE_MAX))
+}
+
+/** 高度 → 盒子尺寸：宽度按素材比例换算，栏内与浮层都用它，避免两处大小不一致 */
+export function petBoxSize(height: number): PetSize {
+  const h = clampPetSize(height)
+  return { width: Math.round(h * PET_ASPECT_RATIO), height: h }
 }
 
 /** 距左右/下边缘的最近吸附边；范围外或贴上边缘返回 null */

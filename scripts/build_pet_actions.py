@@ -47,20 +47,26 @@ CANVAS = (480, 640)
 FPS = 12
 QUALITY = 78
 
-# loop: pingpong = 正放后倒放,保证首尾无缝;none = 按原顺序播放。
-# 待机与睡眠用 pingpong;一次性动作(greet/drop/error)不需要循环。
+# loop: pingpong = 正放后倒放,保证首尾无缝;none = 按原顺序播一次;
+#       pingpong-reverse = 从末帧开始倒放再正放(接在"正放到末帧"的前段之后,不出跳帧)。
+# trim: 只取前 N 秒(覆盖 --trim-seconds);range: 取源帧区间 [start, end](含端点)。
 ACTIONS = [
-    {"id": "idle",        "loop": "pingpong"},
-    {"id": "thinking",    "loop": "pingpong"},
-    {"id": "explaining",  "loop": "pingpong"},
-    {"id": "writing",     "loop": "pingpong"},
-    {"id": "waiting",     "loop": "pingpong"},
-    {"id": "no-evidence", "loop": "none"},
-    {"id": "error",       "loop": "none"},
-    {"id": "drag",        "loop": "pingpong"},
-    {"id": "drop",        "loop": "none"},
-    {"id": "greet",       "loop": "none"},
-    {"id": "sleep",       "loop": "pingpong"},
+    {"id": "idle",           "job": "待机", "loop": "pingpong", "trim": 3.0},
+    # 思考时长不确定：先 0→75 正放一次，再在 75↔22 之间往复
+    {"id": "thinking-intro", "job": "思考", "loop": "none",            "range": (0, 75)},
+    {"id": "thinking-loop",  "job": "思考", "loop": "pingpong-reverse", "range": (22, 75)},
+    {"id": "explaining",     "job": "讲解", "loop": "none"},
+    # 答案还在流式输出、讲解正片(10s)已经播完时接这段：从讲解末帧(源 238 帧)起，
+    # 倒放到 214 帧再回放。range 的末帧必须与正片的末帧对齐，否则切换会跳一下
+    {"id": "explaining-loop", "job": "讲解", "loop": "pingpong-reverse", "range": (214, 240)},
+    {"id": "error",          "job": "出错", "loop": "none"},
+    {"id": "greet",          "job": "行礼", "loop": "none"},
+    {"id": "writing",        "job": "写笔记", "loop": "pingpong"},
+    {"id": "waiting",        "job": "待确认", "loop": "pingpong"},
+    {"id": "no-evidence",    "job": "无依据", "loop": "none"},
+    {"id": "drag",           "job": "被拎起", "loop": "pingpong"},
+    {"id": "drop",           "job": "落地", "loop": "none"},
+    {"id": "sleep",          "job": "打盹", "loop": "pingpong"},
 ]
 
 # matte-studio 导出的动作目录用中文命名;这里把英文 id 映射到它的中文子目录。
@@ -160,6 +166,9 @@ def resample(frames, src_fps: int, dst_fps: int):
 def loop_order(frames, loop: str):
     if loop == "pingpong" and len(frames) > 2:
         return frames + list(reversed(frames[1:-1]))
+    if loop == "pingpong-reverse" and len(frames) > 2:
+        # 末帧→首帧→回末帧：首帧正好接上前段的末帧，循环点也不用跳
+        return list(reversed(frames)) + frames[1:-1]
     return frames
 
 
@@ -341,7 +350,7 @@ def main():
         for spec in specs:
             action_id = spec["id"]
             if args.job_root:
-                cn = JOB_NAME_MAP.get(action_id)
+                cn = spec.get("job") or JOB_NAME_MAP.get(action_id)
                 if not cn:
                     print(f"[skip] {action_id}: 没有对应的 matte-studio 中文目录")
                     continue
@@ -388,9 +397,14 @@ def main():
             directory, frames = sources[action_id]
             try:
                 source_count = len(frames)
+                frame_range = spec.get("range")
+                if frame_range:
+                    start, end = frame_range
+                    frames = frames[start:end + 1]
                 frames, src_fps, guessed = resample(frames, args.src_fps, args.fps)
-                if args.trim_seconds > 0:
-                    keep = int(round(args.trim_seconds * args.fps))
+                trim = spec.get("trim", args.trim_seconds)
+                if trim and trim > 0:
+                    keep = int(round(trim * args.fps))
                     frames = frames[:max(2, keep)]
                 loop = spec["loop"] if args.loop == "auto" else args.loop
                 ordered = loop_order(frames, loop)
@@ -406,7 +420,8 @@ def main():
             built.append({
                 "id": action_id,
                 "file": action_id + ".webp",
-                "loop": loop == "pingpong",
+                "loop": loop,
+                "once": loop == "none",
                 "outputFrames": len(ordered),
                 "duration": info["duration"],
                 "width": info["width"],
@@ -415,7 +430,8 @@ def main():
             })
             fps_note = f"{src_fps}{'?' if guessed else ''}→{args.fps}fps" if src_fps != args.fps else f"{args.fps}fps"
             print(f"[ok] {action_id}  {source_count} 源帧 → {len(ordered)} 帧  "
-                  f"{fps_note}  {info['duration']}s  {info['bytes'] / 1024:.0f} KB  {info['pix_fmt']}")
+                  f"{fps_note}  {info['duration']}s  {info['bytes'] / 1024:.0f} KB  {info['pix_fmt']}  "
+                  f"loop={loop}")
 
         if not built:
             print("[fail] 本轮没有构建出任何动作")

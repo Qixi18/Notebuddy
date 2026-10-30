@@ -3,9 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
 import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent } from '../../api/agent'
-import type { TeacherCharacterId } from '../../components/TeacherCharacter'
 import type { Conversation, ConversationMessage } from '../../types'
-import { teacherPersonaMeta } from '../persona/personas'
+import { TEACHER_PERSONA, teacherPersonaMeta } from '../persona/personas'
 
 /**
  * 答疑的唯一状态源。
@@ -113,13 +112,10 @@ function greetingMessage(conversationId: string | undefined, content: string): C
   }
 }
 
-export function useConversation(
-  courseId?: string,
-  teacherPersona: TeacherCharacterId = 'elf',
-): ConversationState {
+export function useConversation(courseId?: string): ConversationState {
   const courseRef = useRef(courseId)
   courseRef.current = courseId
-  const greeting = teacherPersonaMeta(teacherPersona).greeting
+  const greeting = teacherPersonaMeta().greeting
 
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [conversationId, setConversationId] = useState<string>()
@@ -364,7 +360,7 @@ export function useConversation(
       }])
       const answer = await api.sendConversationMessage(targetId, {
         question,
-        teacher_persona: teacherPersona,
+        teacher_persona: TEACHER_PERSONA.id,
         /* 刻意不传 learning_goal：留空后由后端 discipline.infer_context 按问题关键词
            推断（怎么做→解决练习、区别→比较方法…）。此前界面恒定发送「理解概念」，
            会把这条推断分支短路掉，反而更差。 */
@@ -406,7 +402,7 @@ export function useConversation(
       busyRef.current = false
       if (courseRef.current === requestCourseId) setBusy(false)
     }
-  }, [courseId, teacherPersona, ensureConversation])
+  }, [courseId, ensureConversation])
 
   /* agent 流式提问：本地插入用户消息 → 逐步更新 agentRun → final 规范成消息入历史 */
   const askAgent = useCallback(async (text: string, options: AgentAskOptions): Promise<boolean> => {
@@ -447,7 +443,7 @@ export function useConversation(
       await streamAgentMessage(targetId, {
         question,
         scope: options.scope,
-        teacher_persona: teacherPersona,
+        teacher_persona: TEACHER_PERSONA.id,
         material_id: options.materialId,
         allow_web: true,
         idempotency_key: `${targetId}-${askedAt}`,
@@ -566,7 +562,7 @@ export function useConversation(
           抢先 setBusy(false)，吞掉加载态；门内表示仍是本会话的本请求，正常复位 */
       if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setBusy(false)
     }
-  }, [courseId, teacherPersona, ensureConversation])
+  }, [courseId, ensureConversation])
 
   /* 中断正在进行的回答：abort 当前请求，已收到的正文保留（实时块改渲染成「已中断」） */
   const stopAgent = useCallback(() => {

@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-TeacherPersonaId = Literal["elf", "doubao", "feiyu"]
+TeacherPersonaId = Literal["vodyanitsa"]
 
 
 class AssistantRequest(BaseModel):
@@ -14,7 +14,7 @@ class AssistantRequest(BaseModel):
     page_number: int | None = None
     allow_web: bool = True
     learning_goal: str | None = Field(default=None, max_length=60)
-    teacher_persona: TeacherPersonaId = "elf"
+    teacher_persona: TeacherPersonaId = "vodyanitsa"
 
 
 class AssistantSource(BaseModel):

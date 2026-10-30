@@ -17,8 +17,7 @@ def render_history(
 ) -> str:
     """把受控会话历史渲染成带说话人标签的文本，供两条回答链路共用。
 
-    只标「学生 / 老师」，不确定历史里那条老师回复具体出自哪位——
-    判断规则写在 ``personas.TEAM_CONTEXT`` 的「连续授课规则」里，这里负责标注清楚就够了。
+    只标「学生 / 老师」，历史里的老师回复统一视为当前人设的授课记录。
     """
     rows: list[tuple[str, str]] = []
     for row in (history or [])[-limit:]:
@@ -196,8 +195,8 @@ def build_general_messages(
 ) -> list[dict[str, str]]:
     """没有任何检索依据时，仍让当前老师按人设作答（只谈通用内容）。
 
-    ``history`` 必须传进来：这一路过去是完全不带上下文的，用户中途换老师后
-    新老师看不到同事刚才说过什么，只会从头自我介绍，割裂感就是这么来的。
+    ``history`` 必须传进来：这一路过去是完全不带上下文的，缺少历史会让模型
+    把多轮追问当成第一轮，重复自我介绍或重讲已经讲过的内容。
     """
     persona_object = resolve_persona(persona)
     history_text = render_history(history)

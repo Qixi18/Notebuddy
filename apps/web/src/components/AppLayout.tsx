@@ -15,7 +15,6 @@ import { AssistantDock } from '../features/assistant/AssistantDock'
 import { NotebookBridgeProvider } from '../features/notebook-editor/NotebookBridge'
 import type { AIAction } from '../features/notebook-editor/NotebookEditor'
 import { ConfirmDialog } from './ConfirmDialog'
-import type { TeacherCharacterId } from './TeacherCharacter'
 import { SettingsPanel } from './SettingsPanel'
 import { shouldBlockNoteNavigation } from '../features/notebook/navigation'
 import { readStorage, writeStorage } from '../utils/safeStorage'
@@ -49,9 +48,6 @@ export type WorkspaceContextValue = {
   setEditingNote: (editing: boolean) => void
   graph: KnowledgeGraph
   job?: Job
-  /** 当前选中的 AI 教师，决定答疑回答的表达风格 */
-  teacherPersona: TeacherCharacterId
-  setTeacherPersona: (id: TeacherCharacterId) => void
   /** 答疑的唯一状态源：首页「问 AI」、答疑页、悬浮答疑坞共用同一份会话 */
   conversation: ConversationState
   busy: boolean

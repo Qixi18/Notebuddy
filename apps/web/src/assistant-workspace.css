@@ -389,9 +389,10 @@
   .workspace-topbar-changes { display: none !important; }
 }
 
-/* 桌宠让位给历史：立绘收到 150，舞台 172 */
+/* 窝里的桌宠：盒子宽高由 PetAvatar 按「高度 × 素材比例」内联给出，
+   这里只让它撑满盒子并居中；min-height 交给内容，别再写死尺寸。 */
 .workspace-petstage { min-height: 126px; }
-.workspace-petstage .teacher-character { width: 104px; }
+.workspace-petstage .teacher-character { width: 100%; height: 100%; }
 .workspace-pet-identity-text h2 { font-size: 18px; }
 .workspace-pet-identity-text p { font-size: 11px; }
 

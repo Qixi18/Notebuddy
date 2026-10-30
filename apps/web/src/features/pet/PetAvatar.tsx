@@ -1,9 +1,13 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 
-import { TeacherCharacter, type TeacherCharacterId, type TeacherStatus } from '../../components/TeacherCharacter'
-import { PET_FLOAT_SIZE, type PetMode } from './petLayout'
+import { TeacherCharacter, type TeacherStatus } from '../../components/TeacherCharacter'
+import { PetSizeMenu } from './PetSizeMenu'
+import { PET_SIZE_DEFAULT, petBoxSize, type PetMode } from './petLayout'
+import { loadPetPlacement, savePetSize } from './petStorage'
+import { usePetAction } from './usePetAction'
 import { usePetDrag } from './usePetDrag'
+import { usePetEasterEggs } from './usePetEasterEggs'
 
 /**
  * 页内桌宠：rail 态是左栏舞台，拖出（位移 > 6px）后切到 float 态，
@@ -49,12 +53,15 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
   mode: PetMode
   onModeChange: (mode: PetMode) => void
   status: TeacherStatus
-  character: TeacherCharacterId
+  /** 正文是否正在流式输出：一旦开始吐字就切讲解 */
+  streaming?: boolean
   /** 点击桌宠时冒出的上下文提示 */
   bubbleHint: string
+  /** 输入框草稿：彩蛋「停笔」据此计时 */
+  draft?: string
   /** 输入区容器：浮层压住它时自动让位 */
   avoidRef?: RefObject<HTMLElement | null>
-}>(function PetAvatar({ mode, onModeChange, status, character, bubbleHint, avoidRef }, ref) {
+}>(function PetAvatar({ mode, onModeChange, status, streaming = false, bubbleHint, draft = '', avoidRef }, ref) {
   const wide = useMediaQuery(`(min-width: ${FLOAT_MIN_VIEWPORT}px)`)
   const effectiveMode: PetMode = wide ? mode : 'rail'
 
@@ -62,10 +69,19 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
   const railRectRef = useRef<DOMRect | null>(null)
   const bubbleTimerRef = useRef(0)
   const [bubble, setBubble] = useState<string | null>(null)
+  /* 桌宠高度（栏内与浮层共用）：默认取本地记忆，右键菜单可调 */
+  const [height, setHeight] = useState(() => loadPetPlacement()?.size ?? PET_SIZE_DEFAULT)
+  const box = useMemo(() => petBoxSize(height), [height])
+  const [sizeMenuAt, setSizeMenuAt] = useState<{ x: number; y: number } | null>(null)
+  /* 悬停 3 秒触发行礼，其余动作由 status 跃迁驱动 */
+  const [hovered, setHovered] = useState(false)
+  /* 彩蛋：连点 / 重问 / 夜场 / 停笔 / 离开归来，各会话只放一次 */
+  const eggs = usePetEasterEggs({ busy: status === 'thinking', draft })
+  const { src: petSrc } = usePetAction(status, hovered, streaming, eggs.command)
 
   const drag = usePetDrag({
     mode: effectiveMode,
-    size: { width: PET_FLOAT_SIZE, height: PET_FLOAT_SIZE },
+    size: box,
     enabled: wide,
     getRailOrigin: () => {
       const rect = stageRef.current?.getBoundingClientRect()
@@ -82,12 +98,21 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
     },
   }))
 
-  const showBubble = useCallback(() => {
+  const showBubble = useCallback((text?: string) => {
     if (Date.now() - drag.lastDragAt.current < 200) return
-    setBubble(bubbleHint)
+    setBubble(text ?? bubbleHint)
     window.clearTimeout(bubbleTimerRef.current)
-    bubbleTimerRef.current = window.setTimeout(() => setBubble(null), 4000)
+    bubbleTimerRef.current = window.setTimeout(() => setBubble(null), text ? 5000 : 4000)
   }, [bubbleHint, drag.lastDragAt])
+
+  /* 彩蛋台词：直接用彩蛋自己的文案，盖掉默认点击提示 */
+  const eggNonce = eggs.command?.nonce ?? 0
+  useEffect(() => {
+    if (!eggs.command || !eggNonce) return
+    showBubble(eggs.command.bubble)
+    // 只认 nonce：同一条命令不重复展示
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eggNonce])
 
   useEffect(() => () => window.clearTimeout(bubbleTimerRef.current), [])
 
@@ -96,6 +121,20 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
     railRectRef.current = rail?.getBoundingClientRect() ?? null
     drag.onPointerDown(event)
   }, [drag])
+
+  /* 右键：在落点弹出大小菜单（左栏与浮层共用） */
+  const openSizeMenu = useCallback((event: ReactMouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setSizeMenuAt({ x: event.clientX, y: event.clientY })
+  }, [])
+
+  const closeSizeMenu = useCallback(() => setSizeMenuAt(null), [])
+
+  const pickSize = useCallback((next: number) => {
+    setHeight(next)
+    savePetSize(next)
+  }, [])
 
   const floatHost = useMemo(() => (effectiveMode === 'float' ? ensureFloatHost() : null), [effectiveMode])
 
@@ -109,11 +148,15 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
           <div
             ref={stageRef}
             className={`workspace-petstage-drag${drag.dragging ? ' is-dragging' : ''}`}
-            title="拖动我，可以浮到页面上"
+            style={{ width: box.width, height: box.height }}
+            title="拖动我，可以浮到页面上；右键调整大小"
             onPointerDown={handleStagePointerDown}
-            onClick={showBubble}
+            onClick={() => { eggs.noteClick(); showBubble() }}
+            onContextMenu={openSizeMenu}
+            onPointerEnter={() => setHovered(true)}
+            onPointerLeave={() => setHovered(false)}
           >
-            <TeacherCharacter status={status} animated character={character} pet />
+            <TeacherCharacter status={status} pet src={petSrc} />
           </div>
           {bubbleNode}
         </div>
@@ -124,18 +167,25 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
           className={`workspace-petfloat${drag.dockEdge ? ` is-docked-${drag.dockEdge}` : ''}${drag.dragging ? ' is-dragging' : ''}`}
           role="button"
           tabIndex={0}
-          aria-label="沃雅妮莎桌宠浮层：方向键移动，Home 回左栏，双击回位"
+          style={{ width: box.width, height: box.height }}
+          aria-label="沃雅妮莎桌宠浮层：方向键移动，Home 回左栏，双击回位，右键调整大小"
           onPointerDown={drag.onPointerDown}
           onKeyDown={drag.onKeyDown}
           onDoubleClick={drag.onDoubleClick}
-          onClick={showBubble}
+          onClick={() => { eggs.noteClick(); showBubble() }}
+          onContextMenu={openSizeMenu}
+          onPointerEnter={() => setHovered(true)}
+          onPointerLeave={() => setHovered(false)}
         >
           <div className="workspace-petfloat-inner">
-            <TeacherCharacter status={status} animated character={character} pet />
+            <TeacherCharacter status={status} pet src={petSrc} />
           </div>
           {bubbleNode}
         </div>,
         floatHost,
+      )}
+      {sizeMenuAt && (
+        <PetSizeMenu x={sizeMenuAt.x} y={sizeMenuAt.y} height={height} onPick={pickSize} onClose={closeSizeMenu} />
       )}
     </>
   )

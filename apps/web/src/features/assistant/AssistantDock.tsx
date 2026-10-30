@@ -67,7 +67,6 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
     noteSaving,
     openMaterialSource,
     refreshCurrentNotes,
-    teacherPersona,
     conversation,
   } = useWorkspace()
   const navigate = useNavigate()
@@ -82,7 +81,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const messagesRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const persona = teacherPersonaMeta(teacherPersona)
+  const persona = teacherPersonaMeta()
   const conversationCourse = courses.find((item) => item.id === conversationCourseId)
   const fellBackToRecent = Boolean(conversationCourseId) && !courseId
   const notePath = NOTE_PATH.test(location.pathname)
@@ -336,7 +335,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
 
       <header className="assistant-dock-heading">
         <span className="assistant-dock-avatar" aria-hidden="true">
-          <TeacherCharacter compact animated status={conversation.busy ? 'thinking' : 'idle'} character={teacherPersona} />
+          <TeacherCharacter compact status={conversation.busy ? 'thinking' : 'idle'} />
         </span>
         <div><strong>{persona.name} · 伴读桌宠</strong><small>{conversationCourse?.name ?? '尚无可提问的课程'}</small></div>
         <button className="assistant-dock-close" type="button" onClick={onClose} aria-label="收起答疑坞" title="收起答疑坞">×</button>

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.schemas.assistant import AssistantSource
 
-TeacherPersonaId = Literal["elf", "doubao", "feiyu"]
+TeacherPersonaId = Literal["vodyanitsa"]
 
 
 class ConversationCreate(BaseModel):
@@ -103,8 +103,8 @@ class ConversationMessageCreate(BaseModel):
     page_number: int | None = Field(default=None, ge=1)
     allow_web: bool = True
     idempotency_key: str | None = Field(default=None, max_length=120)
-    # 本次回答使用哪一位 AI 教师的人设；未知取值由 app.ai.personas 回落到默认角色的做法保持一致
-    teacher_persona: TeacherPersonaId = "elf"
+    # 本次回答使用的 AI 教师人设（当前仅沃雅妮莎）
+    teacher_persona: TeacherPersonaId = "vodyanitsa"
     # 会话归属：仅在会话尚无任何用户消息（首轮）时落库，之后忽略——范围是会话级属性。
     # 用于把答疑页自动建的「整门课程」空会话，在首轮改写成用户实际选择的范围。
     scope: Literal["course", "global", "note"] | None = None
@@ -143,7 +143,7 @@ class AgentMessageCreate(BaseModel):
     material_id: str | None = None
     allow_web: bool = True
     idempotency_key: str | None = Field(default=None, max_length=120)
-    teacher_persona: TeacherPersonaId = "elf"
+    teacher_persona: TeacherPersonaId = "vodyanitsa"
     reading_context: ReadingContext | None = None
     notebook_context: NotebookDocumentContext | None = None
     # 发现开关（P4）：允许 agent 自主定位课程内任意笔记并对其提交修改建议。

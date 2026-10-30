@@ -934,15 +934,6 @@
   background: transparent;
 }
 
-.assistant-dock-avatar .teacher-character-halo {
-  display: none;
-}
-
-.assistant-dock-avatar .teacher-character-stage {
-  height: 61px;
-  margin-top: 0;
-}
-
 .assistant-dock-heading strong {
   color: var(--nb-ink);
   font-family: var(--nb-serif);
@@ -1722,7 +1713,6 @@
 .workspace-petstage-drag:hover { background: rgba(76, 123, 93, .06); }
 .workspace-petstage-drag.is-dragging { cursor: grabbing; }
 .workspace-petstage .teacher-character { width: 190px; }
-.workspace-petstage .teacher-character-label { display: none; }
 
 .workspace-pet-bubble {
   position: absolute;
@@ -1814,7 +1804,6 @@
 
 .workspace-pet-anchor-avatar { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; }
 .workspace-pet-anchor-avatar .teacher-character { width: 34px; }
-.workspace-pet-anchor-avatar .teacher-character-label { display: none; }
 .workspace-pet-anchor-text { display: flex; flex-direction: column; min-width: 0; }
 .workspace-pet-anchor-text strong { font-size: 12px; color: var(--nb-ink); }
 .workspace-pet-anchor-text span { color: var(--nb-muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2506,8 +2495,9 @@ button.workspace-evidence-open:hover, .workspace-evidence-open:hover { backgroun
   position: fixed;
   left: 0;
   top: 0;
-  width: 120px;
-  height: 120px;
+  /* 兜底尺寸=默认档（138×184），实际宽高由 PetAvatar 内联写入并与栏内一致 */
+  width: 138px;
+  height: 184px;
   z-index: 90;
   cursor: grab;
   touch-action: none;
@@ -2527,8 +2517,8 @@ button.workspace-evidence-open:hover, .workspace-evidence-open:hover { backgroun
 }
 
 .workspace-petfloat.is-gliding .workspace-petfloat-inner { transition: transform .24s ease; }
-.workspace-petfloat .teacher-character { width: 120px; height: 120px; }
-.workspace-petfloat .teacher-character-label { display: none; }
+/* 尺寸由 PetAvatar 内联给出（栏内/浮层同源），形象只负责撑满 */
+.workspace-petfloat .teacher-character { width: 100%; height: 100%; }
 .workspace-petfloat .workspace-pet-bubble { top: -8px; pointer-events: none; }
 
 .workspace-petfloat.is-docked-left .workspace-petfloat-inner { transform: translateX(calc(-100% + 48px)); }
@@ -2539,6 +2529,46 @@ button.workspace-evidence-open:hover, .workspace-evidence-open:hover { backgroun
 .workspace-petfloat:focus-visible .workspace-petfloat-inner,
 .workspace-petfloat.is-dragging .workspace-petfloat-inner,
 .workspace-petfloat.is-gliding .workspace-petfloat-inner { transform: none; }
+
+/* 右键大小菜单：portal 挂在 body，坐标由组件按落点/视口算好 */
+.pet-size-menu {
+  position: fixed;
+  z-index: 130;
+  min-width: 172px;
+  border: 1px solid var(--nb-line);
+  border-radius: 12px;
+  padding: 10px;
+  color: var(--nb-ink);
+  background: var(--nb-white);
+  box-shadow: var(--shadow-soft);
+  font-size: 12px;
+}
+
+.pet-size-menu-title { margin: 0 0 8px; color: var(--nb-muted); font-size: 11px; letter-spacing: .02em; }
+.pet-size-menu-options { display: flex; gap: 6px; }
+
+.pet-size-menu-option {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  border: 1px solid var(--nb-line);
+  border-radius: 9px;
+  padding: 7px 0 6px;
+  color: var(--nb-ink);
+  background: var(--nb-white);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.pet-size-menu-option:hover { border-color: #b9cdb7; background: #f4f8f1; }
+.pet-size-menu-option.is-active { border-color: #7ba07d; color: #315e43; background: #eaf0e6; }
+.pet-size-menu-label { font-weight: 600; }
+.pet-size-menu-value { color: var(--nb-muted); font-size: 10px; }
+.pet-size-menu-option.is-active .pet-size-menu-value { color: #4f7554; }
+.pet-size-menu-hint { margin: 8px 0 0; color: var(--nb-muted); font-size: 10px; }
 
 /* ---------------------------------------------------------------- 弹层 */
 
@@ -3081,7 +3111,6 @@ button.workspace-evidence-open:hover, .workspace-evidence-open:hover { backgroun
 
   .workspace-pet-identity-avatar { display: inline-grid; place-items: center; width: 38px; height: 38px; flex: none; }
   .workspace-pet-identity-avatar .teacher-character { width: 38px; }
-  .workspace-pet-identity-avatar .teacher-character-label { display: none; }
   .workspace-pet-identity-text { min-width: 0; }
   .workspace-pet-identity-text h2 { font-size: 13px; }
   .workspace-pet-identity-text p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

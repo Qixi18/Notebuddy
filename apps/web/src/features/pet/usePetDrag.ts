@@ -114,8 +114,8 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
   }, [write])
 
   const persist = useCallback(() => {
-    const { xRatio, yRatio } = pointToRatio(posRef.current, viewport())
-    savePetPlacement({ version: 1, mode: 'float', xRatio, yRatio })
+    const { xRatio, yRatio } = pointToRatio(posRef.current, viewport(), sizeRef.current)
+    savePetPlacement({ version: 1, mode: 'float', xRatio, yRatio, size: sizeRef.current.height })
   }, [])
 
   const dockTo = useCallback((edge: PetEdge) => {
@@ -310,6 +310,16 @@ export function usePetDrag(options: UsePetDragOptions): PetDragApi {
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [dockTo, mode, persist, undock, write])
+
+  /* 桌宠大小变化：盒子变大后可能顶出视口，收进边界并重估贴边 */
+  useEffect(() => {
+    if (mode !== 'float') return
+    posRef.current = clampToViewport(posRef.current, sizeRef.current, viewport())
+    const edge = nearestEdge(posRef.current, sizeRef.current, viewport())
+    if (edge) dockTo(edge)
+    else undock()
+    write()
+  }, [dockTo, mode, size.width, size.height, undock, write])
 
   useEffect(() => () => {
     removeWindowListeners()

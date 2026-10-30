@@ -19,6 +19,7 @@ import { teacherPersonaMeta } from '../features/persona/personas'
 import { PetAvatar, type PetAvatarHandle } from '../features/pet/PetAvatar'
 import type { PetMode } from '../features/pet/petLayout'
 import { loadPetPlacement, savePetPlacement } from '../features/pet/petStorage'
+import { reportQuestion } from '../features/pet/petEggs'
 import type { AskScope } from '../features/conversation/useConversation'
 import type { AgentReadingContext, AgentScope } from '../api/agent'
 
@@ -36,7 +37,6 @@ export function AssistantPage() {
     notes,
     courseContentLoading,
     openMaterialSource,
-    teacherPersona,
     conversation,
     refreshCurrentNotes,
   } = useWorkspace()
@@ -179,6 +179,8 @@ export function AssistantPage() {
     /* 走 agent 流式通道：与悬浮坞同一条能力线（可调工具、正文逐字返回） */
     void askAgent(trimmed, agentOptions).then((sent) => { if (!sent) setDraft(trimmed) })
     recentAsksRef.current = [...recentAsksRef.current.slice(-19), { text: trimmed, options: agentOptions }]
+    /* 彩蛋信号：桌宠据此判断"同一句问了两遍"（重试按钮不算） */
+    reportQuestion(trimmed)
     return true
   }, [askAgent, busy, agentOptions])
 
@@ -309,7 +311,7 @@ export function AssistantPage() {
     if (courseId) navigate(featurePath(courseId, 'materials'))
   }
 
-  const persona = teacherPersonaMeta(teacherPersona)
+  const persona = teacherPersonaMeta()
   const lastAssistantMessage = useMemo(
     () => [...messages].reverse().find((message) => message.role === 'assistant'),
     [messages],
@@ -375,13 +377,15 @@ export function AssistantPage() {
             mode={petMode}
             onModeChange={changePetMode}
             status={teacherStatus}
-            character={teacherPersona}
+            /* 只认「本次请求已开始吐正文」：工具阶段/思考阶段都还在 thinking */
+            streaming={busy && (agentRun?.streamingText.length ?? 0) > 0}
+            draft={draft}
             bubbleHint={busy ? '正在翻课程资料，稍等一下…' : hasAsked ? '回答里的角标可以点，右栏能看到原文。' : `问我「${course?.name ?? '这门课'}」的问题吧`}
           />
           {petMode === 'rail' && (
             <div className="workspace-pet-identity">
               <span className="workspace-pet-identity-avatar" aria-hidden="true">
-                <TeacherCharacter status={teacherStatus} compact character={teacherPersona} />
+                <TeacherCharacter status={teacherStatus} compact />
               </span>
               <div className="workspace-pet-identity-text">
                 <h2>{persona.name}</h2>
@@ -405,7 +409,7 @@ export function AssistantPage() {
         {petMode === 'float' && (
           <div className="workspace-pet-anchor">
             <span className="workspace-pet-anchor-avatar" aria-hidden="true">
-              <TeacherCharacter status={teacherStatus} compact character={teacherPersona} />
+              <TeacherCharacter status={teacherStatus} compact />
             </span>
             <div className="workspace-pet-anchor-text">
               <strong>{persona.name}</strong>

@@ -44,9 +44,9 @@ export const conversationApi = {
     })
   },
   listConversationMessages: (conversationId: string) => request<ConversationMessage[]>(`/api/v1/conversations/${conversationId}/messages`),
-  sendConversationMessage: (conversationId: string, payload: { question: string; teacher_persona?: string; material_id?: string; page_number?: number; learning_goal?: string; allow_web?: boolean; idempotency_key?: string; scope?: 'course' | 'global' | 'note'; note_id?: string | null; note_title?: string | null }) =>
+  sendConversationMessage: (conversationId: string, payload: { question: string; teacher_persona?: 'vodyanitsa'; material_id?: string; page_number?: number; learning_goal?: string; allow_web?: boolean; idempotency_key?: string; scope?: 'course' | 'global' | 'note'; note_id?: string | null; note_title?: string | null }) =>
     request<ConversationMessage>(`/api/v1/conversations/${conversationId}/messages`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ teacher_persona: 'elf', ...payload }),
+      body: JSON.stringify({ teacher_persona: 'vodyanitsa', ...payload }),
     }),
 }
