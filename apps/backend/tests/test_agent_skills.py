@@ -68,7 +68,14 @@ def skill_db():
 
     from app.db.database import Base
     from app.db.models import (
-        Asset, Course, DocumentChunk, DocumentParseRun, KnowledgeNode, Material, MaterialPage, Notebook,
+        Asset,
+        Course,
+        DocumentChunk,
+        DocumentParseRun,
+        KnowledgeNode,
+        Material,
+        MaterialPage,
+        Notebook,
     )
     from app.notes.document import dump_document
 
@@ -126,8 +133,8 @@ def skill_db():
 
 
 def test_generate_outline_tool_returns_suggestion(skill_db, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.ai.agent_tools import execute_tool
     import app.services.skills as skills_service
+    from app.ai.agent_tools import execute_tool
 
     db, course, material, _notebook = skill_db
 
@@ -155,8 +162,8 @@ def test_generate_outline_tool_returns_suggestion(skill_db, monkeypatch: pytest.
 
 
 def test_generate_contrast_tool_returns_suggestion(skill_db, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.ai.agent_tools import execute_tool
     import app.services.skills as skills_service
+    from app.ai.agent_tools import execute_tool
 
     db, course, _material, _notebook = skill_db
 
@@ -182,8 +189,8 @@ def test_generate_contrast_tool_returns_suggestion(skill_db, monkeypatch: pytest
 
 
 def test_skill_tool_degrades_schema_failure_to_text(skill_db, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.ai.agent_tools import execute_tool
     import app.services.skills as skills_service
+    from app.ai.agent_tools import execute_tool
 
     db, course, material, _notebook = skill_db
 
@@ -215,8 +222,8 @@ def test_skill_specs_registered_with_switch_in_all_scopes() -> None:
 
 def test_quiz_tool_falls_back_to_course_notes_without_material(skill_db, monkeypatch: pytest.MonkeyPatch) -> None:
     """没选课件也能出题：素材回退到课程小节笔记（修复「有时候不出卡」的空素材分支）。"""
-    from app.ai.agent_tools import execute_tool
     import app.services.quiz as quiz_service
+    from app.ai.agent_tools import execute_tool
 
     db, course, _material, _notebook = skill_db
 
@@ -238,14 +245,9 @@ def test_quiz_tool_falls_back_to_course_notes_without_material(skill_db, monkeyp
 
 
 def test_quiz_tool_defaults_to_locked_note_in_note_scope(skill_db, monkeypatch: pytest.MonkeyPatch) -> None:
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import Session
-    from sqlalchemy.pool import StaticPool
 
-    from app.ai.agent_tools import execute_tool
-    from app.db.database import Base
-    from app.db.models import KnowledgeNode, Note
     import app.services.quiz as quiz_service
+    from app.ai.agent_tools import execute_tool
 
     db, course, _material, _notebook = skill_db
 

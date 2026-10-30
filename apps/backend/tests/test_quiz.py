@@ -117,12 +117,20 @@ def test_generate_quiz_tool_creates_quiz_and_suggestion(tmp_path, monkeypatch: p
     from sqlalchemy.orm import Session
     from sqlalchemy.pool import StaticPool
 
+    import app.services.quiz as quiz_service
     from app.ai.agent_tools import execute_tool
     from app.db.database import Base
     from app.db.models import (
-        Asset, Course, DocumentChunk, DocumentParseRun, KnowledgeNode, Material, MaterialPage, Note, Quiz,
+        Asset,
+        Course,
+        DocumentChunk,
+        DocumentParseRun,
+        KnowledgeNode,
+        Material,
+        MaterialPage,
+        Note,
+        Quiz,
     )
-    import app.services.quiz as quiz_service
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
