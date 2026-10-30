@@ -67,7 +67,10 @@ def skill_db():
     from sqlalchemy.pool import StaticPool
 
     from app.db.database import Base
-    from app.db.models import Course, KnowledgeNode, Material, MaterialPage, Note
+    from app.db.models import (
+        Asset, Course, DocumentChunk, DocumentParseRun, KnowledgeNode, Material, MaterialPage, Notebook,
+    )
+    from app.notes.document import dump_document
 
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -82,26 +85,51 @@ def skill_db():
         node.course_id = course.id
         db.add(node)
         db.flush()
+        # 课件素材现在走 Asset → DocumentParseRun → DocumentChunk 链路
+        asset = Asset(
+            source_type="material", media_type="document", mime_type="application/vnd.ms-powerpoint",
+            extension=".pptx", original_name="a.pptx", storage_key="course/skill-test/a.pptx",
+            byte_size=10, state="ready",
+        )
+        db.add(asset)
+        db.flush()
         material = Material(
             course_id=course.id, lecture_title="第1讲 需求", original_filename="a.pptx",
             stored_filename="a.pptx", size_bytes=10, status="completed", page_count=1,
+            asset_id=asset.id,
         )
         db.add(material)
         db.flush()
         db.add(MaterialPage(material_id=material.id, page_number=1, raw_text="内聚是模块内部的紧密程度，耦合是模块之间的依赖程度。高内聚低耦合。"))
-        db.add(Note(
-            course_id=course.id, knowledge_node_id=node.id, material_id=material.id,
-            title="内聚与耦合", content_markdown="内聚与耦合是模块设计的两个维度。",
+        parse_run = DocumentParseRun(
+            asset_id=asset.id, document_id=asset.id, status="completed", is_current=True,
+            fingerprint="skill-test-fingerprint",
+        )
+        db.add(parse_run)
+        db.flush()
+        db.add(DocumentChunk(
+            parse_run_id=parse_run.id, asset_id=asset.id, order=0,
+            text="内聚是模块内部的紧密程度，耦合是模块之间的依赖程度。高内聚低耦合。",
         ))
+        # 笔记内容现在存放在 Notebook 文档里（IR），技能素材从 Notebook 读取
+        notebook = Notebook(
+            course_id=course.id, title="内聚与耦合", tree_slot=0,
+            document_json=dump_document({
+                "type": "doc", "content": [{"type": "paragraph", "content": [
+                    {"type": "text", "text": "内聚与耦合是模块设计的两个维度。"},
+                ]}],
+            }),
+        )
+        db.add(notebook)
         db.commit()
-        yield db, course, material
+        yield db, course, material, notebook
 
 
 def test_generate_outline_tool_returns_suggestion(skill_db, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.ai.agent_tools import execute_tool
     import app.services.skills as skills_service
 
-    db, course, material = skill_db
+    db, course, material, _notebook = skill_db
 
     def fake_generate(source, *, course_name, focus):
         assert "内聚是模块内部" in source, "素材应来自课件原文"
@@ -119,7 +147,7 @@ def test_generate_outline_tool_returns_suggestion(skill_db, monkeypatch: pytest.
         arguments={"material_id": material.id, "focus": "模块设计"},
         scope="course", allow_quiz=True,
     )
-    assert "复习提纲" in outcome.summary
+    assert "复习模块" in outcome.summary
     suggestion = outcome.suggestions[0]
     assert suggestion["type"] == "review_outline"
     assert suggestion["module_count"] == 2 and suggestion["item_count"] == 2
@@ -130,7 +158,7 @@ def test_generate_contrast_tool_returns_suggestion(skill_db, monkeypatch: pytest
     from app.ai.agent_tools import execute_tool
     import app.services.skills as skills_service
 
-    db, course, _material = skill_db
+    db, course, _material, _notebook = skill_db
 
     def fake_generate(source, *, course_name, focus):
         # 未指定课件 → 素材回退到课程笔记
@@ -157,7 +185,7 @@ def test_skill_tool_degrades_schema_failure_to_text(skill_db, monkeypatch: pytes
     from app.ai.agent_tools import execute_tool
     import app.services.skills as skills_service
 
-    db, course, material = skill_db
+    db, course, material, _notebook = skill_db
 
     def bad_generate(source, *, course_name, focus):
         raise SkillSchemaError("modules 应为 2-8 个")
@@ -174,14 +202,14 @@ def test_skill_tool_degrades_schema_failure_to_text(skill_db, monkeypatch: pytes
 def test_skill_specs_registered_with_switch_in_all_scopes() -> None:
     from app.ai.agent_tools import build_tool_specs
 
-    course_specs = [spec["function"]["name"] for spec in build_tool_specs(scope="course", editable_note=False, allow_quiz=True)]
+    course_specs = [spec["function"]["name"] for spec in build_tool_specs(scope="course", editable_notebook=False, allow_quiz=True)]
     assert "generate_review_outline" in course_specs
     assert "generate_concept_contrast" in course_specs
     # note 档也注册：锁笔记会话里「考考我/复习提纲」不该哑火，素材自动落到锁定的笔记
-    note_specs = [spec["function"]["name"] for spec in build_tool_specs(scope="note", editable_note=True, allow_quiz=True)]
+    note_specs = [spec["function"]["name"] for spec in build_tool_specs(scope="note", editable_notebook=True, allow_quiz=True)]
     assert "generate_review_outline" in note_specs
     assert "generate_concept_contrast" in note_specs
-    no_switch = [spec["function"]["name"] for spec in build_tool_specs(scope="course", editable_note=False, allow_quiz=False)]
+    no_switch = [spec["function"]["name"] for spec in build_tool_specs(scope="course", editable_notebook=False, allow_quiz=False)]
     assert "generate_review_outline" not in no_switch, "技能族与 quiz 共用 allow 开关"
 
 
@@ -190,7 +218,7 @@ def test_quiz_tool_falls_back_to_course_notes_without_material(skill_db, monkeyp
     from app.ai.agent_tools import execute_tool
     import app.services.quiz as quiz_service
 
-    db, course, _material = skill_db
+    db, course, _material, _notebook = skill_db
 
     def fake_generate(source, *, count, focus, course_name, difficulty=""):
         assert "内聚与耦合是模块设计" in source, "素材应来自课程小节笔记"
@@ -219,7 +247,7 @@ def test_quiz_tool_defaults_to_locked_note_in_note_scope(skill_db, monkeypatch: 
     from app.db.models import KnowledgeNode, Note
     import app.services.quiz as quiz_service
 
-    db, course, _material = skill_db
+    db, course, _material, _notebook = skill_db
 
     def fake_generate(source, *, count, focus, course_name, difficulty=""):
         assert "内聚与耦合" in source
@@ -232,15 +260,15 @@ def test_quiz_tool_defaults_to_locked_note_in_note_scope(skill_db, monkeypatch: 
     outcome = execute_tool(
         db, course_id=course.id, name="generate_quiz",
         arguments={},  # note 档不传 note_id → 自动落到锁定的笔记
-        scope="note", locked_note_id=_locked_note_id(db, course.id), allow_quiz=True,
+        scope="note", locked_notebook_id=_locked_notebook_id(db, course.id), allow_quiz=True,
     )
     assert "自测题" in outcome.summary
     assert outcome.suggestions
 
 
-def _locked_note_id(db, course_id: str) -> str:
+def _locked_notebook_id(db, course_id: str) -> str:
     from sqlalchemy import select
 
-    from app.db.models import Note
+    from app.db.models import Notebook
 
-    return db.scalars(select(Note).where(Note.course_id == course_id)).first().id
+    return db.scalars(select(Notebook).where(Notebook.course_id == course_id)).first().id

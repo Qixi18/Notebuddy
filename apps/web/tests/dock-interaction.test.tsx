@@ -189,14 +189,21 @@ test('作用范围可收窄到某份课件，并随提问一起带给后端', as
   }))
 })
 
-test('助手坞不再提供旧 Note 正文写回入口', () => {
+test('写入当前笔记只在「正打开着笔记且没有未保存改动」时可用', () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
+  // 资料页没有打开笔记 → 禁用
   renderShell('/courses/c1/materials', { conversation: answeredConversation, selectedNote: note })
-  expect(screen.queryByRole('button', { name: '写入当前笔记' })).toBeNull()
+  expect((screen.getByRole('button', { name: '写入当前笔记' }) as HTMLButtonElement).disabled).toBe(true)
   cleanup()
 
+  // 笔记本页 + 选中的笔记 + 无未保存改动 → 可用
   renderShell('/courses/c1/notebook', { conversation: answeredConversation, selectedNote: note })
-  expect(screen.queryByRole('button', { name: '写入当前笔记' })).toBeNull()
+  expect((screen.getByRole('button', { name: '写入当前笔记' }) as HTMLButtonElement).disabled).toBe(false)
+  cleanup()
+
+  // 同一页但笔记有未保存改动 → 拒绝回写，避免把用户的字冲掉
+  renderShell('/courses/c1/notebook', { conversation: answeredConversation, selectedNote: note, noteDirty: true })
+  expect((screen.getByRole('button', { name: '写入当前笔记' }) as HTMLButtonElement).disabled).toBe(true)
 })
 
 test('拖分界条实时改宽：往左拖变宽，宽度写进 CSS 变量并落进 localStorage', () => {

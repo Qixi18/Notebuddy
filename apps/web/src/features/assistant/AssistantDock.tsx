@@ -127,11 +127,20 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
       && !scopeMaterials.some((item) => item.id === scopeChoice)) setScopeChoice('')
   }, [scopeChoice, scopeMaterials])
 
+  /* 范围锁定：会话已有真实问答后，后端不再按本轮改 scope（api/v1/agent.py:91 只在首轮落库） */
+  const scopeLocked = conversation.hasMessages === true
+  /* 锁定后以服务端落库的 scope 为准：用户还没发出去的新选择不能盖掉已生效的归属。
+     会话列表尚未就绪时按未锁定处理，不阻塞提问。 */
+  const activeConversation = conversation.conversations?.find((item) => item.id === conversation.conversationId)
+  const persistedScope = scopeLocked ? activeConversation?.scope : undefined
+
   /* 作用范围三档：锁定当前笔记 / 整门课程（可再收窄到课件）/ 全局可查。
-     锁定档要求「正打开着笔记的页面」，否则选项自动失效落回课程档 */
+     锁定档要求「正打开着笔记的页面」，否则选项自动失效落回课程档。
+     会话已锁定范围时，服务端落库的 scope 优先于用户尚未发出的选择。 */
   const canLockNote = Boolean(notePath && selectedNote && !notebook)
   const lockedActive = scopeChoice === '__note__' && canLockNote
-  const scope: AgentScope = lockedActive ? 'note' : scopeChoice === '__global__' ? 'global' : 'course'
+  const scope: AgentScope = persistedScope
+    ?? (lockedActive ? 'note' : scopeChoice === '__global__' ? 'global' : 'course')
   const agentMaterialId = scope === 'course' && scopeChoice && scopeChoice !== '__note__' && scopeChoice !== '__global__'
     ? scopeChoice
     : undefined
@@ -154,8 +163,6 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
     && notebook.courseId === pendingNotebookAnswer.courseId
     && notebook.notebookId === pendingNotebookAnswer.notebookId ? lastAnswer : null
   const hasAsked = messages.some((message) => message.role === 'user')
-  /* 范围锁定：会话已有真实问答后，后端不再按本轮改 scope（api/v1/agent.py:91 只在首轮落库） */
-  const scopeLocked = conversation.hasMessages === true
   const streamingTextLength = conversation.agentRun?.streamingText.length ?? 0
   const bottomKey = `${messages.length}:${lastMessage?.content.length ?? 0}:${conversation.busy}:${streamingTextLength}:${conversation.agentRun?.steps.length ?? 0}`
 
@@ -253,7 +260,10 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
       excerpt: notebook.excerpt,
     } : undefined
     if (!await conversation.askAgent(text, {
-      scope: notebook ? 'course' : scope,
+      /* 范围档位与笔记上下文是两件事：范围表达「去哪找」，笔记上下文表达「改哪篇」。
+         整篇笔记上下文的正文由 notebookContext 承载，不必把范围强行按回课程档，
+         用户在笔记页选「全局可查」时应当照旧生效。 */
+      scope,
       materialId: agentMaterialId,
       readingContext,
       notebookContext,
@@ -350,7 +360,8 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
           </p>
 
           <label className="assistant-dock-scope">作用范围
-            <select value={scopeChoice} onChange={(event) => setScopeChoice(event.target.value)} aria-label="本次提问的作用范围">
+            <select value={scope === 'note' ? '__note__' : scope === 'global' ? '__global__' : agentMaterialId ?? ''}
+              onChange={(event) => setScopeChoice(event.target.value)} aria-label="本次提问的作用范围">
               {/* 范围是会话级属性：首条消息之后后端不再改写 scope，
                   所以这三档在会话开始提问后就禁用，避免「标签变了、回答范围没变」。
                   课件收窄是消息级参数（material_id 只校验不锁定），保持可选。 */}

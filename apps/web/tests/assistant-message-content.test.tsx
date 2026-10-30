@@ -30,7 +30,7 @@ test('web citation opens externally with safe link attributes', () => {
   expect(link.getAttribute('rel')).toContain('noreferrer')
 })
 
-test('outdated citations stay identifiable and unavailable Notebook evidence cannot be opened', () => {
+test('outdated citations stay identifiable and unavailable evidence cannot be opened', () => {
   const openSource = vi.fn()
   const { rerender } = render(<AssistantMessageSource source={{
     source_type: 'course_material', material_id: 'm1', page_number: 2,
@@ -40,12 +40,12 @@ test('outdated citations stay identifiable and unavailable Notebook evidence can
   fireEvent.click(screen.getByRole('button', { name: /第一讲/ }))
   expect(openSource).toHaveBeenCalledOnce()
 
+  // 资料已删除：来源标记为不可用，卡片退化成静态展示，不能再跳转
   rerender(<AssistantMessageSource source={{
-    source_type: 'notebook', notebook_id: 'book', block_id: 'block',
-    snippet: 'Notebook 已删除', source_status: 'unavailable',
+    source_type: 'course_material', material_id: 'm1', page_number: 2,
+    lecture_title: '第一讲', snippet: '资料已删除', source_status: 'unavailable',
   }} onOpen={openSource} />)
-  const unavailable = screen.getByRole('button', { name: /来源已不可用/ }) as HTMLButtonElement
-  expect(unavailable.disabled).toBe(true)
   expect(screen.getByText(/来源已不可用/)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: /第一讲/ })).toBeNull()
   expect(openSource).toHaveBeenCalledOnce()
 })

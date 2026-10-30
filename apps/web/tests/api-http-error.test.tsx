@@ -40,7 +40,7 @@ test('request：非 2xx 抛 ApiError，消息可读且带状态码', async () =>
   stubFetch(422, JSON.stringify({ detail: [{ loc: ['body', 'question'], msg: '长度不足' }] }))
   await expect(request('/api/x')).rejects.toMatchObject({
     name: 'ApiError',
-    message: '请求参数不合法：question 长度不足',
+    message: 'question：长度不足',
     status: 422,
   })
   await expect(request('/api/x')).rejects.toBeInstanceOf(ApiError)

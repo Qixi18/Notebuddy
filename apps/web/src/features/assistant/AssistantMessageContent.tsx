@@ -61,6 +61,13 @@ export function AssistantMessageSource({ source, onOpen }: {
   source: AssistantSource
   onOpen?: () => void
 }) {
+  /* 来源失效提示：课件重新解析后旧引用会标记 stale；资料被删则 unavailable。
+     后端 assistant_sources 一直在产出这两个状态，缺了渲染就等于把失效静默掉。 */
+  const statusLabel = source.source_status === 'stale'
+    ? ' · 来源已更新'
+    : source.source_status === 'unavailable'
+      ? ' · 来源已不可用'
+      : ''
   if (source.source_type === 'web' && source.url) {
     return (
       <a className="source-card web-source-card" href={source.url} target="_blank" rel="noreferrer">
@@ -68,6 +75,7 @@ export function AssistantMessageSource({ source, onOpen }: {
         <span className="source-card-body">
           <span className="source-card-meta">
             网络补充 · {source.site_name}
+            {statusLabel}
             {source.published_at ? ` · 发布于 ${source.published_at}` : ''}
             {source.retrieved_at ? ` · 检索于 ${new Date(source.retrieved_at).toLocaleDateString('zh-CN')}` : ''}
           </span>
@@ -79,12 +87,15 @@ export function AssistantMessageSource({ source, onOpen }: {
   }
   if (!source.material_id || !source.page_number) return null
   return (
-    <SourceCard
-      title={source.lecture_title ?? '课程资料'}
-      pageNumber={source.page_number}
-      locationLabel={source.location_label}
-      quote={source.snippet}
-      onOpen={onOpen}
-    />
+    <div className={`source-citation${source.source_status === 'stale' ? ' is-stale' : ''}${source.source_status === 'unavailable' ? ' is-unavailable' : ''}`}>
+      {statusLabel ? <small className="source-citation-status">{statusLabel.slice(3).trim()}</small> : null}
+      <SourceCard
+        title={source.lecture_title ?? '课程资料'}
+        pageNumber={source.page_number}
+        locationLabel={source.location_label}
+        quote={source.snippet}
+        onOpen={source.source_status === 'unavailable' ? undefined : onOpen}
+      />
+    </div>
   )
 }

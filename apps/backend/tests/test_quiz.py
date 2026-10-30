@@ -119,7 +119,9 @@ def test_generate_quiz_tool_creates_quiz_and_suggestion(tmp_path, monkeypatch: p
 
     from app.ai.agent_tools import execute_tool
     from app.db.database import Base
-    from app.db.models import Material, MaterialPage, Quiz, Course, KnowledgeNode, Note
+    from app.db.models import (
+        Asset, Course, DocumentChunk, DocumentParseRun, KnowledgeNode, Material, MaterialPage, Note, Quiz,
+    )
     import app.services.quiz as quiz_service
 
     engine = create_engine(
@@ -135,13 +137,32 @@ def test_generate_quiz_tool_creates_quiz_and_suggestion(tmp_path, monkeypatch: p
         node.course_id = course.id  # knowledge_nodes.course_id 非空，先落课程再挂节点
         db.add(node)
         db.flush()
+        # 课件素材走 Asset → DocumentParseRun → DocumentChunk 链路
+        asset = Asset(
+            source_type="material", media_type="document", mime_type="application/vnd.ms-powerpoint",
+            extension=".pptx", original_name="a.pptx", storage_key="course/quiz-test/a.pptx",
+            byte_size=10, state="ready",
+        )
+        db.add(asset)
+        db.flush()
         material = Material(
             course_id=course.id, lecture_title="第1讲 行列式", original_filename="a.pptx",
             stored_filename="a.pptx", size_bytes=10, status="completed", page_count=1,
+            asset_id=asset.id,
         )
         db.add(material)
         db.flush()
         db.add(MaterialPage(material_id=material.id, page_number=1, raw_text="行列式是线性代数的基本工具，行列式为零等价于矩阵不可逆。"))
+        parse_run = DocumentParseRun(
+            asset_id=asset.id, document_id=asset.id, status="completed", is_current=True,
+            fingerprint="quiz-test-fingerprint",
+        )
+        db.add(parse_run)
+        db.flush()
+        db.add(DocumentChunk(
+            parse_run_id=parse_run.id, asset_id=asset.id, order=0,
+            text="行列式是线性代数的基本工具，行列式为零等价于矩阵不可逆。",
+        ))
         note = Note(course_id=course.id, knowledge_node_id=node.id, material_id=material.id, title="行列式", content_markdown="# 行列式")
         db.add(note)
         db.commit()

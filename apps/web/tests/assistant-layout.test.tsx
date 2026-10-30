@@ -251,7 +251,7 @@ test('点击会话历史切换会话；顶栏搜索按钮打开命令面板并�
   await waitFor(() => expect(conversation.selectConversation).toHaveBeenCalledWith('conv-0'))
 
   fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
-  const input = screen.getByLabelText('搜索会话标题或消息内容') as HTMLInputElement
+  const input = screen.getByLabelText('搜索会话标题') as HTMLInputElement
   fireEvent.change(input, { target: { value: '堆排序' } })
   expect(screen.getByRole('dialog', { name: '搜索会话' }).textContent).toContain('堆排序的时间复杂度')
   fireEvent.keyDown(input, { key: 'Enter' })

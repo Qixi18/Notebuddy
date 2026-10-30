@@ -1,4 +1,4 @@
-import { ApiError } from './http'
+import { ApiError, readApiError } from './http'
 import { parseAgentRemainder, parseAgentStream } from './agentStream'
 import type {
   AgentEvent,
@@ -52,14 +52,9 @@ export async function streamAgentMessage(
     signal,
   })
   if (!response.ok) {
-    const body = await response.text()
-    let detail = body
-    try {
-      detail = (JSON.parse(body) as { detail?: string }).detail ?? body
-    } catch {
-      // 保持原文可读
-    }
-    throw new ApiError(detail || `请求失败：${response.status}`, response.status)
+    // 复用 http.ts 的可读化：FastAPI 的 detail 可能是数组，直接 new Error(String(detail))
+    // 会把每个对象变成 [object Object]，用户看不到是哪一字段不合法。
+    throw await readApiError(response)
   }
   if (!response.body) throw new ApiError('响应缺少流内容', response.status)
 
