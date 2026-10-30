@@ -21,7 +21,7 @@ def claim_next_forest_job() -> str | None:
         job_id = db.scalar(select(ForestJob.id).where(
             ForestJob.status == "pending",
             ForestJob.kind.in_(("curriculum_import", "notebook_relations")),
-        ).order_by(ForestJob.created_at, ForestJob.id).limit(1))
+        ).order_by(ForestJob.updated_at, ForestJob.created_at, ForestJob.id).limit(1))
         if job_id is None:
             return None
         result = db.execute(update(ForestJob).where(

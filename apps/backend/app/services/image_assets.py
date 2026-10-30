@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -121,8 +122,14 @@ def finalize_staged_image(db: Session, asset: Asset) -> AssetProcessingJob | Non
 def ingest_source_image(
     db: Session, *, notebook_id: str, filename: str, data: bytes,
     upload_batch_id: str | None = None,
+    processing_route: str | None = None,
 ) -> tuple[Asset, AssetProcessingJob | None]:
     notebook = db.get(Notebook, notebook_id)
+    from app.document_processing.routes import provider_snapshot, resolve_route
+    try:
+        route = resolve_route(processing_route)
+    except ValueError as exc:
+        raise ImageUploadRejected(str(exc)) from exc
     if notebook is None or notebook.deleted_at is not None:
         raise ImageUploadRejected("笔记不存在", 404)
     if not data:
@@ -146,6 +153,7 @@ def ingest_source_image(
         extension=extension, original_name=Path(filename or "image").name[:255],
         storage_key=storage_key, byte_size=len(data), sha256=hashlib.sha256(data).hexdigest(),
         state="staging", created_at=now, upload_batch_id=upload_batch_id,
+        processing_route=route, processing_config_json=json.dumps(provider_snapshot()),
     )
     db.add_all([asset, NotebookAsset(
         notebook_id=notebook_id, asset_id=asset_id, role="source_material",

@@ -1,5 +1,13 @@
 # 后端调用与业务数据存储契约
 
+## 双路线处理补充（2026-10-30）
+
+`assets.processing_route` / `processing_config_json` 固定上传所选路线和非敏感模型连接身份，`materials.processing_route` 与其保持一致。批次保存初始路线；失败输入切换后可在同一批次中按实际路线分组生成。历史数据默认 `standard`，新上传的默认值由设置控制。
+
+`processing_steps` 保存以 scope/stage/step_key/fingerprint 唯一定位的成功模型步骤和用量，供读取、规划、正文与关系任务续跑，不承载 Notebook 正式正文。页面图像保存在 `derived/pages/<asset>/<run>/`；完整读取才提升为当前 Document IR。正文仍通过原有 Notebook 文档、来源映射、修订号与派生小节索引写入。
+
+`notebook_generation_jobs.relation_job_id` 跟踪正文提交后的独立藤蔓任务。用户删除联系时在 `notebook_relation_suppressions` 保留端点决定，自动分析不得恢复该条联系；人工联系也不会被自动关系覆盖。迁移为 `a5e3c8d1f209_dual_processing_routes`，使用 Alembic 升级，不删除现有业务数据。
+
 本文记录当前 `main` 的本地 Web 实现，供首页与知识树、答疑 Agent、课程与笔记三条开发线共同使用。字段及错误响应以 `apps/backend/app/schemas/` 和 `apps/backend/app/api/v1/` 为准；详细接口见 [API 契约](api.md)。云端多用户部署不属于当前实现。
 
 ## 共同调用规则

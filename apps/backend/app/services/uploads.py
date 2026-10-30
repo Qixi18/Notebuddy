@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -23,6 +24,7 @@ from app.db.models import (
     new_id,
     utc_now,
 )
+from app.document_processing.routes import provider_snapshot, resolve_route, route_limits
 from app.notes.assets import AssetUnavailable
 from app.notes.notebook import bump_order_revision
 
@@ -41,7 +43,8 @@ class UploadRejected(ValueError):
         self.status_code = status_code
 
 
-def _validate_container(path: Path, extension: str) -> None:
+def _validate_container(path: Path, extension: str, *, processing_route: str = "standard") -> None:
+    max_pages = route_limits(processing_route)[1]
     if extension == ".pdf":
         with path.open("rb") as source:
             if source.read(5) != b"%PDF-":
@@ -51,8 +54,8 @@ def _validate_container(path: Path, extension: str) -> None:
             page_count = len(PdfReader(str(path)).pages)
         except Exception as exc:
             raise UploadRejected("PDF 文件损坏或无法读取", 415) from exc
-        if page_count > settings.max_pages:
-            raise UploadRejected(f"PDF 页面数超过本地限制（最多 {settings.max_pages} 页）", 413)
+        if page_count > max_pages:
+            raise UploadRejected(f"PDF 页面数超过所选路线限制（最多 {max_pages} 页）", 413)
         return
     try:
         with ZipFile(path) as archive:
@@ -60,6 +63,8 @@ def _validate_container(path: Path, extension: str) -> None:
             required = {"ppt/presentation.xml"} if extension == ".pptx" else {"word/document.xml", "[Content_Types].xml"}
             if not required.issubset(names) or archive.testzip() is not None:
                 raise UploadRejected(f"文件不是可读取的 {extension[1:].upper()}", 415)
+        if processing_route == "llm":
+            return  # Office rendering validates actual page count after conversion.
         if extension == ".pptx":
             from pptx import Presentation
 
@@ -204,7 +209,13 @@ def ingest_document(
     allow_duplicate: bool = False, idempotency_key: str | None = None,
     notebook_id: str | None = None,
     upload_batch_id: str | None = None,
+    processing_route: str | None = None,
 ) -> tuple[Material, ProcessingJob]:
+    try:
+        route = resolve_route(processing_route)
+    except ValueError as exc:
+        raise UploadRejected(str(exc), 422) from exc
+    max_bytes, _ = route_limits(route)
     extension = Path(filename).suffix.lower()
     if extension not in settings.allowed_extensions:
         raise UploadRejected("当前支持 PPTX、PDF 和 DOCX 文件", 415)
@@ -220,7 +231,7 @@ def ingest_document(
         if book.course_id != course_id:
             raise UploadRejected("所选笔记不属于该课程", 409)
     notebook_id = book.id
-    key = hashlib.sha256(f"{notebook_id}:{idempotency_key}".encode()).hexdigest() if idempotency_key else None
+    key = hashlib.sha256(f"{notebook_id}:{route}:{idempotency_key}".encode()).hexdigest() if idempotency_key else None
     if key:
         prior = db.scalar(select(ProcessingJob).where(ProcessingJob.idempotency_key == key))
         if prior is not None:
@@ -241,7 +252,7 @@ def ingest_document(
             temporary = Path(output.name)
             while chunk := source.read(1024 * 1024):
                 size += len(chunk)
-                if size > settings.max_upload_bytes:
+                if size > max_bytes:
                     raise UploadRejected("文件超过本地配置的大小限制", 413)
                 output.write(chunk)
                 digest.update(chunk)
@@ -249,7 +260,7 @@ def ingest_document(
             os.fsync(output.fileno())
         if size == 0:
             raise UploadRejected("文件为空或无法读取", 415)
-        _validate_container(temporary, extension)
+        _validate_container(temporary, extension, processing_route=route)
         content_hash = digest.hexdigest()
         # Recheck after taking the SQLite write lock: concurrent retries may
         # both have passed the early lookup while streaming their files.
@@ -284,6 +295,7 @@ def ingest_document(
             original_name=Path(filename).name[:255], storage_key=storage_key,
             byte_size=size, sha256=content_hash, state="staging",
             created_at=created_at, verified_at=None, upload_batch_id=upload_batch_id,
+            processing_route=route, processing_config_json=json.dumps(provider_snapshot()),
         )
         material = Material(
             id=material_id, asset_id=material_id, course_id=None, notebook_id=notebook_id,
@@ -292,6 +304,7 @@ def ingest_document(
             original_filename=Path(filename).name[:255], stored_filename=destination.name,
             media_type=media_type, size_bytes=size, content_hash=content_hash,
             status="pending",
+            processing_route=route,
             chapter_order=0 if last_order is None else last_order + 1,
         )
         job = ProcessingJob(material_id=material_id, kind="parse_material", idempotency_key=key)

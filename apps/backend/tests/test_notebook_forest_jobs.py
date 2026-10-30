@@ -144,3 +144,24 @@ def test_retry_commits_pending_state_and_keeps_attempt_identity(session, engine)
         persisted = independent.get(ForestJob, task.id)
         assert persisted.status == "pending"
         assert persisted.attempt_count == 2
+
+
+def test_deleted_automatic_relation_is_not_recreated(session, engine, monkeypatch):
+    from app.api.v1.notebook import delete_notebook_relation
+    source, target = _setup(session)
+    first = enqueue_notebook_relations(session, source.course_id)
+    session.commit()
+    _configure(monkeypatch, engine, Client())
+    jobs.claim_next_forest_job()
+    jobs.process_forest_job(first.id)
+    session.expire_all()
+    relation = session.scalar(select(NotebookRelation))
+    delete_notebook_relation(source.id, relation.id, session)
+    write_document(session, target, _document('更新后正文仍然讨论导数与梯度下降。'), expected_revision=1)
+    session.commit()
+    next_job = enqueue_notebook_relations(session, source.course_id)
+    session.commit()
+    jobs.claim_next_forest_job()
+    jobs.process_forest_job(next_job.id)
+    session.expire_all()
+    assert session.scalar(select(NotebookRelation)) is None

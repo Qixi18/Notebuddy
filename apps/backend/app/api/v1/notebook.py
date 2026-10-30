@@ -298,6 +298,8 @@ def delete_notebook_relation(notebook_id: str, relation_id: str,
         relation.source_notebook_id, relation.target_notebook_id,
     ):
         raise HTTPException(404, "笔记关系不存在")
+    from app.forest.suppressions import suppress
+    suppress(db, relation)
     db.delete(relation)
     db.commit()
 

@@ -134,7 +134,7 @@ def _lookup_blocks(
     )
     if source is None:
         raise CompositionError(f"输入快照缺少资料 {unit['source_asset_id']}", code="snapshot_invalid")
-    section = next(
+    section = {'blocks': [block for s in source['sections'] for block in s['blocks']]} if unit['section_id'] == '__all__' and snapshot.get('processing_route') == 'llm' else next(
         (item for item in source.get("sections") or []
          if item["section_id"] == unit["section_id"]), None,
     )
@@ -312,7 +312,13 @@ SOURCE_REPAIR_PROMPT = (
 def compose_deepseek(
     snapshot: dict[str, Any], plan: dict[str, Any], unit_ids: list[str],
 ) -> Composition:
-    client = DeepSeekClient()
+    from app.document_processing.routes import provider_client
+    client = provider_client(snapshot.get('provider', {})) if snapshot.get('processing_route') == 'llm' else DeepSeekClient()
+    def call_json(messages, *, max_tokens):
+        if snapshot.get('processing_route') == 'llm':
+            from app.document_processing.checkpoints import structured_call
+            return structured_call(client, messages, max_tokens=max_tokens)
+        return client.complete_json(messages, max_tokens=max_tokens)
     if not client.configured:
         raise CompositionError(
             "DEEPSEEK_API_KEY 未配置，无法调用模型生成正文；可改用离线结构化生成器",
@@ -342,12 +348,14 @@ def compose_deepseek(
         ],
         "units": payload_units,
     }
+    if snapshot.get('processing_route') == 'llm':
+        user_payload['existing_outline'] = snapshot.get('outline_context', [])
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
     ]
     try:
-        result = client.complete_json(messages, max_tokens=8_000)
+        result = call_json(messages, max_tokens=8_000)
         json_repair_used = False
     except DeepSeekError as first_error:
         # Repair malformed/truncated JSON once while preserving the original
@@ -360,7 +368,7 @@ def compose_deepseek(
             {"role": "user", "content": JSON_REPAIR_PROMPT},
         ]
         try:
-            result = client.complete_json(repair_messages, max_tokens=8_000)
+            result = call_json(repair_messages, max_tokens=8_000)
             json_repair_used = True
         except DeepSeekError as exc:
             raise CompositionError(f"模型生成失败（JSON 修复重试后仍无效）：{exc}", code="model_failed") from exc
@@ -387,7 +395,7 @@ def compose_deepseek(
         }, ensure_ascii=False)},
     ]
     try:
-        repaired = client.complete_json(repair_messages, max_tokens=4_000)
+        repaired = call_json(repair_messages, max_tokens=4_000)
     except DeepSeekError as exc:
         raise CompositionError(f"模型来源映射修复失败：{exc}", code="missing_sources") from exc
     repaired_sources = repaired.get("sources")

@@ -9,15 +9,24 @@ import httpx
 from app.core.config import Settings, settings
 
 
+def _retry_after(value: str | None) -> float | None:
+    try:
+        return max(0.0, float(value)) if value else None
+    except ValueError:
+        return None
+
+
 class DeepSeekError(RuntimeError):
     """Raised when the configured DeepSeek provider cannot return a result."""
 
     def __init__(
         self, message: str, *, status_code: int | None = None, code: str = "provider_error",
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
+        self.retry_after = retry_after
 
 
 class DeepSeekClient:
@@ -32,7 +41,7 @@ class DeepSeekClient:
 
     def complete(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         json_mode: bool = False,
         max_tokens: int = 3000,
@@ -75,7 +84,9 @@ class DeepSeekClient:
             } or None
             content = body["choices"][0]["message"]["content"]
             if not isinstance(content, str) or not content.strip():
-                raise DeepSeekError("DeepSeek 返回了空内容")
+                if self.last_finish_reason == 'length':
+                    raise DeepSeekError('模型输出被截断，请减小批次后重试', code='output_truncated')
+                raise DeepSeekError("DeepSeek 返回了空内容", code='provider_empty')
             return content.strip()
         except httpx.HTTPStatusError as exc:
             self.last_usage = None
@@ -83,15 +94,17 @@ class DeepSeekClient:
             raise DeepSeekError(
                 f"DeepSeek 调用失败：HTTP {exc.response.status_code}",
                 status_code=exc.response.status_code,
+                retry_after=_retry_after(exc.response.headers.get('Retry-After')),
             ) from exc
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             self.last_usage = None
             self.last_finish_reason = None
-            raise DeepSeekError(f"DeepSeek 调用失败：{type(exc).__name__}") from exc
+            raise DeepSeekError(f"DeepSeek 调用失败：{type(exc).__name__}",
+                                code='provider_transport' if isinstance(exc, httpx.HTTPError) else 'provider_response_invalid') from exc
 
     def complete_json(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         *,
         max_tokens: int = 3000,
     ) -> dict[str, Any]:

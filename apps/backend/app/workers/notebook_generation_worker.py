@@ -13,7 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import aliased
 
 from app.core.config import settings
@@ -28,10 +28,20 @@ from app.db.models import (
     NotebookGenerationInput,
     NotebookGenerationJob,
 )
+from app.document_processing.checkpoints import (
+    WorkPending,
+    fingerprint,
+    get_step,
+    put_step,
+    structured_call,
+)
+from app.document_processing.routes import provider_client
 from app.generation.composer import CompositionError, compose
 from app.generation.context import GenerationInputError, current_outline
 from app.generation.figures import append_source_figures
+from app.generation.llm_planner import build_llm_plan
 from app.generation.planner import build_plan
+from app.generation.resume import compose_batch
 from app.notes.document import (
     DocumentValidationError,
     load_document,
@@ -51,12 +61,16 @@ def claim_next_generation_job() -> str | None:
         busy = aliased(NotebookGenerationJob)
         available = ~select(busy.id).where(
             busy.notebook_id == NotebookGenerationJob.notebook_id,
-            busy.status.in_(("processing", "cancel_requested")),
+            or_(busy.status.in_(("processing", "cancel_requested")),
+                and_(busy.status == 'pending', or_(
+                    busy.created_at < NotebookGenerationJob.created_at,
+                    and_(busy.created_at == NotebookGenerationJob.created_at,
+                         busy.id < NotebookGenerationJob.id)))),
         ).exists()
         job_id = db.scalar(select(NotebookGenerationJob.id).where(
             NotebookGenerationJob.status == "pending",
             available,
-        ).order_by(NotebookGenerationJob.created_at, NotebookGenerationJob.id).limit(1))
+        ).order_by(NotebookGenerationJob.updated_at, NotebookGenerationJob.created_at, NotebookGenerationJob.id).limit(1))
         if job_id is None:
             return None
         result = db.execute(update(NotebookGenerationJob).where(
@@ -80,6 +94,30 @@ def process_generation_job(job_id: str) -> None:
         if not _checkpoint(db, job, attempt):
             return
         snapshot = _parse_json(job.input_snapshot_json) or {}
+        llm_route = snapshot.get('processing_route') == 'llm'
+        model_steps = 0
+        def cached_model_call(messages, *, max_tokens=6000, validator=None):
+            nonlocal model_steps
+            identity = fingerprint([messages, snapshot.get('provider'), 'plan-v1'])
+            cached = get_step(db, job.id, 'plan', identity, identity)
+            if cached is not None:
+                if validator:
+                    validator(cached)
+                return cached
+            if model_steps >= 2:
+                raise WorkPending()
+            if not _checkpoint(db, job, attempt):
+                raise CompositionError('任务已停止', code='cancelled')
+            db.commit()
+            client = provider_client(snapshot.get('provider', {}))
+            result = structured_call(client, messages, max_tokens=max_tokens)
+            if validator:
+                validator(result)
+            if not _checkpoint(db, job, attempt):
+                raise CompositionError('任务已停止', code='cancelled')
+            put_step(db, job.id, 'plan', identity, identity, result, client.last_usage)
+            model_steps += 1
+            return result
         try:
             _validate_snapshot_sources(db, job.notebook_id, snapshot)
         except GenerationInputError as exc:
@@ -110,23 +148,51 @@ def process_generation_job(job_id: str) -> None:
             job.input_snapshot_json = json.dumps(snapshot, ensure_ascii=False)
             job.base_document_revision = notebook.document_revision
             try:
-                plan = build_plan(snapshot)
+                plan = build_llm_plan(snapshot, cached_model_call) if llm_route else build_plan(snapshot)
+            except WorkPending:
+                job.status = 'pending'
+                job.updated_at = datetime.now(UTC)
+                db.commit()
+                return
             except Exception as exc:
                 _fail_inputs(db, job, "plan_failed", f"生成计划构建失败：{exc}", attempt)
                 return
             job.knowledge_plan_json = json.dumps(plan, ensure_ascii=False)
+            job.input_snapshot_json = json.dumps(snapshot, ensure_ascii=False)
             db.commit()
         generator = job.generator or settings.notebook_generator
         try:
             compositions = []
+            def fresh_composition(snapshot, plan, batch, *, generator):
+                nonlocal model_steps
+                if model_steps >= 2:
+                    raise WorkPending()
+                result = compose(snapshot, plan, batch, generator=generator)
+                result.nodes = _normalize_model_blocks(result.nodes)
+                if not _checkpoint(db, job, attempt):
+                    raise CompositionError('任务已停止', code='cancelled')
+                model_steps += 1
+                return result
             for batch in plan.get("batches") or []:
                 if not _checkpoint(db, job, attempt):
                     return
                 # Do not hold a read transaction across a network/model call.
                 db.commit()
-                compositions.append(compose(snapshot, plan, batch, generator=generator))
+                if llm_route:
+                    compositions.append(compose_batch(db, job.id, snapshot, plan, batch, generator,
+                                                       compose_impl=fresh_composition))
+                else:
+                    compositions.append(compose(snapshot, plan, batch, generator=generator))
                 if not _checkpoint(db, job, attempt):
                     return
+        except WorkPending:
+            job.status = 'pending'
+            job.updated_at = datetime.now(UTC)
+            db.commit()
+            return
+        except DocumentValidationError as exc:
+            _fail_inputs(db, job, 'document_validation_failed', str(exc), attempt)
+            return
         except (CompositionError, GenerationInputError) as exc:
             _fail_inputs(db, job, getattr(exc, "code", "generation_failed"), str(exc), attempt)
             return
@@ -168,6 +234,13 @@ def process_generation_job(job_id: str) -> None:
             _fail_inputs(db, job, "invalid_sources", "生成内容引用了本次输入之外的原文块", attempt)
             return
 
+        if llm_route:
+            notebook = db.get(Notebook, job.notebook_id, populate_existing=True)
+            if notebook is not None and notebook.document_revision != snapshot['base_document_revision']:
+                job.knowledge_plan_json = None
+                job.status = 'pending'
+                db.commit()
+                return
         try:
             merged = _merge_with_retry(db, job, fragment, source_map, attempt, snapshot, plan)
         except DocumentValidationError as exc:
@@ -196,7 +269,10 @@ def process_generation_job(job_id: str) -> None:
             if notebook.course_id is not None:
                 from app.forest.notebook_relations import enqueue_notebook_relations
 
-                enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id)
+                relation_job = enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id,
+                    processing_route=snapshot.get('processing_route', 'standard'),
+                    provider=snapshot.get('provider', {}))
+                job.relation_job_id = relation_job.id if relation_job else None
             db.commit()
         except Exception:
             db.rollback()

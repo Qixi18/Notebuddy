@@ -1,11 +1,15 @@
 import type { AssetDocument, AssetProcessingJob, AssetResource, Coverage, DeletionPreview, DocumentBlock, DocumentCoverage, DocumentParseRunSummary, Job, Material, Page, PageEvidence, UploadResponse, WebSource } from '../types'
 import { request } from './http'
+import type { ProcessingRoute } from './config'
 
 export const materialApi = {
+  switchAssetProcessingRoute: (assetId: string, route: ProcessingRoute) => request<{ asset_id: string; processing_route: ProcessingRoute; job_id: string }>(`/api/v1/assets/${assetId}/processing-route`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ processing_route: route }) }),
+  cancelAssetProcessing: (assetId: string) => request<{ cancelled: boolean }>(`/api/v1/assets/${assetId}/cancel-processing`, { method: 'POST' }),
   listNotebookAssets: (notebookId: string) => request<AssetResource[]>(`/api/v1/notebooks/${notebookId}/assets`),
   listDetachedNotebookAssets: (notebookId: string) => request<AssetResource[]>(`/api/v1/notebooks/${notebookId}/detached-assets`),
-  uploadNotebookAsset: (notebookId: string, file: File, batchId?: string) => {
+  uploadNotebookAsset: (notebookId: string, file: File, batchId?: string, route?: ProcessingRoute) => {
     const body = new FormData(); body.append('file', file)
+    if (route) body.append('processing_route', route)
     return request<{ asset: AssetResource; processing_job: AssetProcessingJob | null; upload_batch_id?: string }>(`/api/v1/notebooks/${notebookId}/assets`, {
       method: 'POST', headers: batchId ? { 'X-Upload-Batch-ID': batchId } : undefined, body,
     })
@@ -21,23 +25,25 @@ export const materialApi = {
   previewMaterialDeletion: (id: string) => request<DeletionPreview>(`/api/v1/materials/${id}/deletion-preview`),
   deleteMaterial: (id: string) => request<DeletionPreview>(`/api/v1/materials/${id}`, { method: 'DELETE' }),
   restoreMaterial: (id: string) => request<Material>(`/api/v1/materials/${id}/restore`, { method: 'POST' }),
-  uploadMaterial: (courseId: string, file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID(), batchId?: string) => {
+  uploadMaterial: (courseId: string, file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID(), batchId?: string, route?: ProcessingRoute) => {
     const form = new FormData()
     form.append('file', file)
     form.append('lecture_title', lectureTitle)
     form.append('topic_title', topicTitle)
     form.append('allow_duplicate', String(allowDuplicate))
     form.append('notebook_id', notebookId)
+    if (route) form.append('processing_route', route)
     return request<UploadResponse>(`/api/v1/courses/${courseId}/materials`, {
       method: 'POST', headers: { 'Idempotency-Key': idempotencyKey, ...(batchId ? { 'X-Upload-Batch-ID': batchId } : {}) }, body: form,
     })
   },
-  uploadNotebookFile: (notebookId: string, file: File, lectureTitle = file.name, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID(), batchId?: string) => {
+  uploadNotebookFile: (notebookId: string, file: File, lectureTitle = file.name, topicTitle = '', allowDuplicate = false, idempotencyKey = crypto.randomUUID(), batchId?: string, route?: ProcessingRoute) => {
     const form = new FormData()
     form.append('file', file)
     form.append('lecture_title', lectureTitle)
     form.append('topic_title', topicTitle)
     form.append('allow_duplicate', String(allowDuplicate))
+    if (route) form.append('processing_route', route)
     return request<UploadResponse>(`/api/v1/notebooks/${notebookId}/files`, {
       method: 'POST', headers: { 'Idempotency-Key': idempotencyKey, ...(batchId ? { 'X-Upload-Batch-ID': batchId } : {}) }, body: form,
     })

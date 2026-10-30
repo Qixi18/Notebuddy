@@ -14,6 +14,7 @@ dependencies = [
     "alembic>=1.20.0",
     "pypdf>=6.19.0",
     "pypdfium2>=5.14,<6",
+    "pillow>=11",
     "python-docx>=1.2.0",
 ]
 

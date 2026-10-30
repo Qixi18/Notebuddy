@@ -20,3 +20,5 @@ class JobRead(BaseModel):
     updated_at: datetime
     error_code: str | None = None
     attempt_count: int = 0
+    completed_pages: int = 0
+    total_pages: int = 0
