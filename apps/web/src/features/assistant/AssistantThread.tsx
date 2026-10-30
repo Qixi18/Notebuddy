@@ -136,10 +136,6 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
           {messageTimeLabel(message) && <time>{messageTimeLabel(message)}</time>}
         </header>
 
-        <div className="workspace-msg-content">
-          <CitationText content={message.content} sources={sources} onCite={handleCite} />
-        </div>
-
         {message.process ? <details className="message-process">
           <summary>
             过程记录{message.process.steps.length ? ` · ${message.process.steps.length} 个步骤` : ''}
@@ -153,6 +149,11 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
             duration_ms: step.duration_ms, status: 'done' as const,
           }))} />
         </details> : null}
+
+        <div className="workspace-msg-content">
+          <CitationText content={message.content} sources={sources} onCite={handleCite} />
+        </div>
+
         <MessageSkillCards suggestions={message.suggestions ?? []} courseId={skillCourseId} onAsk={onSkillAsk} />
 
         {message.status !== 'failed' && message.mode && sources.length === 0 && (
@@ -366,8 +367,8 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
             {agentRun.aborted ? (
               <p className="workspace-agent-aborted-note">这次回答已停止，下面是已收到的部分；可以直接继续提问。</p>
             ) : null}
-            <AgentSteps steps={agentRun.steps} />
             <AgentThinking thinking={agentRun.thinking} live={Boolean(agentRun.thinking) && !agentRun.final && !agentRun.aborted} />
+            <AgentSteps steps={agentRun.steps} />
             {agentRun.notice ? <p className="workspace-agent-notice">{agentRun.notice}</p> : null}
             {agentRun.streamingText ? (
               <div className="workspace-agent-streaming">
