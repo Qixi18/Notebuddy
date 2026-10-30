@@ -30,6 +30,15 @@ test.each([1, 2, 3])('%i notebooks have one main branch each while filling the c
 
 const course = { course_id: 'course', name: '课程', learning_state: 'learning', position: 0, revision: 0, prerequisites: [], note_count: 6, material_count: 1, semester: 1, level: 'foundation' } as ForestCourse
 
+test.each(['home', 'forest'])('an empty course in %s has bare branches and no decorative knowledge leaves', mode => {
+  const { container } = mode === 'home'
+    ? render(<HomeCourseTree courseId="course" books={[]} previewId="preview" onPreview={vi.fn()} onLeave={vi.fn()} onNotebook={vi.fn()} onNote={vi.fn()} />)
+    : render(<KnowledgeTreeScene courses={[{ ...course, note_count: 0, material_count: 0 }]} trees={[{ course_id: 'course', notebooks: [] }]} onRoot={vi.fn()} onNotebook={vi.fn()} onNote={vi.fn()} onRelation={vi.fn()} />)
+  expect(container.querySelectorAll('image[href="/assets/forest/leaves-atlas.webp"]')).toHaveLength(0)
+  expect(container.querySelectorAll('.kt-sapling-bough').length).toBeGreaterThan(0)
+  expect(screen.queryByRole('button', { name: /打开知识点/ })).toBeNull()
+})
+
 test.each([1, 2])('revealing or expanding distant notes keeps the first leaves fixed with %i notebooks', count => {
   const data = books(count)
   data[0].chapters[0].sections = Array.from({ length: 200 }, (_, i) => ({ ...data[0].chapters[0].sections[0], id: `note-0-${i}`, tree_slot: i }))

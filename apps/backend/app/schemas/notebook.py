@@ -9,6 +9,7 @@ from app.schemas.notes import NoteRead
 class SectionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    block_id: str | None = None
     notebook_id: str
     tree_slot: int
     knowledge_node_id: str

@@ -1,4 +1,4 @@
-import { ApiError } from './http'
+import { ApiError, readApiError } from './http'
 import { parseAgentRemainder, parseAgentStream } from './agentStream'
 import type {
   AgentEvent,
@@ -52,14 +52,7 @@ export async function streamAgentMessage(
     signal,
   })
   if (!response.ok) {
-    const body = await response.text()
-    let detail = body
-    try {
-      detail = (JSON.parse(body) as { detail?: string }).detail ?? body
-    } catch {
-      // 保持原文可读
-    }
-    throw new ApiError(detail || `请求失败：${response.status}`, response.status)
+    throw await readApiError(response)
   }
   if (!response.body) throw new ApiError('响应缺少流内容', response.status)
 

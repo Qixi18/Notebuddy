@@ -170,4 +170,4 @@ def test_complete_json_marks_invalid_output_and_truncation(
     with pytest.raises(DeepSeekError, match=message) as captured:
         client.complete_json([{"role": "user", "content": "生成"}])
 
-    assert captured.value.code == "invalid_json"
+    assert captured.value.code == ("output_truncated" if finish_reason == "length" else "invalid_json")

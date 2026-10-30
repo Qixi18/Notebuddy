@@ -45,7 +45,7 @@ def create_course(payload: CourseCreate, db: Session = Depends(get_db)) -> Cours
     course = Course(name=payload.name.strip(), description=payload.description)
     db.add(course)
     db.flush()
-    ensure_profile(db, course)
+    ensure_profile(db, course, auto_home=True)
     db.commit()
     db.refresh(course)
     return course

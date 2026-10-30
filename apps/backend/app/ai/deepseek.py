@@ -37,6 +37,7 @@ class DeepSeekClient:
         json_mode: bool = False,
         max_tokens: int = 3000,
         temperature: float = 0.2,
+        thinking: bool | None = None,
     ) -> str:
         if not self.configured:
             raise DeepSeekError("DEEPSEEK_API_KEY 未配置")
@@ -51,6 +52,8 @@ class DeepSeekClient:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if thinking is not None:
+            payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
 
         try:
             response = httpx.post(
@@ -74,6 +77,13 @@ class DeepSeekClient:
                 if isinstance(usage, dict) and isinstance(usage.get(key), (int, float))
             } or None
             content = body["choices"][0]["message"]["content"]
+            if self.last_finish_reason == "length" and json_mode:
+                # A thinking model may exhaust the budget before emitting any
+                # content. Even parseable JSON cannot prove the answer is whole.
+                raise DeepSeekError(
+                    "DeepSeek JSON 输出达到输出长度限制，结果可能被截断",
+                    code="output_truncated",
+                )
             if not isinstance(content, str) or not content.strip():
                 raise DeepSeekError("DeepSeek 返回了空内容")
             return content.strip()
@@ -94,8 +104,11 @@ class DeepSeekClient:
         messages: list[dict[str, str]],
         *,
         max_tokens: int = 3000,
+        thinking: bool | None = None,
     ) -> dict[str, Any]:
-        content = self.complete(messages, json_mode=True, max_tokens=max_tokens)
+        content = self.complete(
+            messages, json_mode=True, max_tokens=max_tokens, thinking=thinking,
+        )
         try:
             decoded = json.loads(content)
         except json.JSONDecodeError as exc:

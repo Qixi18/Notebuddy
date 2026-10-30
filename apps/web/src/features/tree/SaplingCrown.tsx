@@ -1,4 +1,3 @@
-import { LeafSprite } from './TreeSprites'
 import { saplingGeometry } from './saplingGeometry'
 
 const crowns = [0, 1, 2].map(saplingGeometry)
@@ -11,7 +10,6 @@ export function SaplingCrown({ variant, textureId }: { variant: number; textureI
       <path className="kt-sapling-spine" d={branch.spine} fill="none" stroke="#d8c69b" strokeWidth=".65" opacity=".65" /></g>
       <g data-growth-sapling-foliage="true">{branch.foliage.map((leaf, leafIndex) => <g key={leafIndex} className="kt-sapling-sprig">
         <path className="kt-sapling-twig" d={leaf.path} fill="none" stroke="#8a7957" strokeWidth="1.1" strokeLinecap="round" />
-        <g className="kt-sapling-leaf" transform={`translate(${leaf.petiole.x},${leaf.petiole.y}) scale(${leaf.scale})`}><LeafSprite variant={leaf.variant} angle={leaf.angle} /></g>
       </g>)}</g>
     </g>)}
   </g>

@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { featureLabels, featurePath, useWorkspace, type Feature } from './AppLayout'
+import { Dialog } from './Dialog'
 
 export function CourseRouteGuard({ children }: { children: ReactNode }) {
   const { course, coursesLoading, refreshCourses } = useWorkspace()
@@ -54,19 +55,12 @@ export function CourseGate({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose()
-    }}>
-      <section className="course-gate-modal" role="dialog" aria-modal="true" aria-labelledby="course-gate-title">
-        <button className="modal-close" onClick={onClose} aria-label="关闭">×</button>
-        <span className="eyebrow">先确定学习范围</span>
-        <h2 id="course-gate-title">选择课程后打开{featureLabels[feature]}</h2>
-        <p className="muted-copy">课程是笔记和学习资料的归属。选择后，我们会把你带到对应功能。</p>
+    <Dialog title={`选择课程后打开${featureLabels[feature]}`} description="课程是笔记和学习资料的归属。选择后，继续这门课程的学习。" onClose={onClose} busy={submitting}>
 
         {courses.length > 0 && (
           <div className="course-gate-list" aria-label="已有课程">
             {courses.map((course) => (
-              <button key={course.id} className="course-choice" onClick={() => void openCourse(course.id)}>
+              <button type="button" key={course.id} className="course-choice" disabled={submitting} onClick={() => void openCourse(course.id)}>
                 <span className="course-choice-mark">{course.name.slice(0, 1)}</span>
                 <span><strong>{course.name}</strong><small>打开{featureLabels[feature]}</small></span>
                 <span className="course-choice-arrow" aria-hidden="true">→</span>
@@ -75,9 +69,8 @@ export function CourseGate({
           </div>
         )}
 
-        <form className="course-gate-create" onSubmit={handleCreate}>
+        <form className="course-gate-create botanical-dialog-form" onSubmit={handleCreate}>
           <label htmlFor="new-course-name">或者新建课程</label>
-          <div className="course-create-row">
             <input
               id="new-course-name"
               value={name}
@@ -85,14 +78,17 @@ export function CourseGate({
               placeholder="例如：软件工程"
               maxLength={120}
               autoFocus
+              required
+              disabled={submitting}
             />
+          {localError && <p className="form-error" role="alert">{localError}</p>}
+          <div className="botanical-dialog-actions">
+            <button className="secondary-button" type="button" onClick={onClose} disabled={submitting}>取消</button>
             <button className="primary-button" type="submit" disabled={!name.trim() || submitting || busy}>
               {submitting ? '创建中…' : '创建并继续'}
             </button>
           </div>
         </form>
-        {localError && <p className="form-error" role="alert">{localError}</p>}
-      </section>
-    </div>
+    </Dialog>
   )
 }

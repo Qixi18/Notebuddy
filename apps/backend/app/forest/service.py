@@ -49,7 +49,7 @@ def _json_strings(value: str) -> list[str]:
     return [item for item in decoded if isinstance(item, str)] if isinstance(decoded, list) else []
 
 
-def ensure_profile(db: Session, course: Course) -> ForestCourseProfile:
+def ensure_profile(db: Session, course: Course, *, auto_home: bool = False) -> ForestCourseProfile:
     """Initialize once; a later upload never changes a user's learning state."""
     profile = db.get(ForestCourseProfile, course.id)
     if profile is not None:
@@ -73,7 +73,7 @@ def ensure_profile(db: Session, course: Course) -> ForestCourseProfile:
             position=position,
             learning_state=(
                 case((_learning_count() < HOME_COURSE_LIMIT, "learning"), else_="planned")
-                if has_material else "planned"
+                if has_material or auto_home else "planned"
             ),
         )
         .on_conflict_do_nothing(index_elements=[ForestCourseProfile.course_id])

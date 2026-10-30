@@ -1,0 +1,11 @@
+.app-shell-garden .course-workspace-heading { align-items: flex-start; }
+.course-overview .course-notebook-panel { padding: 12px 0 20px; }
+.course-notebook-panel > header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.course-notebook-panel > header h2 { margin: 0; font-size: 19px; font-weight: 600; }
+.course-notebook-panel > p { color: #68745f; font-size: 13px; line-height: 1.8; }
+.course-overview-error { display: grid; justify-items: start; gap: 12px; color: #934b36; font-size: 13px; }
+@media (max-width: 900px) {
+  .app-shell-garden .course-workspace-heading { flex-direction: column; }
+  .course-workspace-heading > div { max-width: 100%; }
+  .course-workspace-actions { justify-content: flex-start; }
+}

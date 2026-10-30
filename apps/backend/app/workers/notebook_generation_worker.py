@@ -29,7 +29,12 @@ from app.db.models import (
     NotebookGenerationInput,
     NotebookGenerationJob,
 )
-from app.generation.composer import CompositionError, compose, repair_deepseek_document_format
+from app.generation.composer import (
+    CompositionError,
+    combine_compositions,
+    compose,
+    repair_deepseek_document_format,
+)
 from app.generation.context import GenerationInputError, current_outline
 from app.generation.figures import append_source_figures
 from app.generation.planner import build_plan
@@ -140,12 +145,9 @@ def process_generation_job(job_id: str) -> None:
                          f"生成任务失败：{type(exc).__name__}", attempt)
             return
 
-        nodes: list[dict[str, Any]] = []
-        source_map: dict[str, list[str]] = {}
-        for composition in compositions:
-            nodes.extend(composition.nodes)
-            for block_id, ids in composition.source_map.items():
-                source_map[block_id] = list(dict.fromkeys(source_map.get(block_id, []) + ids))
+        combined = combine_compositions(compositions)
+        nodes = combined.nodes
+        source_map = combined.source_map
         if not nodes:
             if plan.get("units") and all(
                 unit.get("intent") == "skip" for unit in plan["units"]

@@ -68,6 +68,7 @@ def _section_read(book: Notebook, row: NotebookSection) -> SectionRead:
     # work, but every value now comes from the Notebook body, not from Note.
     return SectionRead(
         id=row.block_id,
+        block_id=row.block_id,
         notebook_id=book.id,
         tree_slot=row.order,
         knowledge_node_id="",
