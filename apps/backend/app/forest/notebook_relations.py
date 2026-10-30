@@ -30,8 +30,12 @@ class RelationOutput(BaseModel):
     relations: list[RelationProposal] = Field(max_length=30)
 
 
-def enqueue_notebook_relations(db, course_id: str, *, notebook_id: str | None = None):
-    snapshot = candidate_snapshots(db, course_id, notebook_id=notebook_id)
+def enqueue_notebook_relations(db, course_id: str, *, notebook_id: str | None = None,
+                              processing_route: str = 'standard', provider: dict | None = None):
+    snapshot = candidate_snapshots(db, course_id, notebook_id=notebook_id,
+                                   processing_route=processing_route)
+    if processing_route == 'llm':
+        snapshot['provider'] = provider or {}
     if not snapshot["sources"] or not snapshot["targets"]:
         return None
     key = f"notebook-relations:{course_id}:{snapshot_fingerprint(snapshot)}"
@@ -52,12 +56,45 @@ def process_notebook_relation_job(job_id: str) -> None:
         attempt = job.attempt_count
         try:
             snapshot = json.loads(job.source_snapshot_json)
-            client = DeepSeekClient()
+            from app.document_processing.checkpoints import (
+                WorkPending,
+                fingerprint,
+                get_step,
+                put_step,
+                structured_call,
+            )
+            from app.document_processing.routes import provider_client
+            llm_route = snapshot.get('processing_route') == 'llm'
+            client = provider_client(snapshot.get('provider', {})) if llm_route else DeepSeekClient()
             if not client.configured:
                 raise DeepSeekError("模型未配置，请配置后重试")
             # Release the SQLite read transaction before contacting the model.
             db.commit()
-            result = client.complete_json([
+            if llm_route:
+                from app.forest.llm_relations import propose_relations
+                steps = 0
+                def call(messages, *, max_tokens=4000, validator=None):
+                    nonlocal steps
+                    identity = fingerprint([messages, snapshot.get('provider'), 'relations-v1'])
+                    cached = get_step(db, job.id, 'relations', identity, identity)
+                    if cached is not None:
+                        return cached
+                    if steps >= 2:
+                        raise WorkPending()
+                    db.commit()
+                    result = structured_call(client, messages, max_tokens=max_tokens)
+                    if validator:
+                        validator(result)
+                    db.refresh(job)
+                    if job.status != 'processing' or job.attempt_count != attempt:
+                        raise ValueError('关系任务已停止')
+                    job.heartbeat_at = datetime.now(UTC)
+                    put_step(db, job.id, 'relations', identity, identity, result, client.last_usage)
+                    steps += 1
+                    return result
+                proposals = propose_relations(snapshot, call)
+            else:
+                result = client.complete_json([
                 {"role": "system", "content": (
                     "依据给定笔记正文片段判断跨课联系。只输出 JSON："
                     '{"relations":[{"source_key":"s0","target_key":"t0",'
@@ -67,8 +104,8 @@ def process_notebook_relation_job(job_id: str) -> None:
                     "这是模型推断关系，依据必须说明两端正文如何联系。"
                 )},
                 {"role": "user", "content": json.dumps(snapshot, ensure_ascii=False)},
-            ], max_tokens=4000)
-            output = RelationOutput.model_validate(result)
+                ], max_tokens=4000)
+                proposals = RelationOutput.model_validate(result).relations
             guarded = db.execute(update(ForestJob).where(
                 ForestJob.id == job_id, ForestJob.status == "processing",
                 ForestJob.attempt_count == attempt,
@@ -78,11 +115,14 @@ def process_notebook_relation_job(job_id: str) -> None:
                 return
             sources = {row["key"]: row for row in snapshot["sources"]}
             targets = {row["key"]: row for row in snapshot["targets"]}
-            for proposal in output.relations:
+            for proposal in proposals:
                 source = sources.get(proposal.source_key)
                 target = targets.get(proposal.target_key)
                 if source is None or target is None or not proposal.reason.strip():
                     raise ValueError("模型引用了输入之外的小节或没有提供依据")
+                from app.forest.suppressions import is_suppressed
+                if is_suppressed(db, source, target, proposal.relation_type):
+                    continue
                 for endpoint in (source, target):
                     book = db.get(Notebook, endpoint["notebook_id"], populate_existing=True)
                     course = db.get(Course, endpoint["course_id"], populate_existing=True)
@@ -115,6 +155,10 @@ def process_notebook_relation_job(job_id: str) -> None:
             job.completed_source_count = len(sources)
             job.error_message = None
             job.finished_at = job.updated_at = datetime.now(UTC)
+            db.commit()
+        except WorkPending:
+            job.status = 'pending'
+            job.updated_at = datetime.now(UTC)
             db.commit()
         except Exception as exc:
             db.rollback()

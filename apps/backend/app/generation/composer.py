@@ -141,7 +141,7 @@ def _lookup_blocks(
     )
     if source is None:
         raise CompositionError(f"输入快照缺少资料 {unit['source_asset_id']}", code="snapshot_invalid")
-    section = next(
+    section = {'blocks': [block for s in source['sections'] for block in s['blocks']]} if unit['section_id'] == '__all__' and snapshot.get('processing_route') == 'llm' else next(
         (item for item in source.get("sections") or []
          if item["section_id"] == unit["section_id"]), None,
     )
@@ -340,7 +340,13 @@ FORMAT_REPAIR_PROMPT = (
 def compose_deepseek(
     snapshot: dict[str, Any], plan: dict[str, Any], unit_ids: list[str],
 ) -> Composition:
-    client = DeepSeekClient()
+    from app.document_processing.routes import provider_client
+    client = provider_client(snapshot.get('provider', {})) if snapshot.get('processing_route') == 'llm' else DeepSeekClient()
+    def call_json(messages, *, max_tokens):
+        if snapshot.get('processing_route') == 'llm':
+            from app.document_processing.checkpoints import structured_call
+            return structured_call(client, messages, max_tokens=max_tokens)
+        return client.complete_json(messages, max_tokens=max_tokens)
     if not client.configured:
         raise CompositionError(
             "DEEPSEEK_API_KEY 未配置，无法调用模型生成正文；可改用离线结构化生成器",
@@ -366,8 +372,10 @@ def compose_deepseek(
         "existing_outline": [
             item["heading"] for item in snapshot.get("current_outline") or []
         ],
+        "processing_route": snapshot.get("processing_route"),
+        "outline_context": snapshot.get("outline_context", []),
     }
-    requests = _DeepSeekRequests(client)
+    requests = _DeepSeekRequests(client, llm_route=snapshot.get("processing_route") == "llm")
     pending = partition_payload_units(payload_units)
     compositions: list[Composition] = []
     while pending:
@@ -392,6 +400,7 @@ def compose_deepseek(
 @dataclass
 class _DeepSeekRequests:
     client: DeepSeekClient
+    llm_route: bool = False
     remaining: int = MAX_BATCH_REQUESTS
 
     def complete_json(self, messages: list[dict[str, str]], *, max_tokens: int):
@@ -402,6 +411,9 @@ class _DeepSeekRequests:
         self.remaining -= 1
         # Only this bounded, structured note generator opts out of thinking.
         # Ordinary completion and the streaming agent keep their own defaults.
+        if self.llm_route:
+            from app.document_processing.checkpoints import structured_call
+            return structured_call(self.client, messages, max_tokens=max_tokens)
         return self.client.complete_json(messages, max_tokens=max_tokens, thinking=False)
 
 
@@ -436,6 +448,8 @@ def _compose_deepseek_batch(
 ) -> Composition:
     user_payload = {**base_payload, "units": payload_units}
     allowed_ids = {block["block_id"] for unit in payload_units for block in unit["blocks"]}
+    if base_payload.get("processing_route") == "llm":
+        user_payload["existing_outline"] = base_payload.get("outline_context", [])
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},

@@ -9,7 +9,8 @@ export type ConnectivityTestPayload = {
   model?: string
 }
 export type OCRStatus = { enabled: boolean; available: boolean; status: string; provider: string; max_pages: number; language: string; timeout_seconds: number }
-export type Capabilities = { allowed_extensions: string[]; max_upload_bytes: number; max_pages: number; ocr: OCRStatus }
+export type ProcessingRoute = 'standard' | 'llm'
+export type Capabilities = { allowed_extensions: string[]; max_upload_bytes: number; max_pages: number; ocr: OCRStatus; default_processing_route?: ProcessingRoute; processing_routes?: Record<ProcessingRoute, { max_upload_bytes: number; max_pages: number }> }
 
 export const configApi = {
   getSettings: () => request<SettingsStatus>('/api/v1/settings'),

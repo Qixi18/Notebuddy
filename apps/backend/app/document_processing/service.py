@@ -91,20 +91,34 @@ def create_parse_run(
 ) -> DocumentParseRun:
     """Create a new pending parse version.  The previous current run is kept."""
 
+    from app.document_processing.routes import asset_config
+    route = asset.processing_route or 'standard'
+    provider = asset_config(asset) if route == 'llm' else {}
+    expected_config = {'processing_route': route, 'provider': provider}
     current = db.scalar(select(DocumentParseRun).where(
         DocumentParseRun.asset_id == asset.id,
         DocumentParseRun.is_current.is_(True),
     ))
-    if current is not None and not reparse and current.status == "completed":
+    def compatible(candidate):
+        old = json.loads(candidate.config_json or '{}')
+        return (old.get('processing_route', 'standard') == route
+                and (route != 'llm' or old.get('provider') == provider))
+    if current is not None and not reparse and current.status == "completed" and compatible(current):
         # Idempotent: a successful current parse is reused unless a reparse is
         # explicitly requested (retrying a failed run still creates a new one).
         return current
     # The HTTP upload path records installed capabilities without loading OCR
     # models; the isolated worker performs the inference preflight before parse.
-    states = engine_state(probe=False)
+    running = db.scalar(select(DocumentParseRun).where(
+        DocumentParseRun.asset_id == asset.id, DocumentParseRun.status.in_(['pending', 'running'])
+    ).order_by(DocumentParseRun.created_at.desc()).limit(1))
+    if route == 'llm' and running is not None and compatible(running):
+        return running
+    states = engine_state(probe=False) if route != 'llm' else None
     config = {
-        "ocr": states.ocr.to_dict(),
-        "vision": states.vision.to_dict(),
+        "ocr": states.ocr.to_dict() if states else {'available': False},
+        "vision": states.vision.to_dict() if states else {'available': True},
+        **expected_config,
         **(config or {}),
     }
     run = DocumentParseRun(
@@ -142,6 +156,8 @@ def execute_parse_run(
     vision_available: bool | None = None,
     ocr_recognize: Callable[..., object] | None = None,
     vision_describe: Callable[..., object] | None = None,
+    progress: Callable[[int, int], None] | None = None,
+    max_new_pages: int | None = None,
 ) -> ParseOutcome:
     run = db.get(DocumentParseRun, run_id)
     if run is None:
@@ -160,6 +176,32 @@ def execute_parse_run(
     db.commit()
 
     path = source_path or _asset_path(asset)
+    run_config = json.loads(run.config_json or '{}')
+    if run_config.get('processing_route', 'standard') == 'llm':
+        from app.document_processing.engines.pdf_text import EngineInfo
+        from app.document_processing.llm_reader import read_document
+        document = read_document(db, run, asset, path, progress=progress, max_new_pages=max_new_pages)
+        document.quality = assess(document, engines=EngineState(
+            ocr=EngineInfo('disabled', '0', False), vision=EngineInfo('primary-api', '1', True)),
+            doc_type=document.doc_type, notes=[])
+        document.seal()
+        _replace_children(db, run, document)
+        run.status = 'completed'
+        run.doc_type = document.doc_type
+        run.parser_name = document.parser_name
+        run.parser_version = document.parser_version
+        run.config_version = document.config_version
+        run.fingerprint = document.fingerprint
+        run.page_count = document.page_count
+        run.text_chars = document.quality.text_chars
+        run.quality_status = document.quality.status
+        run.quality_json = json.dumps(document.quality.to_dict(), ensure_ascii=False)
+        run.document_warnings_json = json.dumps(document.warnings, ensure_ascii=False)
+        run.markdown_text = render_markdown(document)
+        run.finished_at = _now()
+        _promote_current(db, run)
+        db.flush()
+        return ParseOutcome(run=run, ir=document)
     extension = (asset.extension or path.suffix).lower()
     parser_choice = (os.getenv("NOTEBOOK_DOCUMENT_PARSER", "native").strip().lower() or "native")
     if parser_choice not in {"native", "mineru"}:

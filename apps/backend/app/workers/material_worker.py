@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from app.db.database import SessionLocal
 from app.db.models import Asset, Material, ProcessingJob
+from app.document_processing.llm_reader import ReadingPending
 from app.document_processing.service import (
     DocumentProcessingError,
     create_parse_run,
@@ -33,6 +34,7 @@ def process_material(job_id: str) -> None:
         if job is None or job.status != "processing":
             return
         material = job.material
+        attempt = job.attempt_count
         job.status = "processing"
         job.phase = "parse"
         job.web_search_status = "unavailable"
@@ -65,8 +67,22 @@ def process_material(job_id: str) -> None:
             quality = load_ir(db, run).quality
         else:
             run_id = run.id
+            def reading_progress(done, total):
+                db.refresh(job)
+                db.refresh(material)
+                if job.status != 'processing' or job.attempt_count != attempt or material.deleted_at:
+                    raise DocumentProcessingError('任务已停止或资料已移除', code='job_interrupted')
+                job.phase = 'ai_read'
+                job.completed_pages = done
+                job.total_pages = total
+                job.progress = 10 + int(85 * done / max(1, total))
+                job.heartbeat_at = datetime.now(UTC)
+                material.page_count = total
+                db.commit()
             outcome = execute_parse_run(
                 db, run.id, source_path=source_path, title=material.lecture_title,
+                progress=reading_progress if asset.processing_route == 'llm' else None,
+                max_new_pages=2 if asset.processing_route == 'llm' else None,
             )
             quality = outcome.ir.quality
 
@@ -83,6 +99,13 @@ def process_material(job_id: str) -> None:
         job.finished_at = datetime.now(UTC)
         job.heartbeat_at = job.finished_at
         db.commit()
+    except ReadingPending:
+        db.refresh(job)
+        if job.status == 'processing' and job.attempt_count == attempt:
+            job.status = 'pending'
+            job.phase = 'ai_read'
+            job.updated_at = datetime.now(UTC)
+            db.commit()
     except Exception as exc:
         db.rollback()
         if job is None:
@@ -95,6 +118,9 @@ def process_material(job_id: str) -> None:
             except Exception:  # pragma: no cover - failure bookkeeping only
                 db.rollback()
         if job is None:
+            return
+        db.refresh(job)
+        if job.status != 'processing' or job.attempt_count != attempt:
             return
         job.status = "failed"
         job.phase = "failed"

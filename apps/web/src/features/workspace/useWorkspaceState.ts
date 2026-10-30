@@ -193,12 +193,12 @@ export function useWorkspaceState() {
     return created
   }
 
-  async function uploadMaterial(file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false, batchId?: string) {
+  async function uploadMaterial(file: File, lectureTitle: string, notebookId: string, topicTitle = '', allowDuplicate = false, batchId?: string, processingRoute?: 'standard' | 'llm') {
     if (!courseId) throw new Error('请先选择课程')
     try {
       setBusy(true)
       setError(undefined)
-      const result = await api.uploadMaterial(courseId, file, lectureTitle, notebookId, topicTitle, allowDuplicate, undefined, batchId)
+      const result = await api.uploadMaterial(courseId, file, lectureTitle, notebookId, topicTitle, allowDuplicate, undefined, batchId, processingRoute)
       if (currentCourseId.current === courseId) {
         setJob(result.job)
         setSelectedMaterialId(result.material.id)

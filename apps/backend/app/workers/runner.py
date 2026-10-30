@@ -116,7 +116,7 @@ def claim_next_job() -> str | None:
         ).join(Material, Material.id == ProcessingJob.material_id)
           .outerjoin(Asset, Asset.id == Material.asset_id)
           .where(or_(Material.asset_id.is_(None), Asset.state == "ready"))
-          .order_by(ProcessingJob.created_at, ProcessingJob.id).limit(1))
+          .order_by(ProcessingJob.updated_at, ProcessingJob.created_at, ProcessingJob.id).limit(1))
         if candidate is None:
             return None
         now = datetime.now(UTC)

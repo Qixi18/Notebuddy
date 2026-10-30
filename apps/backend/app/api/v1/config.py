@@ -74,11 +74,17 @@ def get_config_status() -> dict:
 
 @router.get("/config/capabilities")
 def get_capabilities() -> dict:
+    from app.document_processing.routes import route_limits
     return {
         "allowed_extensions": list(settings.allowed_extensions),
         "max_upload_bytes": settings.max_upload_bytes,
         "max_pages": settings.max_pages,
         "ocr": ocr_status(),
+        "default_processing_route": settings.document_processing_route,
+        "processing_routes": {
+            route: {"max_upload_bytes": route_limits(route)[0], "max_pages": route_limits(route)[1]}
+            for route in ("standard", "llm")
+        },
     }
 
 

@@ -19,6 +19,19 @@
 
 # API 契约
 
+## 双路线文件处理（2026-10-30）
+
+以下地址均以 `/api/v1` 为前缀：
+
+- `PATCH /settings` 接受字符串键 `NOTEBOOK_DOCUMENT_PROCESSING_ROUTE`，值为 `standard` 或 `llm`。`GET /settings` 在 `storage.processing_route` 返回当前默认值。保存继续使用现有白名单、口令及原子写盘规则。
+- `GET /config/capabilities` 增加 `default_processing_route` 和 `processing_routes`，分别提供两条路线的 `max_upload_bytes`、`max_pages`。
+- `POST /courses/{course_id}/materials`、`/notebooks/{notebook_id}/files`、`/notebooks/{notebook_id}/assets` 的 multipart 表单均接受可选 `processing_route`。显式值优先，省略时使用新上传的设置默认值；后续同批文件省略值时沿用批次首个文件的路线，显式不匹配返回 409。
+- Material、Asset、上传批次与生成任务响应增加 `processing_route`；批次的输入增加 `phase`、`completed_pages`、`total_pages`。批次同时返回 `relation_jobs`（id/status/error_message），正文完成与关系分析完成分别呈现。
+- `POST /assets/{asset_id}/processing-route` 接受 JSON `{"processing_route":"llm"}`，为已有原件创建新读取任务，返回 asset_id/processing_route/job_id。活动任务存在时返回 409；保留旧成功读取版本，不自动重写已生成正文。
+- `POST /assets/{asset_id}/cancel-processing` 取消活动读取，成功返回 `{"cancelled":true}`；已成功页面保留，常规重试沿用原路线并继续读取。当前模型请求结束/超时后停止写入结果；生成阶段仍使用已有的 generation-jobs cancel 接口。
+
+旧持久记录迁移为 `standard`。模型配置、来源版本及路线在任务快照中冻结，密钥不进入快照；后续切换设置不改动活动或重试任务。
+
 三条并行开发线的调用顺序、共享约束和业务数据存储位置见 [后端调用与业务数据存储契约](backend-data-contract.md)。本页记录各接口的详细行为。
 
 ## 多笔记本与续读（2026-10-15）

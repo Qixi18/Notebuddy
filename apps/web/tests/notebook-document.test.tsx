@@ -80,7 +80,7 @@ test('resource and outline groups collapse; upload targets the current notebook'
   fireEvent.click(screen.getByRole('button', { name: /笔记目录/ }))
   expect(screen.getByRole('navigation', { name: '笔记目录' })).toBeTruthy()
   fireEvent.change(screen.getByLabelText('选择课程资料'), { target: { files: [new File(['sample'], '第一讲.pdf', { type: 'application/pdf' })] } })
-  await waitFor(() => expect(uploadMaterial).toHaveBeenCalledWith(expect.any(File), '第一讲', 'book', '', false, expect.any(String)))
+  await waitFor(() => expect(uploadMaterial).toHaveBeenCalledWith(expect.any(File), '第一讲', 'book', '', false, expect.any(String), undefined))
   await waitFor(() => expect(refreshCurrentMaterials).toHaveBeenCalled())
 })
 
@@ -91,7 +91,7 @@ test('Notebook upload preserves the explicit duplicate-as-new-item choice', asyn
   const file = new File(['pdf'], '同名讲义.pdf', { type: 'application/pdf' })
   fireEvent.change(screen.getByLabelText('选择课程资料'), { target: { files: [file] } })
   await waitFor(() => expect(uploadMaterial).toHaveBeenCalledWith(
-    file, '同名讲义', 'book', '', true, expect.any(String),
+    file, '同名讲义', 'book', '', true, expect.any(String), undefined,
   ))
 })
 

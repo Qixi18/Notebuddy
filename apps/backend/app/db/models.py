@@ -160,6 +160,16 @@ class NotebookRelation(Base):
     )
 
 
+class NotebookRelationSuppression(Base):
+    """Keep deliberate removal from being undone by later model jobs."""
+    __tablename__ = 'notebook_relation_suppressions'
+    pair_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    left_notebook_id: Mapped[str] = mapped_column(ForeignKey('notebooks.id', ondelete='CASCADE'))
+    right_notebook_id: Mapped[str] = mapped_column(ForeignKey('notebooks.id', ondelete='CASCADE'))
+    anchors_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+
+
 class NotebookReadingPosition(Base):
     __tablename__ = "notebook_reading_positions"
     notebook_id: Mapped[str] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), primary_key=True)
@@ -249,6 +259,7 @@ class Material(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     parser_version: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    processing_route: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
     document_warning: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
     chapter_order: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
@@ -275,6 +286,7 @@ class NotebookUploadBatch(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    processing_route: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
 
 
 class NotebookGenerationInput(Base):
@@ -338,6 +350,24 @@ class Asset(Base):
     state: Mapped[str] = mapped_column(String(20), nullable=False, default="ready", server_default="ready")
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    processing_route: Mapped[str] = mapped_column(String(20), default="standard", server_default="standard")
+    processing_config_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}")
+
+
+class ProcessingStep(Base):
+    """Validated resumable work, reusable only for an identical input fingerprint."""
+
+    __tablename__ = "processing_steps"
+    __table_args__ = (UniqueConstraint("scope", "stage", "step_key", "fingerprint",
+                                      name="uq_processing_steps_identity"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    scope: Mapped[str] = mapped_column(String(100), index=True)
+    stage: Mapped[str] = mapped_column(String(40))
+    step_key: Mapped[str] = mapped_column(String(100))
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    result_json: Mapped[str] = mapped_column(Text)
+    usage_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
 class AssetMigrationIssue(Base):
@@ -456,6 +486,9 @@ class AssetProcessingJob(Base):
     kind: Mapped[str] = mapped_column(String(30), nullable=False, default="image_parse")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     attempt_count: Mapped[int] = mapped_column(default=0, nullable=False)
+    phase: Mapped[str] = mapped_column(String(30), default='parse', server_default='parse')
+    completed_pages: Mapped[int] = mapped_column(default=0, server_default='0')
+    total_pages: Mapped[int] = mapped_column(default=0, server_default='0')
     error_code: Mapped[str | None] = mapped_column(String(60), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
@@ -510,6 +543,7 @@ class NotebookGenerationJob(Base):
     generator_version: Mapped[str] = mapped_column(String(40), default="1", server_default="1", nullable=False)
     knowledge_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_map_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    relation_job_id: Mapped[str | None] = mapped_column(ForeignKey('forest_jobs.id', ondelete='SET NULL'), nullable=True)
 
 
 class NotebookGenerationCandidate(Base):
@@ -771,6 +805,8 @@ class ProcessingJob(Base):
     kind: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False)
     progress: Mapped[int] = mapped_column(default=0, nullable=False)
+    completed_pages: Mapped[int] = mapped_column(default=0, server_default='0')
+    total_pages: Mapped[int] = mapped_column(default=0, server_default='0')
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     phase: Mapped[str] = mapped_column(String(30), default="queued", nullable=False)
     web_search_status: Mapped[str] = mapped_column(String(30), default="not_started", nullable=False)

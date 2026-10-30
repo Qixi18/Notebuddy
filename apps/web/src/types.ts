@@ -8,6 +8,7 @@ export type Course = {
 }
 
 export type Material = {
+  processing_route?: 'standard' | 'llm'
   asset_id?: string | null
   notebook_id: string
   chapter_order?: number
@@ -57,6 +58,8 @@ export type CourseOverview = {
 }
 
 export type Job = {
+  completed_pages?: number
+  total_pages?: number
   id: string
   material_id: string
   kind: string
@@ -150,6 +153,10 @@ export type UploadResponse = {
 }
 
 export type NotebookGenerationInputStatus = {
+  processing_route?: 'standard' | 'llm'
+  completed_pages?: number
+  total_pages?: number
+  phase?: string
   asset_id: string
   parse_job_id: string | null
   parse_result_fingerprint: string | null
@@ -161,6 +168,8 @@ export type NotebookGenerationInputStatus = {
 }
 
 export type NotebookUploadBatch = {
+  relation_jobs?: Array<{ id: string; status: string; error_message: string | null }>
+  processing_route?: 'standard' | 'llm'
   id: string
   notebook_id: string
   status: 'open' | 'waiting_parse' | 'parsing' | 'generating' | 'partial_failure' | 'completed'
@@ -172,6 +181,7 @@ export type NotebookUploadBatch = {
 }
 
 export type AssetResource = {
+  processing_route?: 'standard' | 'llm'
   id: string
   source_type: string
   media_type: string
@@ -239,6 +249,7 @@ export type NotebookGenerationCandidate = {
 }
 
 export type NotebookGenerationJob = {
+  processing_route?: 'standard' | 'llm'
   id: string
   notebook_id: string
   status: string
@@ -552,7 +563,7 @@ export type Feedback = {
 export type SettingsStatus = {
   deepseek: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }
   embedding: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }
-  storage: { data_dir: string; database: string; max_upload_mb: number }
+  storage: { data_dir: string; database: string; max_upload_mb: number; processing_route?: 'standard' | 'llm' }
   limits: { allowed_extensions: string[]; editable_keys: string[]; secret_write_enabled: boolean; token_required: boolean }
   source: { env_path: string; env_exists: boolean; override_keys: string[] }
 }

@@ -16,6 +16,7 @@ dependencies = [
     "pypdfium2>=5.14,<6",
     "pymupdf>=1.26,<2",
     "fonttools>=4,<5",
+    "pillow>=11",
     "python-docx>=1.2.0",
 ]
 

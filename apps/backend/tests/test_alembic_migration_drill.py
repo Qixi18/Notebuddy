@@ -20,7 +20,8 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 BASE_REVISION = "d9e4a7b21c60"
 AGENT_REVISION = "e29a10c7f501"
-HEAD_REVISION = "c4b8e2f7a910"
+HEAD_REVISION = "f1a7c9d3e620"
+PROCESSING_REVISION = "a5e3c8d1f209"
 
 NOTEBOOK_DOCUMENT = json.dumps(
     {
@@ -155,7 +156,9 @@ def test_upgrade_from_scratch_and_stepwise_downgrade(tmp_path):
     # 4) 回滚一级：只丢 request_key，作答与产物表仍在
     _migrate(data_dir, "downgrade", AGENT_REVISION)
     with sqlite3.connect(db_path) as connection:
-        assert _version(connection) == AGENT_REVISION
+        # Downgrading the agent branch keeps the independent processing
+        # migration applied; the Alembic version table therefore points at it.
+        assert _version(connection) == PROCESSING_REVISION
         assert "request_key" not in _columns(connection, "quiz_attempts")
         assert "uq_quiz_attempts_item_request" not in _indexes(connection, "quiz_attempts")
         assert "quizzes" in _tables(connection)

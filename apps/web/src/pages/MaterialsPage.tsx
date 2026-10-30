@@ -10,10 +10,12 @@ import type { Capabilities } from '../api/config'
 import type { Coverage, DeletionPreview, PageEvidence, NotebookSummary } from '../types'
 import { NotebookRootMenu } from '../features/notebook/NotebookRootMenu'
 import type { ForestCourse } from '../features/forest/types'
+import { ProcessingRouteControl, useProcessingRoute } from '../features/notebook/useProcessingRoute'
 
 const statusLabels: Record<string, string> = { pending: '等待处理', processing: '解析中', completed: '已完成', failed: '解析失败' }
 
 export function MaterialsPage() {
+  const { route, setRoute } = useProcessingRoute()
   const [query, setQuery] = useSearchParams()
   const location = useLocation()
   const targetBookId = query.get('notebook') ?? ''
@@ -119,7 +121,7 @@ export function MaterialsPage() {
     event.preventDefault()
     if (!file || !targetBook) return
     try {
-      await uploadMaterial(file, lectureTitle, targetBook.id, topicTitle, allowDuplicate)
+      await uploadMaterial(file, lectureTitle, targetBook.id, topicTitle, allowDuplicate, undefined, route)
       setFile(undefined)
       setAllowDuplicate(false)
       if (course) {
@@ -131,6 +133,7 @@ export function MaterialsPage() {
   }
 
   const selectedPage = pages.find((page) => page.page_number === selectedPageNumber)
+  const uploadLimit = capabilities?.processing_routes?.[route ?? capabilities.default_processing_route ?? 'standard']?.max_upload_bytes ?? capabilities?.max_upload_bytes
 
   async function startLearning() {
     if (!startLearningCourse) return
@@ -163,10 +166,11 @@ export function MaterialsPage() {
       </header>
 
       <form className="material-upload-card" onSubmit={(event) => void handleUpload(event)}>
+        <ProcessingRouteControl value={route} onChange={setRoute} disabled={busy} />
         <label>目标笔记本<select aria-label="目标笔记本" value={targetBook?.id ?? ''} disabled={booksLoading || busy} onChange={event => setQuery({ notebook: event.target.value }, { state: location.state })}><option value="" disabled>请选择本课程的笔记本</option>{notebooks.map(book => <option key={book.id} value={book.id}>{book.title}</option>)}</select></label>
         {!booksLoading && !notebooks.length && <p>此课程尚无笔记本。<button type="button" onClick={() => setRootOpen(true)}>新建笔记本</button></p>}
         {!booksLoading && targetBookId && !targetBook && <p role="alert">目标笔记本不存在或属于其他课程，请重新选择。</p>}
-        <div className="upload-card-heading"><span className="upload-card-icon">＋</span><div><h2>添加课程资料</h2><p>支持 {(capabilities?.allowed_extensions ?? ['.pptx', '.pdf', '.docx']).join('、')}，单文件上限 {capabilities ? `${Math.round(capabilities.max_upload_bytes / 1024 / 1024)} MB` : '由后端配置'}。</p><small>{capabilities?.ocr.status === 'ready' ? `扫描页可使用 OCR，每次最多 ${capabilities.ocr.max_pages} 页。` : '扫描页会标记为待检查，不会生成虚构文本。'}</small></div></div>
+        <div className="upload-card-heading"><span className="upload-card-icon">＋</span><div><h2>添加课程资料</h2><p>支持 {(capabilities?.allowed_extensions ?? ['.pptx', '.pdf', '.docx']).join('、')}，单文件上限 {uploadLimit ? `${Math.round(uploadLimit / 1024 / 1024)} MB` : '由后端配置'}。</p><small>{route === 'llm' ? '扫描页、图表和公式由当前模型读取，保留原页证据。' : capabilities?.ocr.status === 'ready' ? `扫描页可使用 OCR，每次最多 ${capabilities.ocr.max_pages} 页。` : '扫描页会标记为待检查，不会生成虚构文本。'}</small></div></div>
         <div className="material-upload-fields">
           <label className="material-file-field"><span>{file ? file.name : '选择课件文件'}</span><input type="file" accept={(capabilities?.allowed_extensions ?? ['.pptx', '.pdf', '.docx']).join(',')} onChange={(event) => setFile(event.target.files?.[0])} /></label>
           <button className="primary-button" type="submit" disabled={!file || busy || !targetBook}>{busy ? '上传中…' : '上传并解析'}</button>
@@ -202,6 +206,12 @@ export function MaterialsPage() {
                     <span className="material-list-copy"><strong>{material.lecture_title}</strong><small>{material.topic_title ? `${material.topic_title} · ` : ''}{material.original_filename} · {material.page_count} 页</small><time dateTime={material.created_at}>上传于 {new Date(material.created_at).toLocaleString('zh-CN')}</time></span>
                     <span className={`status-pill status-pill-${material.status}`}>{statusLabels[material.status] ?? material.status}</span>
                   </button>
+                  {material.status === 'failed' && material.asset_id && material.processing_route !== 'llm' && <button className="material-retry-action" onClick={() => {
+                    void api.switchAssetProcessingRoute(material.asset_id!, 'llm').then(() => refreshCurrentMaterials()).catch(cause => setMaterialActionError(String(cause)))
+                  }}>改用全程 AI</button>}
+                  {['pending', 'processing'].includes(material.status) && material.asset_id && material.processing_route === 'llm' && <button className="text-button" onClick={() => {
+                    void api.cancelAssetProcessing(material.asset_id!).then(() => refreshCurrentMaterials()).catch(cause => setMaterialActionError(String(cause)))
+                  }}>取消读取</button>}
                   {(material.status === 'failed' || material.status === 'completed') && <details className="material-row-actions"><summary>更多</summary>{material.status === 'failed' && <button className="material-retry-action" onClick={() => void retryMaterial(material.id)}>重试解析</button>}{material.status === 'completed' && <button className="material-retry-action" onClick={() => void reparseMaterial(material.id)}>重新解析</button>}<button className="text-button" disabled={Boolean(deletionPreviewingId || deletingMaterialId)} onClick={() => void deleteMaterial(material.id)}>{deletionPreviewingId === material.id ? '准备移除…' : '移除资料'}</button></details>}
                 </div>
               ))}

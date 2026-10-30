@@ -186,6 +186,8 @@ def delete_relation(relation_id: str, db: Session = Depends(get_db)) -> dict:
     relation = db.get(NotebookRelation, relation_id)
     if relation is None:
         raise HTTPException(status_code=404, detail="关系不存在")
+    from app.forest.suppressions import suppress
+    suppress(db, relation)
     db.delete(relation)
     db.commit()
     return {"deleted": True}

@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 
 from app.db.database import SessionLocal
 from app.db.models import Asset, AssetProcessingJob
+from app.document_processing.llm_reader import ReadingPending
 from app.document_processing.service import (
     DocumentProcessingError,
     create_parse_run,
@@ -40,6 +41,7 @@ def process_asset_job(job_id: str) -> None:
         if job is None or job.status != "processing":
             return
         asset = db.get(Asset, job.asset_id)
+        attempt = job.attempt_count
         run_id: str | None = None
         try:
             if asset is None or asset.state != "ready":
@@ -57,8 +59,17 @@ def process_asset_job(job_id: str) -> None:
                 quality = load_ir(db, run).quality
             else:
                 run_id = run.id
+                def reading_progress(done, total):
+                    db.refresh(job)
+                    if job.status != 'processing' or job.attempt_count != attempt:
+                        raise DocumentProcessingError('图片任务已停止', code='job_interrupted')
+                    job.phase = 'ai_read'
+                    job.completed_pages = done
+                    job.total_pages = total
+                    db.commit()
                 outcome = execute_parse_run(db, run.id, source_path=source_path,
-                                            title=asset.original_name)
+                    title=asset.original_name,
+                    progress=reading_progress if asset.processing_route == 'llm' else None)
                 quality = outcome.ir.quality
             job.error_code = None
             job.error_message = None
@@ -77,10 +88,16 @@ def process_asset_job(job_id: str) -> None:
                 job.error_code = "parse_quality_insufficient"
                 job.error_message = quality.generation_block_reason or "图片没有可用内容"
             db.commit()
+        except ReadingPending:
+            job.status = 'pending'
+            db.commit()
         except Exception as exc:
             db.rollback()
             job = db.get(AssetProcessingJob, job_id)
             if job is None:
+                return
+            db.refresh(job)
+            if job.status != 'processing' or job.attempt_count != attempt:
                 return
             code = exc.code if isinstance(exc, DocumentProcessingError) else "image_parse_failed"
             message = str(exc) or type(exc).__name__

@@ -59,7 +59,7 @@ export type WorkspaceContextValue = {
   error?: string
   setError: (message: string | undefined) => void
   createCourse: (name: string) => Promise<Course>
-  uploadMaterial: (file: File, lectureTitle: string, notebookId: string, topicTitle?: string, allowDuplicate?: boolean, batchId?: string) => Promise<UploadResponse>
+  uploadMaterial: (file: File, lectureTitle: string, notebookId: string, topicTitle?: string, allowDuplicate?: boolean, batchId?: string, processingRoute?: 'standard' | 'llm') => Promise<UploadResponse>
   retryMaterial: (materialId: string) => Promise<void>
   reparseMaterial: (materialId: string) => Promise<void>
   requestOCR: (materialId: string) => Promise<void>
