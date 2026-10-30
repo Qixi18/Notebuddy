@@ -9,6 +9,7 @@ import { DragHandle } from '@tiptap/extension-drag-handle-react'
 import { filterSlashCommands, type SlashCommand, type SlashContext } from './slashCommands'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { buildExtensions } from './extensions'
+import './NotebookMath.css'
 import { markdownToNodes, newBlockId, type DocNode } from './document'
 
 export type AIAction = 'explain' | 'summarize' | 'expand' | 'example'

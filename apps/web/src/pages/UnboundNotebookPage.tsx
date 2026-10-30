@@ -232,8 +232,12 @@ function UnboundNotebookBody({ notebookId }: { notebookId: string | undefined })
         </div>
         <button className="notebook-document-ai-button" type="button" onClick={() => openAssistant()} disabled={!conversationCourseId} aria-label="打开 AI 助手"><span aria-hidden="true">✦</span> AI 助手</button>
         <details className="notebook-document-more">
-          <summary aria-label="更多操作">更多</summary>
-          <div>
+          <summary aria-label="更多操作">
+            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>
+            <span>更多</span>
+            <i aria-hidden="true" />
+          </summary>
+          <div className="notebook-document-more-menu">
             <button type="button" onClick={() => void save.saveNow()}>立即保存</button>
             <button type="button" onClick={() => setHistoryOpen(true)}>历史版本</button>
             <button type="button" onClick={exportMarkdown}>导出 Markdown</button>

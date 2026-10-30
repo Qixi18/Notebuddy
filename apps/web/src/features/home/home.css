@@ -4,12 +4,12 @@
   --garden-green: #284b39;
   --garden-muted: #65745c;
   --garden-line: #d9dcc9;
-  grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-columns: 196px minmax(0, 1fr);
   background: var(--garden-paper);
 }
-.app-shell-home.app-shell-with-assistant { grid-template-columns: 212px minmax(0, 1fr) var(--dock-w, 340px); }
-.app-shell-home.app-shell-sidebar-collapsed { grid-template-columns: 76px minmax(0, 1fr); }
-.app-shell-home.app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 76px minmax(0, 1fr) var(--dock-w, 340px); }
+.app-shell-home.app-shell-with-assistant { grid-template-columns: 196px minmax(0, 1fr) var(--dock-w, 340px); }
+.app-shell-home.app-shell-sidebar-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+.app-shell-home.app-shell-sidebar-collapsed.app-shell-with-assistant { grid-template-columns: 64px minmax(0, 1fr) var(--dock-w, 340px); }
 .app-shell-home .app-sidebar-home {
   padding: 32px 17px 24px;
   border: 0;

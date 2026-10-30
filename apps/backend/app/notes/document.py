@@ -70,7 +70,9 @@ ALLOWED_ATTRS: dict[str, set[str]] = {
     "text": set(),
     "hardBreak": set(),
     "bulletList": {"blockId"},
-    "orderedList": {"blockId", "start"},
+    # Tiptap serializes the standard <ol type> attribute (null by default).
+    # Keep it in the storage contract so browser round trips remain lossless.
+    "orderedList": {"blockId", "start", "type"},
     "listItem": set(),
     "taskList": {"blockId"},
     "taskItem": {"checked"},
@@ -595,6 +597,9 @@ def _validate_node(node: Any, *, depth: int, top_level: bool, counts: dict[str, 
         start = attrs.get("start", 1)
         if not isinstance(start, int) or start < 1 or start > 100_000:
             raise DocumentValidationError("有序列表起始值不合法")
+        list_type = attrs.get("type")
+        if list_type is not None and list_type not in {"1", "a", "A", "i", "I"}:
+            raise DocumentValidationError("有序列表编号样式不合法")
     if node_type == "codeBlock":
         language = attrs.get("language")
         if language is not None and (not isinstance(language, str) or len(language) > 40):

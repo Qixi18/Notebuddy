@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, datetime
@@ -32,6 +33,7 @@ from app.generation.composer import CompositionError, compose, repair_deepseek_d
 from app.generation.context import GenerationInputError, current_outline
 from app.generation.figures import append_source_figures
 from app.generation.planner import build_plan
+from app.generation.quality_gate import inspect_generated_math
 from app.notes.document import (
     CALLOUT_TONES,
     MAX_LATEX,
@@ -43,7 +45,8 @@ from app.notes.document import (
 from app.notes.store import DocumentConflict, body_fingerprint, write_document
 from app.services.notebook_generation_inputs import cancel_generation_inputs
 
-PROMPT_VERSION = "notebook-generation-v3"
+PROMPT_VERSION = "notebook-generation-v4-math-contract"
+logger = logging.getLogger(__name__)
 
 
 def claim_next_generation_job() -> str | None:
@@ -151,9 +154,14 @@ def process_generation_job(job_id: str) -> None:
                 return
             _fail_inputs(db, job, "empty_generation", "没有可追加的正文内容（资料可能已全部覆盖）", attempt)
             return
+        format_repair_count = 0
+        normalized_nodes = _normalize_model_blocks(nodes)
+        candidate_document = normalize_document({"type": "doc", "content": normalized_nodes})
+        math_report = inspect_generated_math(candidate_document)
+        if not _accept_generated_math(db, job, generator, math_report, attempt, format_repair_count):
+            return
         try:
-            normalized_nodes = _normalize_model_blocks(nodes)
-            fragment = validate_document(normalize_document({"type": "doc", "content": normalized_nodes}))
+            fragment = validate_document(candidate_document)
             _reject_images(fragment)
             _validate_source_map(fragment, source_map)
         except DocumentValidationError as first_validation_error:
@@ -173,11 +181,16 @@ def process_generation_job(job_id: str) -> None:
                 repaired = repair_deepseek_document_format(
                     normalized_nodes, source_map, allowed_source_ids, str(first_validation_error),
                 )
+                format_repair_count = 1
                 source_map = repaired.source_map
                 normalized_nodes = _normalize_model_blocks(repaired.nodes)
-                fragment = validate_document(
-                    normalize_document({"type": "doc", "content": normalized_nodes}),
-                )
+                candidate_document = normalize_document({"type": "doc", "content": normalized_nodes})
+                math_report = inspect_generated_math(candidate_document)
+                if not _accept_generated_math(
+                    db, job, generator, math_report, attempt, format_repair_count,
+                ):
+                    return
+                fragment = validate_document(candidate_document)
                 _reject_images(fragment)
                 _validate_source_map(fragment, source_map)
             except (CompositionError, DocumentValidationError) as repair_error:
@@ -323,6 +336,36 @@ def _reject_images(document: dict[str, Any]) -> None:
         if node.get("type") == "image":
             raise DocumentValidationError("AI 生成的补充内容不能新增图片资源")
         stack.extend(node.get("content") or [])
+
+
+def _accept_generated_math(db, job, generator: str, report, attempt: int, retry_count: int) -> bool:
+    """Log small diagnostics and stop AI-only failures before formal writes."""
+    logger.info(
+        "notebook_generation_quality_gate",
+        extra={
+            "event": "notebook_generation_quality_gate",
+            "job_id": job.id,
+            "generator": generator,
+            "stage": "math_validation",
+            "inline_math_count": report.inline_math_count,
+            "block_math_count": report.block_math_count,
+            "suspected_unstructured_math_count": report.suspected_unstructured_math_count,
+            "failure_codes": report.failure_codes,
+            "elapsed_ms": report.elapsed_ms,
+            "retry_count": retry_count,
+            "result": "passed" if report.passed else "blocked",
+        },
+    )
+    if report.passed:
+        return True
+    issue = next(issue for issue in report.issues if issue.severity == "error")
+    block_context = f", block_id={issue.block_id}" if issue.block_id else ""
+    _fail_inputs(
+        db, job, issue.code,
+        f"生成数学内容质量检查未通过：{issue.code}（{issue.node_path}{block_context}）",
+        attempt,
+    )
+    return False
 
 
 def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:

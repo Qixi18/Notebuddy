@@ -290,8 +290,18 @@ SYSTEM_PROMPT = (
     '{"nodes":[Tiptap节点...],"sources":{"<节点blockId>":["<原文块id>",...]}}。'
     "规则：1) 只依据给定资料陈述，不编造事实或来源；2) 每个顶层节点必须有唯一 attrs.blockId，"
     "并在 sources 中列出支撑它的原文块 id；3) 不要重写、复制已有正文，只输出需要新增的内容；"
-    "4) 公式用 blockMath(latex)，表格用 table，tableCell/tableHeader 的文本需放入 paragraph；"
-    "callout 要有 title，内部内容放入 paragraph；禁止 image/URL/HTML/SVG；"
+    "4) 数学内容必须使用数学节点：中文句子中嵌入的短公式使用 inlineMath，独占一行或需要展示的推导使用 blockMath；"
+    "公式 attrs.latex 只放裸 LaTeX 字符串，不带 $、$$、\\(、\\)、\\[、\\] 定界符，不是 HTML 或图片。"
+    "例如段落 content 可为 [{\"type\":\"text\",\"text\":\"设点列 \"},"
+    "{\"type\":\"inlineMath\",\"attrs\":{\"latex\":\"x_k\\\\to a\"}},"
+    "{\"type\":\"text\",\"text\":\" 在 \"},"
+    "{\"type\":\"inlineMath\",\"attrs\":{\"latex\":\"\\\\mathbb{R}^n\"}},"
+    "{\"type\":\"text\",\"text\":\" 中收敛。\"}]；不要把 x_k、R^n、(x-x_0)^2 等教学公式写成普通 text。"
+    "不要给 inlineMath 添加 blockId；来源映射归属于它所在的顶层块。"
+    "列表项内部是 listItem→paragraph；callout 的 content 内放 paragraph；tableCell/tableHeader 的 content 内放 paragraph。"
+    "这些容器里的中文说明与短公式都拆成 text + inlineMath；独占行公式用带 blockId 的 blockMath 顶层节点。"
+    "表格用 table，tableCell/tableHeader 的文本需放入 paragraph。"
+    "callout 要有 title，内部内容放入 paragraph；禁止 image、URL 节点、HTML、SVG 及不可信链接/HTML 数学命令；"
     "5) 资料不足或图形未识别时，用 callout(tone=warning) 明确写“需人工核对”，不要猜测；"
     "6) 输出应是有教学顺序的完整讲解：定义、前提、推导/方法、例题、易错点。"
 )
@@ -311,7 +321,8 @@ SOURCE_REPAIR_PROMPT = (
 
 FORMAT_REPAIR_PROMPT = (
     "请只修复给定 Tiptap 正文 JSON 的结构格式，使其通过 NoteBuddy Notebook document v2 校验。"
-    "不得改变知识含义、删除有效内容、添加事实或更改任何 blockId；每个顶层正文节点都必须保留原 blockId，"
+    "不得改变知识含义、删除有效内容、添加事实或更改任何 blockId；已有 inlineMath/blockMath 的 attrs.latex 必须逐字保留，"
+    "不得改动其中的变量、运算符、比较符、上下标、正负号或分组；每个顶层正文节点都必须保留原 blockId，"
     "sources 必须逐项保留并为每个节点映射至少一个允许的原文块 ID。"
     "允许的顶层类型仅为 paragraph、heading、bulletList、orderedList、taskList、blockquote、codeBlock、"
     "horizontalRule、table、callout、example、blockMath。正文结构、attrs、子节点、marks 和文本必须符合 Tiptap。"
@@ -510,5 +521,5 @@ def _composition_from_deepseek_result(
     if not cleaned:
         raise CompositionError("模型返回的节点均不可用", code="empty_generation")
     return Composition(
-        nodes=cleaned, source_map=source_map, generator="deepseek", generator_version="3",
+        nodes=cleaned, source_map=source_map, generator="deepseek", generator_version="4",
     )
