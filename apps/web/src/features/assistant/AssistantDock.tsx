@@ -121,9 +121,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
 
   /* 作用范围三档：锁定当前笔记 / 整门课程（可再收窄到课件）/ 全局可查。
      锁定档要求「正打开着笔记的页面」，否则选项自动失效落回课程档 */
-  const scope: AgentScope = persistedScope === 'note' ? 'note'
-    : persistedScope === 'global' ? 'global'
-      : scopeChoice === '__global__' ? 'global' : 'course'
+  const scope: AgentScope = persistedScope ?? (scopeChoice === '__global__' ? 'global' : 'course')
   const agentMaterialId = scope === 'course' && scopeChoice && scopeChoice !== '__global__'
     ? scopeChoice
     : undefined
@@ -252,7 +250,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
       }
     }
     if (!await conversation.askAgent(text, {
-      scope: notebook?.courseId && !scopeLocked ? 'course' : scope,
+      scope,
       materialId: agentMaterialId,
       readingContext: effectiveReadingContext,
       notebookContext,
@@ -289,7 +287,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
 
   const rangeLabel = persistedScope === 'note'
     ? `锁定《${activeConversation?.note_title ?? notebook?.title ?? 'Notebook'}》`
-    : scopeChoice === '__global__'
+    : scope === 'global'
       ? '全局可查'
       : agentMaterialId
         ? `课件《${scopeMaterials.find((item) => item.id === agentMaterialId)?.lecture_title ?? '未命名'}》`
@@ -331,19 +329,19 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
           </p>
 
           <label className="assistant-dock-scope">作用范围
-            <select value={persistedScope === 'note' ? '__note__' : persistedScope === 'global' ? '__global__' : scopeChoice}
+            <select value={scope === 'note' ? '__note__' : scope === 'global' ? '__global__' : agentMaterialId ?? ''}
               onChange={(event) => setScopeChoice(event.target.value)} aria-label="本次提问的作用范围">
               {/* 范围是会话级属性：首条消息之后后端不再改写 scope，
                   所以这三档在会话开始提问后就禁用，避免「标签变了、回答范围没变」。
                   课件收窄是消息级参数（material_id 只校验不锁定），保持可选。 */}
               {persistedScope === 'note' ? <option value="__note__" disabled>📌 锁定《{activeConversation?.note_title ?? 'Notebook'}》</option> : null}
               <option value="" disabled={scopeLocked}>整门课程</option>
-              {scopeMaterials.map((material) => <option key={material.id} value={material.id}>{material.lecture_title}</option>)}
+              {scopeMaterials.map((material) => <option key={material.id} value={material.id} disabled={scopeLocked && scope !== 'course'}>{material.lecture_title}</option>)}
               <option value="__global__" disabled={scopeLocked}>🌲 全局可查（跨课程）</option>
             </select>
           </label>
           {scopeLocked ? (
-            <p className="assistant-dock-scope-lock" role="status">🔒 范围已锁定（首条消息后不能改）；仍可限定到某份课件。</p>
+            <p className="assistant-dock-scope-lock" role="status">🔒 范围已锁定（首条消息后不能改）{scope === 'course' ? '；仍可限定到某份课件。' : '。'}</p>
           ) : null}
           {notebook ? <p className="assistant-dock-open-hint">正在编辑整篇笔记：选中文字后提问，回答可以直接插入或替换选区，采纳前不会改动正文。</p> : null}
 

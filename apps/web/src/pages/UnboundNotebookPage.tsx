@@ -9,6 +9,7 @@ import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features
 import { countText, docToMarkdown, emptyDocument, excerptAroundSelection, extractOutline, normalizeDocument, stableStringify, type DocNode } from '../features/notebook-editor/document'
 import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
 import { useNotebookSave } from '../features/notebook-editor/useNotebookSave'
+import { historyOriginLabel, useHistoryDialog } from '../features/notebook-editor/historyDialog'
 import { SourceUploadPanel } from '../features/notebook-workspace/SourceUploadPanel'
 import type { NotebookRevision } from '../types'
 import './NotebookPage.css'
@@ -294,6 +295,7 @@ function UnboundHistoryPanel({ notebookId, onClose, onRestore }: { notebookId: s
   const [selected, setSelected] = useState<number>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const dialogRef = useHistoryDialog(onClose, busy)
   useEffect(() => {
     let active = true
     void api.listUnboundNotebookRevisions(notebookId).then((rows) => { if (active) setItems(rows) })
@@ -301,16 +303,25 @@ function UnboundHistoryPanel({ notebookId, onClose, onRestore }: { notebookId: s
     return () => { active = false }
   }, [notebookId])
   async function selectRevision(revision: number) {
+    if (busy) return
     setSelected(revision)
     setBusy(true)
     try { setPreview((await api.getUnboundNotebookRevision(notebookId, revision)).content) }
     catch (cause) { setError(cause instanceof Error ? cause.message : '版本内容读取失败') }
     finally { setBusy(false) }
   }
-  return <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="历史版本"><div className="nb-modal is-wide">
-    <div className="nb-modal-head"><h2>历史版本</h2><button type="button" onClick={onClose} aria-label="关闭">×</button></div>
+  async function restore() {
+    if (selected === undefined || busy) return
+    setBusy(true)
+    setError(undefined)
+    try { await onRestore(selected) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '恢复失败') }
+    finally { setBusy(false) }
+  }
+  return <div ref={dialogRef} className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="历史版本" aria-busy={busy} tabIndex={-1}><div className="nb-modal is-wide">
+    <div className="nb-modal-head"><h2>历史版本</h2><button type="button" onClick={onClose} disabled={busy} aria-label="关闭">×</button></div>
     {error && <p className="notebook-document-error" role="alert">{error}</p>}
-    <div className="notebook-document-history"><div className="notebook-document-history-list">{items.length ? items.map((item) => <button key={item.revision} type="button" className={selected === item.revision ? 'is-active' : ''} onClick={() => void selectRevision(item.revision)}><strong>revision {item.revision}</strong><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><small>{item.origin === 'restore' ? '恢复生成' : '自动保存'}</small></button>) : <p className="notebook-document-sidebar-empty">还没有历史快照。</p>}</div><div className="notebook-document-history-preview">{preview ? <pre>{docToMarkdown(preview).slice(0, 20000)}</pre> : <p>选择左侧版本查看内容。</p>}</div></div>
-    <div className="nb-modal-actions"><button type="button" onClick={onClose}>关闭</button><button type="button" className="primary-button" disabled={selected === undefined || busy} onClick={() => selected !== undefined && void onRestore(selected)}>恢复到此版本</button></div>
+    <div className="notebook-document-history"><div className="notebook-document-history-list">{items.length ? items.map((item) => <button key={item.revision} type="button" disabled={busy} className={selected === item.revision ? 'is-active' : ''} onClick={() => void selectRevision(item.revision)}><strong>revision {item.revision}</strong><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span><small>{historyOriginLabel(item.origin)}</small></button>) : <p className="notebook-document-sidebar-empty">还没有历史快照。</p>}</div><div className="notebook-document-history-preview">{preview ? <pre>{docToMarkdown(preview).slice(0, 20000)}</pre> : <p>选择左侧版本查看内容。</p>}</div></div>
+    <div className="nb-modal-actions"><button type="button" onClick={onClose} disabled={busy}>关闭</button><button type="button" className="primary-button" disabled={selected === undefined || busy} onClick={() => void restore()}>恢复到此版本</button></div>
   </div></div>
 }

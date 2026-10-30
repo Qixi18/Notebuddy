@@ -29,7 +29,7 @@ const note = {
 const askAgent = vi.fn(async () => true)
 
 function liveRun(overrides: Partial<AgentRunState> = {}): AgentRunState {
-  return { steps: [], streamingText: '', ...overrides }
+  return { steps: [], thinking: '', streamingText: '', ...overrides }
 }
 
 function renderShell(overrides: Record<string, unknown> = {}) {

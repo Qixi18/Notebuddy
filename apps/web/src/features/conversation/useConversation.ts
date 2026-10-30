@@ -274,6 +274,7 @@ export function useConversation(
     const question = text.trim()
     const requestCourseId = courseId
     if (!requestCourseId || !question || busyRef.current) return false
+    const firstTurn = !history.some((message) => message.role === 'user')
     busyRef.current = true
     setBusy(true)
     setError(undefined)
@@ -318,13 +319,12 @@ export function useConversation(
       setHistory((current) => [...current, answer])
       // 首条问题后端已把标题从「新对话」改写；据此刷新历史列表。
       // 归属（scope/note 快照）只在首轮生效，故按本次发送的范围同步列表字段；
-      // 非首轮后端会忽略 scope，此处同步的值与列表已有值一致，不会改分组。
-      if (answer.conversation_title) {
-        const renamed = answer.conversation_title
+      // 后续轮次不得按调用方参数改写已经锁定的归属。
+      if (firstTurn || answer.conversation_title) {
         setConversations((current) => current.map((item) => {
           if (item.id !== targetId) return item
-          const next = { ...item, title: renamed }
-          if (ownership?.scope) {
+          const next = { ...item, title: answer.conversation_title ?? item.title }
+          if (firstTurn && ownership?.scope) {
             next.scope = ownership.scope
             next.default_scope = ownership.scope
             next.note_id = ownership.scope === 'note' ? (ownership.noteId ?? null) : null
@@ -343,7 +343,7 @@ export function useConversation(
       busyRef.current = false
       if (courseRef.current === requestCourseId) setBusy(false)
     }
-  }, [courseId, teacherPersona, ensureConversation])
+  }, [courseId, teacherPersona, ensureConversation, history])
 
   /* agent 流式提问：本地插入用户消息 → 逐步更新 agentRun → final 规范成消息入历史 */
   const askAgent = useCallback(async (text: string, options: AgentAskOptions): Promise<boolean> => {
@@ -356,6 +356,42 @@ export function useConversation(
     setAgentRun({ steps: [], thinking: '', streamingText: '' })
     let targetId = ''
     const historyRequest = historyRequestRef.current
+    const firstTurn = !history.some((message) => message.role === 'user')
+    const isCurrentRequest = () => courseRef.current === requestCourseId
+      && historyRequestRef.current === historyRequest
+    let ownershipSynced = false
+    const acceptOwnership = (title?: string) => {
+      if (!isCurrentRequest() || (ownershipSynced && !title)) return
+      ownershipSynced = true
+      // Any SSE event proves the backend accepted and persisted the question.
+      // Its first-turn scope is locked before streaming starts, even if the
+      // model fails or the user stops before receiving a final event.
+      setConversations((current) => current.map((item) => item.id !== targetId ? item : {
+        ...item,
+        ...(title ? { title } : {}),
+        ...(firstTurn ? {
+          scope: options.scope,
+          default_scope: options.scope,
+          note_id: options.scope === 'note' ? options.notebookContext?.notebook_id ?? null : null,
+          note_title: options.scope === 'note'
+            ? options.notebookContext?.title ?? options.readingContext?.note_title ?? item.note_title
+            : null,
+        } : {}),
+      }))
+    }
+    const refreshSavedConversation = async (reloadHistory: boolean) => {
+      if (!targetId || !isCurrentRequest()) return
+      const [savedConversations, savedMessages] = await Promise.allSettled([
+        api.listConversations(requestCourseId),
+        reloadHistory ? api.listConversationMessages(targetId) : Promise.resolve(undefined),
+      ])
+      if (!isCurrentRequest()) return
+      if (savedConversations.status === 'fulfilled') {
+        const saved = savedConversations.value.find((item) => item.id === targetId)
+        if (saved) setConversations((current) => current.map((item) => item.id === targetId ? saved : item))
+      }
+      if (savedMessages.status === 'fulfilled' && savedMessages.value) setHistory(savedMessages.value)
+    }
     /* 中断器：用户点「停止」时 abort 本次请求（signal 铺在 fetch 上，见 api/agent.ts） */
     const controller = new AbortController()
     abortRef.current = controller
@@ -389,12 +425,32 @@ export function useConversation(
         reading_context: options.readingContext,
         notebook_context: options.notebookContext,
       }, {
-        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
-        /* 思维链增量累进 thinking（实时展示用）；final 到达后随 process 一起落库。 */
-        onThinking: (event: AgentThinkingEvent) => setAgentRun((current) => current ? { ...current, thinking: current.thinking + event.text } : current),
-        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
-        onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
-        onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
+        onStep: (event: AgentStepEvent) => {
+          if (!isCurrentRequest()) return
+          acceptOwnership()
+          setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current)
+        },
+        /* 思考增量保留远端字符串契约；范围同步和旧请求隔离与其他事件一致。 */
+        onThinking: (event: AgentThinkingEvent) => {
+          if (!isCurrentRequest()) return
+          acceptOwnership()
+          setAgentRun((current) => current ? { ...current, thinking: current.thinking + event.text } : current)
+        },
+        onDelta: (event: AgentDeltaEvent) => {
+          if (!isCurrentRequest()) return
+          acceptOwnership()
+          setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current)
+        },
+        onNotice: (event: AgentNoticeEvent) => {
+          if (!isCurrentRequest()) return
+          acceptOwnership()
+          setAgentRun((current) => current ? { ...current, notice: event.text } : current)
+        },
+        onError: (event: AgentErrorEvent) => {
+          if (!isCurrentRequest()) return
+          acceptOwnership()
+          setError(event.message)
+        },
         onFinal: (final: AgentFinalEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
           setAgentRun((current) => current ? { ...current, final } : current)
@@ -414,39 +470,25 @@ export function useConversation(
             suggestions: final.suggestions ?? [],
             process: final.process ?? null,
           }])
-          // 同步后端回写的标题（仅标题；scope 分组字段不在流里回传，且只在首轮生效，
-          // 避免把中途改范围错误反映成分组迁移——下次载入会话列表会自洽）。
-          if (final.conversation_title) {
-            const renamed = final.conversation_title
-            setConversations((current) => current.map((item) => (item.id === targetId ? { ...item, title: renamed } : item)))
-          }
+          acceptOwnership(final.conversation_title)
         },
       }, controller.signal)
-      if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
-        try {
-          const loaded = await api.listConversationMessages(targetId)
-          if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
-        } catch { /* Keep the final event's local message until history can be loaded. */ }
-      }
+      await refreshSavedConversation(true)
       return true
     } catch (cause) {
       /* 用户中断：不是错误。保留已收到的正文并打「已中断」标记；
-         不弹错误、不重载历史（重载会把这段本地正文冲掉）。提问本身已落库，照常留在历史里。 */
+         不弹错误、不重载消息历史；只刷新会话归属，保留已收到的本地正文。 */
       if (isAbortError(cause)) {
         if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
           setAgentRun((current) => current ? { ...current, aborted: true } : current)
         }
+        await refreshSavedConversation(false)
         return true
       }
       if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) {
         setError(cause instanceof Error ? cause.message : '智能问答请求失败')
         setAgentRun(null)
-        if (targetId) {
-          try {
-            const loaded = await api.listConversationMessages(targetId)
-            if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setHistory(loaded)
-          } catch { /* Keep the visible error when history cannot be loaded. */ }
-        }
+        await refreshSavedConversation(true)
       }
       return false
     } finally {
@@ -454,7 +496,7 @@ export function useConversation(
       busyRef.current = false
       if (courseRef.current === requestCourseId) setBusy(false)
     }
-  }, [courseId, teacherPersona, ensureConversation])
+  }, [courseId, teacherPersona, ensureConversation, history])
 
   /* 中断正在进行的回答：abort 当前请求，已收到的正文保留（实时块改渲染成「已中断」） */
   const stopAgent = useCallback(() => {

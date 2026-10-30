@@ -17,6 +17,7 @@ import { useDocumentReadingPosition } from '../features/notebook-editor/useDocum
 import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-editor/draftStore'
 import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features/notebook-editor/NotebookBridge'
 import { DocumentSourcePreview } from '../features/notebook-editor/DocumentSourcePreview'
+import { historyOriginLabel, useHistoryDialog } from '../features/notebook-editor/historyDialog'
 import './NotebookPage.css'
 
 function serverDate(value: string): Date {
@@ -866,7 +867,7 @@ function NotebookPageBody() {
         <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" multiple onChange={(event) => void handleUploadMaterial(event)} aria-label="选择课程资料" />
         <input ref={sourceImageInput} className="notebook-document-file-input" type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={(event) => void handleUploadSourceImage(event)} aria-label="选择原始图片资料" />
         <button className="notebook-document-upload" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
-          <span aria-hidden="true">＋</span>{busy ? '上传中…' : '上传资料'}
+          <span aria-hidden="true">＋</span>{uploadProgress?.phase === 'uploading' ? '上传中…' : '上传资料'}
         </button>
         <label className="notebook-document-duplicate-option">
           <input type="checkbox" checked={allowDuplicateUploads}
@@ -1096,6 +1097,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
   const [selectedRevision, setSelectedRevision] = useState<number | null>(null)
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const dialogRef = useHistoryDialog(onClose, busy)
 
   useEffect(() => {
     let active = true
@@ -1108,6 +1110,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
   }, [courseId, notebookId])
 
   async function loadPreview(revision: number) {
+    if (busy) return
     setBusy(true)
     setSelectedRevision(revision)
     try {
@@ -1119,7 +1122,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
   }
 
   async function restore() {
-    if (selectedRevision === null) return
+    if (selectedRevision === null || busy) return
     if (!window.confirm(`恢复 revision ${selectedRevision}？已保存的当前版本会保留在历史中，恢复操作会生成新修订。`)) return
     setBusy(true)
     try {
@@ -1135,16 +1138,16 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
     } finally { setBusy(false) }
   }
 
-  return <div className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="历史版本">
+  return <div ref={dialogRef} className="nb-modal-backdrop" role="dialog" aria-modal="true" aria-label="历史版本" aria-busy={busy} tabIndex={-1}>
     <div className="nb-modal is-wide">
-      <div className="nb-modal-head"><h2>历史版本</h2><button type="button" onClick={onClose} aria-label="关闭">×</button></div>
+      <div className="nb-modal-head"><h2>历史版本</h2><button type="button" onClick={onClose} disabled={busy} aria-label="关闭">×</button></div>
       {error && <p className="notebook-document-error" role="alert">{error}</p>}
       <div className="notebook-document-history">
         <div className="notebook-document-history-list">
-          {items.length ? items.map((item) => <button key={item.revision} type="button" className={selectedRevision === item.revision ? 'is-active' : ''} onClick={() => void loadPreview(item.revision)}>
+          {items.length ? items.map((item) => <button key={item.revision} type="button" disabled={busy} className={selectedRevision === item.revision ? 'is-active' : ''} onClick={() => void loadPreview(item.revision)}>
             <strong>revision {item.revision}</strong>
             <span>{serverDate(item.created_at).toLocaleString('zh-CN')}</span>
-            <small>{item.origin === 'restore' ? '恢复生成' : item.origin === 'autosave' ? '自动保存' : item.origin}</small>
+            <small>{historyOriginLabel(item.origin)}</small>
           </button>) : <p className="notebook-document-sidebar-empty">还没有历史快照。</p>}
         </div>
         <div className="notebook-document-history-preview">
@@ -1152,7 +1155,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
         </div>
       </div>
       <div className="nb-modal-actions">
-        <button type="button" onClick={onClose}>关闭</button>
+        <button type="button" onClick={onClose} disabled={busy}>关闭</button>
         <button type="button" className="primary-button" disabled={selectedRevision === null || busy} onClick={() => void restore()}>恢复到此版本（生成新修订）</button>
       </div>
     </div>
