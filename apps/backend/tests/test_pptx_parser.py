@@ -10,6 +10,9 @@
 3. 标题应取版面上沿的「页眉带」（章节名），而不是字号更大的正文块
    （正文 16pt > 页眉 14pt，仅按字号排序会误取正文）。
 4. 整页只有页脚时应视为空页，而不是造出一个垃圾标题。
+
+常规回归在临时目录自建 PPTX；最后一条私人课件回归仅在原文件可用时运行。
+自建样例不能替代该私人课件的真实版式验收。
 """
 
 from __future__ import annotations
@@ -186,11 +189,64 @@ def test_multiline_header_returns_first_line(tmp_path: Path) -> None:
     assert parse_pptx(path)[0]["title"] == "1.2 欧式空间    1.2.1  内积与投影"
 
 
+@pytest.fixture()
+def synthetic_multi_page_deck(tmp_path: Path) -> Path:
+    """Create an independent public sample, never a replacement for the private deck."""
+    presentation, blank = _blank_deck()
+    for number in range(1, 46):
+        slide = presentation.slides.add_slide(blank)
+        footer = f"示例讲者 (示例学院) 合成课程 2026 年 1 月 1 日 {number} / 45"
+        # Footer first reproduces the original ordering bug without private text.
+        _add_textbox(slide, footer, top=Emu(3207283), height=Emu(248920), size=5.0)
+        _add_textbox(slide, ", · , · =", top=Emu(3207283), height=Emu(248920), size=5.0)
+        if number == 2:
+            continue  # Decoration-only slide must not inherit another page's title.
+        if number == 45:
+            _add_textbox(slide, f"合成结束页\n, · , · =\n{footer}",
+                         top=Emu(1344496), height=Emu(2110104), size=24.0)
+            continue
+        title = f"合成课程 · 第 {number} 节\n本页小节"
+        body = f"合成正文第 {number} 条：这里是保留的教学内容。"
+        if number % 2:
+            # Body precedes the smaller header in the shape list.
+            _add_textbox(slide, body, top=Emu(777538), height=Emu(1800000), size=18.0)
+        _add_textbox(slide, title, top=Emu(-24548), height=Emu(463550), size=14.0)
+        if not number % 2:
+            # Mixed text/footer shape exercises line cleanup independently of geometry.
+            _add_textbox(slide, f"{body}\n, · , · =\n{footer}",
+                         top=Emu(777538), height=Emu(2676525), size=18.0)
+    return _save(presentation, tmp_path)
+
+
+def test_synthetic_multi_page_deck_cleans_titles_and_body(synthetic_multi_page_deck: Path) -> None:
+    """Known synthetic pages test ordering, geometry, line cleanup and page isolation."""
+    pages = parse_pptx(synthetic_multi_page_deck)
+    assert len(pages) == 45
+    assert [page["page_number"] for page in pages] == list(range(1, 46))
+    assert pages[2]["title"] == "合成课程 · 第 3 节"
+    assert pages[23]["title"] == "合成课程 · 第 24 节"
+    assert pages[1]["title"] is None
+    assert pages[1]["raw_text"] == ""
+    assert pages[1]["blocks"] == []
+    assert pages[44]["title"] == "合成结束页"
+    assert pages[44]["raw_text"] == "合成结束页"
+    for number, page in enumerate(pages, start=1):
+        if number not in {2, 45}:
+            assert page["title"] == f"合成课程 · 第 {number} 节"
+            assert f"合成正文第 {number} 条：这里是保留的教学内容。" in page["raw_text"]
+        for text in [page["title"] or "", page["raw_text"],
+                     *(block["content"] for block in page["blocks"])]:
+            assert "示例讲者" not in text
+            assert "示例学院" not in text
+            assert "/ 45" not in text
+            assert ", · , · =" not in text
+
+
 def test_real_deck_no_page_has_footer_as_title() -> None:
-    """用仓库里的真实课件回归：任何一页的标题都不应包含页脚特征文本。
+    """可选私人课件回归：任何一页的标题都不应包含页脚特征文本。
 
     该文件正是触发上传失败的那份（`向量与空间_2026.pptx`）。缺失时跳过，
-    以免在未携带样例数据的机器上误报。
+    保留“原资料尚未验收”的限制；上方 synthetic 回归不能替代它。
     """
     sample = (
         Path(__file__).resolve().parents[3]
@@ -199,7 +255,11 @@ def test_real_deck_no_page_has_footer_as_title() -> None:
         / "bc4287e2-9131-433e-bc88-aa2cd96d61f0.pptx"
     )
     if not sample.exists():
-        pytest.skip("样例课件不在仓库中")
+        pytest.skip(
+            "可选私人课件缺失：向量与空间_2026.pptx "
+            "(bc4287e2-9131-433e-bc88-aa2cd96d61f0.pptx)；"
+            "受控 synthetic 回归不代表该原资料已通过验收"
+        )
 
     pages = parse_pptx(sample)
 

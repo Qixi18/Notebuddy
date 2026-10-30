@@ -6,6 +6,9 @@ dist/
 __pycache__/
 *.py[cod]
 .venv/
+.venv-*/
+# Project-local UV, managed Python, Node, model/download caches and setup logs.
+.runtime/
 .pytest_cache/
 .ruff_cache/
 

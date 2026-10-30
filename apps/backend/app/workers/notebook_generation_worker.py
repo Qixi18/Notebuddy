@@ -157,12 +157,13 @@ def process_generation_job(job_id: str) -> None:
             _fail_inputs(db, job, "empty_generation", "没有可追加的正文内容（资料可能已全部覆盖）", attempt)
             return
         format_repair_count = 0
-        normalized_nodes = _normalize_model_blocks(nodes)
-        candidate_document = normalize_document({"type": "doc", "content": normalized_nodes})
-        math_report = inspect_generated_math(candidate_document)
-        if not _accept_generated_math(db, job, generator, math_report, attempt, format_repair_count):
-            return
+        normalized_nodes = nodes
         try:
+            normalized_nodes = _normalize_model_blocks(nodes)
+            candidate_document = normalize_document({"type": "doc", "content": normalized_nodes})
+            math_report = inspect_generated_math(candidate_document)
+            if not _accept_generated_math(db, job, generator, math_report, attempt, format_repair_count):
+                return
             fragment = validate_document(candidate_document)
             _reject_images(fragment)
             _validate_source_map(fragment, source_map)
