@@ -515,6 +515,9 @@
 .agent-thinking { margin: 8px 0; padding: 8px 10px; border-radius: 9px; background: var(--nb-paper-muted, #f5f4ef); color: var(--nb-muted, #777); font-size: 11px; }
 .agent-thinking-head { display: flex; align-items: center; gap: 7px; }
 .agent-thinking-body { max-height: 180px; overflow: auto; margin: 7px 0 0; white-space: pre-wrap; font: inherit; }
+.agent-thinking-done .agent-thinking-toggle { display: inline-flex; gap: 5px; align-items: center; padding: 3px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--nb-muted, #8a9a86); font-size: 11px; cursor: pointer; }
+.agent-thinking-done .agent-thinking-toggle:hover { background: var(--nb-paper-muted, #f1f4ec); }
+.agent-thinking-check { color: var(--nb-green, #4c7a55); font-weight: 600; }
 .agent-spinner { width: 10px; height: 10px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; animation: agent-spin .8s linear infinite; }
 @keyframes agent-spin { to { transform: rotate(360deg); } }
 .workspace-quick-chip {

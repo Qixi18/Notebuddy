@@ -265,12 +265,37 @@ export function ConversationList({ conversations, courses, conversationId, busy,
   )
 }
 
-/** Ctrl+K 会话搜索命令面板 */
-export function ConversationSearch({ conversations, conversationId, courseId, onSelect, onClose }: {
+/** 命中片段按关键词二次定位并高亮（大小写不敏感，中文逐字匹配） */
+function HighlightedSnippet({ snippet, keyword }: { snippet: string; keyword: string }) {
+  const lowered = snippet.toLowerCase()
+  const needle = keyword.toLowerCase()
+  const parts: Array<{ text: string; hit: boolean }> = []
+  let cursor = 0
+  while (cursor < snippet.length) {
+    const index = lowered.indexOf(needle, cursor)
+    if (index < 0 || !needle) {
+      parts.push({ text: snippet.slice(cursor), hit: false })
+      break
+    }
+    if (index > cursor) parts.push({ text: snippet.slice(cursor, index), hit: false })
+    parts.push({ text: snippet.slice(index, index + needle.length), hit: true })
+    cursor = index + needle.length
+  }
+  return (
+    <span className="workspace-palette-snippet">
+      {parts.map((part, index) => (part.hit ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>))}
+    </span>
+  )
+}
+
+/** Ctrl+K 会话搜索命令面板：两级结果——会话（标题命中，本地过滤）+ 消息（内容命中，后端搜索） */
+export function ConversationSearch({ conversations, conversationId, courseId, onSelect, onSelectMessage, onClose }: {
   conversations: Conversation[]
   conversationId?: string
   courseId?: string
   onSelect: (id: string) => void
+  /** 点消息命中：打开该会话并定位高亮该条消息 */
+  onSelectMessage: (conversationId: string, messageId: string) => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
@@ -319,15 +344,16 @@ export function ConversationSearch({ conversations, conversationId, courseId, on
           ref={inputRef}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="搜索会话标题…"
-          aria-label="搜索会话标题"
+          placeholder="搜索会话标题或消息内容…"
+          aria-label="搜索会话标题或消息内容"
           maxLength={120}
           onKeyDown={(event) => {
             if (event.key === 'Escape') { onClose(); return }
-            if (event.key === 'Enter' && (messageResults[0] || results[0])) {
-              onSelect(messageResults[0]?.conversation_id ?? results[0].id)
-              onClose()
-            }
+            if (event.key !== 'Enter') return
+            /* 与会话标题命中优先，其次才是消息命中；消息命中要带上 messageId 才能定位 */
+            if (results[0]) { onSelect(results[0].id); onClose(); return }
+            const hit = messageResults[0]
+            if (hit) { onSelectMessage(hit.conversation_id, hit.message_id); onClose() }
           }}
         />
         {results.length === 0 ? (
@@ -360,9 +386,9 @@ export function ConversationSearch({ conversations, conversationId, courseId, on
               : <ul className="workspace-palette-list">
                 {messageResults.map((hit) => (
                   <li key={hit.message_id}>
-                    <button type="button" onClick={() => { onSelect(hit.conversation_id); onClose() }}>
+                    <button type="button" onClick={() => { onSelectMessage(hit.conversation_id, hit.message_id); onClose() }}>
                       <span>{hit.conversation_title} · {hit.message_role === 'user' ? '你' : 'AI'}</span>
-                      <small>{hit.snippet}</small>
+                      <HighlightedSnippet snippet={hit.snippet} keyword={query.trim()} />
                     </button>
                   </li>
                 ))}

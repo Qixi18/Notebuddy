@@ -8,7 +8,7 @@
 - ``{"type": "error", "message"}`` 失败事件，由 API 层回退旧问答管线。
 
 安全设计：
-- 思考模型的思维链不外发（只内部回填），前端仅有 busy 指示；
+- 思考模型的思维链以 thinking 事件外发（仅展示用），并随 process 落库；
 - 每轮都携带完整工具集（思考模型在缺少 tools 时会把工具调用内联成文本）；
 - 工具失败折算为文本回给模型继续，绝不中断流；
 - 最多 ``MAX_TOOL_ROUNDS`` 轮，防止失控消耗。
@@ -130,10 +130,8 @@ def run_agent(
             tool_call_event: dict[str, Any] | None = None
             for event in client.chat_stream(messages, tools=specs, max_tokens=2400):
                 if event["type"] == "reasoning":
-                    # 思维链原文既不外发也不落库：只发一个不带内容的边界信号，供上层
-                    # 计量思考耗时。模型侧要求的 reasoning_content 回传在 tool_calls
-                    # 分支单独处理，不经过这里。
-                    yield {"type": "thinking"}
+                    # 思维链增量放行为 thinking 事件（仅展示用，不进入正文与证据）
+                    yield {"type": "thinking", "text": event["text"]}
                     continue
                 if event["type"] == "delta":
                     round_text.append(event["text"])

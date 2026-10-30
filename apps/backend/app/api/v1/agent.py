@@ -187,7 +187,7 @@ def send_agent_message(
         partial_text: list[str] = []
         completed_suggestions: list[dict[str, Any]] = []
         persisted = False
-        process: dict[str, Any] = {"thinking_ms": 0, "steps": []}
+        process: dict[str, Any] = {"thinking": "", "thinking_ms": 0, "steps": []}
         thinking_started: float | None = None
 
         def close_thinking() -> None:
@@ -201,12 +201,13 @@ def send_agent_message(
             if persisted:
                 return
             close_thinking()
-            # 只保留工具摘要/状态/耗时；思维链原文从不进入判断与落库。
+            # 工具摘要/状态/耗时 + 思维链全文（限长）一并保留，供历史里展开回看。
             process["steps"] = [
                 {key: value for key, value in step.items() if key != "started"}
                 for step in process["steps"][:60]
             ]
-            trace = process if process["thinking_ms"] or process["steps"] else None
+            process["thinking"] = process["thinking"][:20000]
+            trace = process if process["thinking_ms"] or process["steps"] or process["thinking"] else None
             _persist_interrupted_agent(
                 db, conversation, "".join(partial_text), payload.learning_goal, trace,
                 completed_suggestions,
@@ -240,11 +241,11 @@ def send_agent_message(
                     error_message = str(event.get("message") or "agent 执行失败")
                 else:
                     if event["type"] == "thinking":
-                        # 只记开始时间用于算耗时；同时把事件重建成不带内容的信号，
-                        # 避免下游把任何随行的思维链原文原样透传给前端。
+                        # 记开始时间用于算耗时；原文随事件透传给前端做实时展示，并累进
+                        # process 供落库（限长），历史里因此能展开回看。
                         if thinking_started is None:
                             thinking_started = time.monotonic()
-                        event = {"type": "thinking"}
+                        process["thinking"] += str(event.get("text") or "")
                     elif event["type"] == "delta":
                         close_thinking()
                         partial_text.append(str(event.get("text") or ""))
@@ -304,7 +305,8 @@ def send_agent_message(
                 {key: value for key, value in step.items() if key != "started"}
                 for step in process["steps"][:60]
             ]
-            saved_process = process if process["thinking_ms"] or process["steps"] else None
+            process["thinking"] = process["thinking"][:20000]
+            saved_process = process if process["thinking_ms"] or process["steps"] or process["thinking"] else None
             assistant = persist_assistant_message(
                 db, conversation=conversation, learning_goal=payload.learning_goal,
                 content=str(final_event["answer"]), model_version=final_event.get("model_version"),

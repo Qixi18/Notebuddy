@@ -22,7 +22,7 @@ export type AgentStepEvent = {
 export type AgentDeltaEvent = { type: 'delta'; text: string }
 
 /** 思考边界信号：后端只告知「进入/离开思考」，从不携带思维链原文。 */
-export type AgentThinkingEvent = { type: 'thinking' }
+export type AgentThinkingEvent = { type: 'thinking'; text: string }
 
 export type AgentNoticeEvent = { type: 'notice'; text: string }
 
@@ -34,7 +34,9 @@ export type AgentSuggestion =
   | { type: 'concept_contrast'; id: string; artifact_id?: string; pair_count: number; pairs: { a: string; b: string; core: string; dimensions: { name: string; a: string; b: string }[]; anchor?: string }[] }
 
 export type AgentProcessTrace = {
-  /** 思考耗时（毫秒）。后端只存时长，思维链原文既不外发也不落库。 */
+  /** 思维链全文（后端落库前截断 2 万字符）。历史「过程记录」展开时回看 */
+  thinking?: string
+  /** 思考耗时（毫秒） */
   thinking_ms?: number
   steps: { tool: string; detail: string; duration_ms?: number | null }[]
 }

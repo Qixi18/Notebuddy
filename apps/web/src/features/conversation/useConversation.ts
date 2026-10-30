@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
-import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent } from '../../api/agent'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent, type AgentThinkingEvent } from '../../api/agent'
 import type { TeacherCharacterId } from '../../components/TeacherCharacter'
 import type { Conversation, ConversationMessage } from '../../types'
 import { teacherPersonaMeta } from '../persona/personas'
@@ -30,8 +30,8 @@ export type AskScope = {
 /** agent 执行中的实时状态：步骤时间线 + 流式文本 + 最终事件 */
 export type AgentRunState = {
   steps: AgentStepEvent[]
-  /** 是否正在思考（状态位）。思维链原文既不外发也不在本地保存。 */
-  thinking: boolean
+  /** 思维链累计文本（所有轮次拼接）；仅展示用，随 final 的 process 落库 */
+  thinking: string
   streamingText: string
   notice?: string
   final?: AgentFinalEvent
@@ -62,7 +62,12 @@ export type ConversationState = {
   error?: string
   /** agent 执行中的实时状态；非 agent 提问时为 null */
   agentRun: AgentRunState | null
-  selectConversation: (id: string) => Promise<void>
+  /** 搜索命中消息带来的定位目标：历史加载完后由线程滚动高亮，消费后清除 */
+  pendingMessageId?: string
+  /** 打开会话；传 pendingMessageId 表示要定位到该条消息 */
+  selectConversation: (id: string, pendingMessageId?: string) => Promise<void>
+  /** 线程完成定位高亮后调用，清掉定位目标 */
+  consumePendingMessage: () => void
   /** 重命名会话（右键菜单）；成功更新本地列表标题，返回是否成功 */
   renameConversation: (id: string, title: string) => Promise<boolean>
   /** 删除整段会话（右键菜单）；删的是当前会话时切换到剩余最近一条，或清空等待下次新建 */
@@ -109,6 +114,8 @@ export function useConversation(
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string>()
   const [agentRun, setAgentRun] = useState<AgentRunState | null>(null)
+  /** 搜索命中的定位目标：历史加载完后由线程滚动高亮，消费后清除 */
+  const [pendingMessageId, setPendingMessageId] = useState<string>()
   const busyRef = useRef(false)
   const creatingRef = useRef<Promise<string> | null>(null)
   const historyRequestRef = useRef(0)
@@ -156,10 +163,12 @@ export function useConversation(
     return () => { active = false }
   }, [courseId])
 
-  const selectConversation = useCallback(async (id: string) => {
+  const selectConversation = useCallback(async (id: string, pendingMessageId?: string) => {
     const request = ++historyRequestRef.current
     const requestCourseId = courseRef.current
     setConversationId(id)
+    /* 带消息命中的跳转记录定位目标；普通切换传 undefined 顺带清掉遗留目标 */
+    setPendingMessageId(pendingMessageId)
     setHistory([])
     setBusy(true)
     setError(undefined)
@@ -177,6 +186,9 @@ export function useConversation(
       }
     }
   }, [])
+
+  /* 线程完成滚动高亮后消费定位目标 */
+  const consumePendingMessage = useCallback(() => setPendingMessageId(undefined), [])
 
   const renameConversation = useCallback(async (id: string, title: string): Promise<boolean> => {
     const trimmed = title.trim()
@@ -341,7 +353,7 @@ export function useConversation(
     busyRef.current = true
     setBusy(true)
     setError(undefined)
-    setAgentRun({ steps: [], thinking: false, streamingText: '' })
+    setAgentRun({ steps: [], thinking: '', streamingText: '' })
     let targetId = ''
     const historyRequest = historyRequestRef.current
     /* 中断器：用户点「停止」时 abort 本次请求（signal 铺在 fetch 上，见 api/agent.ts） */
@@ -377,10 +389,10 @@ export function useConversation(
         reading_context: options.readingContext,
         notebook_context: options.notebookContext,
       }, {
-        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, thinking: false, steps: [...current.steps, event] } : current),
-        /* 后端只发思考边界信号，不含思维链原文；这里仅维护一个「正在思考」的状态位。 */
-        onThinking: () => setAgentRun((current) => current ? { ...current, thinking: true } : current),
-        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, thinking: false, streamingText: current.streamingText + event.text } : current),
+        onStep: (event: AgentStepEvent) => setAgentRun((current) => current ? { ...current, steps: [...current.steps, event] } : current),
+        /* 思维链增量累进 thinking（实时展示用）；final 到达后随 process 一起落库。 */
+        onThinking: (event: AgentThinkingEvent) => setAgentRun((current) => current ? { ...current, thinking: current.thinking + event.text } : current),
+        onDelta: (event: AgentDeltaEvent) => setAgentRun((current) => current ? { ...current, streamingText: current.streamingText + event.text } : current),
         onNotice: (event: AgentNoticeEvent) => setAgentRun((current) => current ? { ...current, notice: event.text } : current),
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {
@@ -459,5 +471,5 @@ export function useConversation(
     [history, conversationId, greeting],
   )
 
-  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, selectConversation, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
+  return { conversations, conversationId, messages, hasMessages: history.length > 0, busy, ready, error, agentRun, pendingMessageId, selectConversation, consumePendingMessage, renameConversation, deleteConversation, startNewConversation, ask, askAgent, stopAgent }
 }

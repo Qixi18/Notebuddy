@@ -67,16 +67,19 @@ async function copyText(text: string): Promise<boolean> {
 /** 追问建议：点一下只把话术填进输入框，由用户决定要不要发 */
 const FOLLOW_UPS = ['再展开讲讲', '能举个例子吗', '这和上一讲有什么关系'] as const
 
-/** 过程记录只展示耗时，绝不展示思维链原文（后端也不再落库原文）。 */
+/** 过程记录的摘要行：步骤数与思考耗时（思维链正文在展开区里单独渲染）。 */
 function thinkingDurationLabel(thinkingMs?: number): string {
   if (!thinkingMs || thinkingMs < 100) return ''
   return thinkingMs < 1000 ? ' · 思考 <1s' : ` · 思考 ${(thinkingMs / 1000).toFixed(1)}s`
 }
 
+/** 「需改进」的细分原因：选一个即提交，作为 feedback.comment 落库 */
+const FEEDBACK_REASONS = ['答非所问', '引用不准', '太啰嗦', '有错误', '其他'] as const
+
 function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, retryText, onFollowUp, skillCourseId, onSkillAsk }: {
   message: ConversationMessage
   personaName: string
-  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful') => Promise<boolean>
+  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful', comment?: string) => Promise<boolean>
   onOpenMaterial?: (materialId: string, page: number) => void
   onOpenNotebook?: (notebookId: string, blockId?: string, assetId?: string, page?: number) => void
   /** 失败卡的重试：回传原问题原文，由调用方重发 */
@@ -94,6 +97,8 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
   const citeSeq = useRef(0)
   const [feedbackSaved, setFeedbackSaved] = useState(false)
   const [feedbackBusy, setFeedbackBusy] = useState(false)
+  /* 点「需改进」先展开原因，选了原因才提交；再点一次收起 */
+  const [reasonOpen, setReasonOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const sources = message.sources ?? []
 
@@ -103,10 +108,10 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
     setCiteFocus({ no, seq: citeSeq.current })
   }
 
-  async function handleFeedback(category: 'helpful' | 'not_helpful') {
+  async function handleFeedback(category: 'helpful' | 'not_helpful', comment?: string) {
     if (feedbackBusy) return
     setFeedbackBusy(true)
-    const saved = await onFeedback(message.id, category)
+    const saved = await onFeedback(message.id, category, comment)
     setFeedbackBusy(false)
     if (saved) setFeedbackSaved(true)
   }
@@ -119,7 +124,10 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
   }
 
   return (
-    <article className={`workspace-msg workspace-msg-assistant${message.status === 'failed' ? ' is-failed' : ''}`}>
+    <article
+      className={`workspace-msg workspace-msg-assistant${message.status === 'failed' ? ' is-failed' : ''}`}
+      data-message-id={message.id}
+    >
       <span className="workspace-msg-mark" aria-hidden="true"><PetMark /></span>
       <div className="workspace-msg-body">
         <header className="workspace-msg-head">
@@ -137,6 +145,9 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
             过程记录{message.process.steps.length ? ` · ${message.process.steps.length} 个步骤` : ''}
             {thinkingDurationLabel(message.process.thinking_ms)}
           </summary>
+          {message.process.thinking ? (
+            <pre className="agent-thinking-body">{message.process.thinking}</pre>
+          ) : null}
           <AgentSteps steps={message.process.steps.map((step) => ({
             type: 'step' as const, tool: step.tool, detail: step.detail,
             duration_ms: step.duration_ms, status: 'done' as const,
@@ -172,6 +183,18 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
 
         {message.status !== 'failed' && message.id !== 'local-greeting' && (
           <footer className="workspace-msg-foot">
+            {reasonOpen && !feedbackSaved && (
+              <div className="workspace-msg-reasons" role="group" aria-label="选择不理想的原因">
+                {FEEDBACK_REASONS.map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    disabled={feedbackBusy}
+                    onClick={() => void handleFeedback('not_helpful', reason)}
+                  >{reason}</button>
+                ))}
+              </div>
+            )}
             <div className="workspace-msg-feedback">
               <button
                 type="button"
@@ -182,8 +205,9 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
               <button
                 type="button"
                 disabled={feedbackBusy}
-                aria-pressed={feedbackSaved}
-                onClick={() => void handleFeedback('not_helpful')}
+                aria-pressed={reasonOpen && !feedbackSaved}
+                aria-expanded={reasonOpen}
+                onClick={() => setReasonOpen((open) => !open)}
               >需改进</button>
               {feedbackSaved && <small>反馈已保存</small>}
             </div>
@@ -206,7 +230,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onOpenNo
 }
 
 /** 对话主线：欢迎态 / 用户气泡 / 回答卡（角标 + 依据行 + 反馈）/ agent 实时块 */
-export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, onFollowUp, agentRun, extras, skillCourseId, onSkillAsk }: {
+export function AssistantThread({ ready, busy, messages, conversationId, personaName, starters, onStarter, onFeedback, onOpenMaterial, onOpenNotebook, onRetry, onFollowUp, agentRun, extras, skillCourseId, onSkillAsk, highlightMessageId, onHighlightConsumed }: {
   ready: boolean
   busy: boolean
   messages: ConversationMessage[]
@@ -214,7 +238,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
   personaName: string
   starters: string[]
   onStarter: (prompt: string) => void
-  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful') => Promise<boolean>
+  onFeedback: (messageId: string, category: 'helpful' | 'not_helpful', comment?: string) => Promise<boolean>
   onOpenMaterial?: (materialId: string, page: number) => void
   onOpenNotebook?: (notebookId: string, blockId?: string, assetId?: string, page?: number) => void
   /** 失败卡的重试：回传原问题原文，由调用方重发 */
@@ -227,12 +251,31 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
   extras?: ReactNode
   skillCourseId?: string
   onSkillAsk?: (prompt: string) => void
+  /** 搜索命中的定位目标——历史就绪后滚动到该条并闪烁高亮，随后回调消费 */
+  highlightMessageId?: string
+  onHighlightConsumed?: () => void
 }) {
   const threadRef = useRef<HTMLDivElement>(null)
   const prevConversation = useRef<string | undefined>(undefined)
   const prevCount = useRef(0)
   /* 流式正文长度：消息条数不变时，靠它判断「还在长」 */
   const liveLength = agentRun?.streamingText.length ?? 0
+
+  /* 搜索定位：目标消息出现在历史里 → 滚到视野中央 + 闪烁高亮 → 消费掉定位目标 */
+  useEffect(() => {
+    if (!highlightMessageId) return
+    if (!messages.some((message) => message.id === highlightMessageId)) return
+    const timer = window.setTimeout(() => {
+      const node = document.querySelector<HTMLElement>(`[data-message-id="${highlightMessageId}"]`)
+      if (node) {
+        node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        node.classList.add('is-flash')
+        window.setTimeout(() => node.classList.remove('is-flash'), 1800)
+      }
+      onHighlightConsumed?.()
+    }, 60)
+    return () => window.clearTimeout(timer)
+  }, [highlightMessageId, messages, onHighlightConsumed])
 
   /* 失败卡要重试的是它前面那条提问：往上找最近的一条 user 消息 */
   function retryTextFor(index: number): string | undefined {
@@ -302,7 +345,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
             onSkillAsk={onSkillAsk}
           />
         ) : (
-          <article className="workspace-msg workspace-msg-user" key={`${message.id}-${index}`}>
+          <article className="workspace-msg workspace-msg-user" key={`${message.id}-${index}`} data-message-id={message.id}>
             {messageTimeLabel(message) && <time>{messageTimeLabel(message)}</time>}
             <span aria-hidden="true">你</span>
             <p>{message.content}</p>
@@ -324,7 +367,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
               <p className="workspace-agent-aborted-note">这次回答已停止，下面是已收到的部分；可以直接继续提问。</p>
             ) : null}
             <AgentSteps steps={agentRun.steps} />
-            <AgentThinking live={agentRun.thinking && !agentRun.final && !agentRun.aborted} />
+            <AgentThinking thinking={agentRun.thinking} live={Boolean(agentRun.thinking) && !agentRun.final && !agentRun.aborted} />
             {agentRun.notice ? <p className="workspace-agent-notice">{agentRun.notice}</p> : null}
             {agentRun.streamingText ? (
               <div className="workspace-agent-streaming">

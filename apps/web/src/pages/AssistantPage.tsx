@@ -311,10 +311,10 @@ export function AssistantPage() {
     composerRef.current?.focus()
   }
 
-  async function handleFeedback(messageId: string, category: 'helpful' | 'not_helpful'): Promise<boolean> {
+  async function handleFeedback(messageId: string, category: 'helpful' | 'not_helpful', comment?: string): Promise<boolean> {
     if (!courseId) return false
     try {
-      await api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: messageId, category })
+      await api.saveFeedback(courseId, { target_type: 'assistant_message', target_id: messageId, category, comment })
       return true
     } catch {
       return false
@@ -549,6 +549,8 @@ export function AssistantPage() {
           agentRun={agentRun}
           skillCourseId={courseId}
           onSkillAsk={useStarter}
+          highlightMessageId={conversation.pendingMessageId}
+          onHighlightConsumed={conversation.consumePendingMessage}
           extras={(
             <>
               <NotebookEditSuggestionCards
@@ -619,6 +621,7 @@ export function AssistantPage() {
           conversationId={conversation.conversationId}
           courseId={courseId}
           onSelect={(id) => void conversation.selectConversation(id)}
+          onSelectMessage={(conversationId, messageId) => void conversation.selectConversation(conversationId, messageId)}
           onClose={() => setPaletteOpen(false)}
         />
       )}
