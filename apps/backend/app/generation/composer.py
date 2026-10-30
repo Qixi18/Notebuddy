@@ -22,6 +22,7 @@ from app.ai.deepseek import DeepSeekClient, DeepSeekError
 
 MAX_PARAGRAPH_CHARS = 1_000
 MAX_TEXT_NODE = 8_000
+NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS = 20_000
 
 
 class CompositionError(RuntimeError):
@@ -308,6 +309,15 @@ SOURCE_REPAIR_PROMPT = (
     "没有来源依据的节点返回空数组，本地校验会拒绝写入。"
 )
 
+FORMAT_REPAIR_PROMPT = (
+    "请只修复给定 Tiptap 正文 JSON 的结构格式，使其通过 NoteBuddy Notebook document v2 校验。"
+    "不得改变知识含义、删除有效内容、添加事实或更改任何 blockId；每个顶层正文节点都必须保留原 blockId，"
+    "sources 必须逐项保留并为每个节点映射至少一个允许的原文块 ID。"
+    "允许的顶层类型仅为 paragraph、heading、bulletList、orderedList、taskList、blockquote、codeBlock、"
+    "horizontalRule、table、callout、example、blockMath。正文结构、attrs、子节点、marks 和文本必须符合 Tiptap。"
+    "只输出完整 JSON 对象 {\"nodes\":[...],\"sources\":{...}}，不要 Markdown 或解释。"
+)
+
 
 def compose_deepseek(
     snapshot: dict[str, Any], plan: dict[str, Any], unit_ids: list[str],
@@ -347,7 +357,7 @@ def compose_deepseek(
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
     ]
     try:
-        result = client.complete_json(messages, max_tokens=8_000)
+        result = client.complete_json(messages, max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS)
         json_repair_used = False
     except DeepSeekError as first_error:
         # Repair malformed/truncated JSON once while preserving the original
@@ -360,7 +370,9 @@ def compose_deepseek(
             {"role": "user", "content": JSON_REPAIR_PROMPT},
         ]
         try:
-            result = client.complete_json(repair_messages, max_tokens=8_000)
+            result = client.complete_json(
+                repair_messages, max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS,
+            )
             json_repair_used = True
         except DeepSeekError as exc:
             raise CompositionError(f"模型生成失败（JSON 修复重试后仍无效）：{exc}", code="model_failed") from exc
@@ -387,7 +399,9 @@ def compose_deepseek(
         }, ensure_ascii=False)},
     ]
     try:
-        repaired = client.complete_json(repair_messages, max_tokens=4_000)
+        repaired = client.complete_json(
+            repair_messages, max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS,
+        )
     except DeepSeekError as exc:
         raise CompositionError(f"模型来源映射修复失败：{exc}", code="missing_sources") from exc
     repaired_sources = repaired.get("sources")
@@ -396,6 +410,43 @@ def compose_deepseek(
     return _composition_from_deepseek_result(
         {"nodes": normalized_nodes, "sources": repaired_sources}, allowed_ids,
     )
+
+
+def repair_deepseek_document_format(
+    nodes: list[dict[str, Any]],
+    source_map: dict[str, list[str]],
+    allowed_source_ids: set[str],
+    validation_error: str,
+) -> Composition:
+    """Ask the model to repair a rejected document fragment without changing its evidence."""
+    client = DeepSeekClient()
+    if not client.configured:
+        raise CompositionError("格式矫正需要已配置的 DeepSeek 模型", code="model_not_configured")
+    request = {
+        "nodes": nodes,
+        "sources": source_map,
+        "allowed_source_block_ids": sorted(allowed_source_ids),
+        "validation_error": validation_error[:1_000],
+    }
+    try:
+        result = client.complete_json([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(request, ensure_ascii=False)},
+            {"role": "user", "content": FORMAT_REPAIR_PROMPT},
+        ], max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS)
+    except DeepSeekError as exc:
+        raise CompositionError(f"模型正文格式矫正失败：{exc}", code="document_format_repair_failed") from exc
+    try:
+        composition = _composition_from_deepseek_result(result, allowed_source_ids)
+    except CompositionError as exc:
+        raise CompositionError(
+            f"模型正文格式矫正结果未通过来源校验：{exc}", code="document_format_repair_failed",
+        ) from exc
+    if set(composition.source_map) != {
+        (node.get("attrs") or {}).get("blockId") for node in composition.nodes
+    }:
+        raise CompositionError("格式矫正改变了正文块与来源的对应关系", code="document_format_repair_failed")
+    return composition
 
 
 def _normalize_model_node_ids(

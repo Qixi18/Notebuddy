@@ -41,6 +41,7 @@ class NotebookSummary(BaseModel):
     is_default: bool
     created_at: datetime
     updated_at: datetime
+    deleted_at: datetime | None = None
     cover_url: str | None = None
 
 

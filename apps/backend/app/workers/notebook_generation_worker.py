@@ -28,11 +28,13 @@ from app.db.models import (
     NotebookGenerationInput,
     NotebookGenerationJob,
 )
-from app.generation.composer import CompositionError, compose
+from app.generation.composer import CompositionError, compose, repair_deepseek_document_format
 from app.generation.context import GenerationInputError, current_outline
 from app.generation.figures import append_source_figures
 from app.generation.planner import build_plan
 from app.notes.document import (
+    CALLOUT_TONES,
+    MAX_LATEX,
     DocumentValidationError,
     load_document,
     normalize_document,
@@ -150,14 +152,41 @@ def process_generation_job(job_id: str) -> None:
             _fail_inputs(db, job, "empty_generation", "没有可追加的正文内容（资料可能已全部覆盖）", attempt)
             return
         try:
-            fragment = validate_document(normalize_document({
-                "type": "doc", "content": _normalize_model_blocks(nodes),
-            }))
+            normalized_nodes = _normalize_model_blocks(nodes)
+            fragment = validate_document(normalize_document({"type": "doc", "content": normalized_nodes}))
             _reject_images(fragment)
             _validate_source_map(fragment, source_map)
-        except DocumentValidationError as exc:
-            _fail_inputs(db, job, "document_validation_failed", str(exc)[:1000], attempt)
-            return
+        except DocumentValidationError as first_validation_error:
+            if generator != "deepseek":
+                _fail_inputs(db, job, "document_validation_failed", str(first_validation_error)[:1000], attempt)
+                return
+            allowed_source_ids = {
+                block["block_id"]
+                for source in snapshot.get("sources") or []
+                if isinstance(source, dict)
+                for section in source.get("sections") or []
+                if isinstance(section, dict)
+                for block in section.get("blocks") or []
+                if isinstance(block, dict) and isinstance(block.get("block_id"), str)
+            }
+            try:
+                repaired = repair_deepseek_document_format(
+                    normalized_nodes, source_map, allowed_source_ids, str(first_validation_error),
+                )
+                source_map = repaired.source_map
+                normalized_nodes = _normalize_model_blocks(repaired.nodes)
+                fragment = validate_document(
+                    normalize_document({"type": "doc", "content": normalized_nodes}),
+                )
+                _reject_images(fragment)
+                _validate_source_map(fragment, source_map)
+            except (CompositionError, DocumentValidationError) as repair_error:
+                _fail_inputs(
+                    db, job, "document_format_repair_failed",
+                    f"初次正文格式校验失败：{first_validation_error}；自动矫正后仍未通过：{repair_error}"[:2000],
+                    attempt,
+                )
+                return
 
         allowed_runs = {
             source["parse_run_id"] for source in snapshot.get("sources") or []
@@ -334,11 +363,33 @@ def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]
             return
         promote_standalone_latex(node)
         kind = node.get("type")
+        if kind in {"inlineMath", "blockMath"}:
+            attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+            latex = attrs.get("latex")
+            if not isinstance(latex, str) or not latex.strip():
+                # Models sometimes place the same formula in text instead of attrs.
+                fallback = node.get("text")
+                if isinstance(fallback, str) and fallback.strip():
+                    attrs["latex"] = fallback.strip()
+                    node.pop("text", None)
+            elif latex != latex.strip():
+                attrs["latex"] = latex.strip()
+            node["attrs"] = attrs
         children = node.get("content")
         if kind == "callout":
-            attrs = node.get("attrs")
-            if isinstance(attrs, dict) and not attrs.get("title"):
+            attrs = node.get("attrs") if isinstance(node.get("attrs"), dict) else {}
+            tone = attrs.get("tone")
+            if tone not in CALLOUT_TONES:
+                tone_aliases = {
+                    "important": "tip", "positive": "tip", "success": "tip",
+                    "caution": "warning", "danger": "warning", "error": "warning",
+                    "info": "note", "neutral": "note",
+                }
+                tone_key = tone.strip().casefold() if isinstance(tone, str) else ""
+                attrs["tone"] = tone_aliases.get(tone_key, "tip")
+            if not attrs.get("title"):
                 attrs["title"] = "请核对" if attrs.get("tone") == "warning" else "提示"
+            node["attrs"] = attrs
         if kind in {"tableHeader", "tableCell", "callout", "example"} and isinstance(children, list):
             inline_types = {"text", "hardBreak", "inlineMath"}
             if children and all(isinstance(child, dict) and child.get("type") in inline_types
@@ -349,6 +400,25 @@ def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]
 
     for node in result:
         visit(node)
+    def check_math(node: Any, path: str) -> None:
+        if not isinstance(node, dict):
+            return
+        if node.get("type") in {"inlineMath", "blockMath"}:
+            attrs = node.get("attrs") or {}
+            latex = attrs.get("latex") if isinstance(attrs, dict) else None
+            if not isinstance(latex, str):
+                raise DocumentValidationError(f"{path} 的公式缺少字符串 latex")
+            if not latex.strip():
+                raise DocumentValidationError(f"{path} 的公式 latex 为空")
+            if len(latex) > MAX_LATEX:
+                raise DocumentValidationError(
+                    f"{path} 的公式 latex 过长（{len(latex)} 字符，上限 {MAX_LATEX}）",
+                )
+        for index, child in enumerate(node.get("content") or [], start=1):
+            check_math(child, f"{path} / 子节点 {index}")
+
+    for index, node in enumerate(result, start=1):
+        check_math(node, f"正文块 {index}")
     return result
 
 

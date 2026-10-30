@@ -77,6 +77,7 @@ from app.schemas.notebook import (
     ReadingPositionUpdate,
     UnboundNotebookSummary,
 )
+from app.services.deletion import DeletionConflict, permanently_delete_notebook
 
 router = APIRouter()
 
@@ -312,6 +313,7 @@ def _summary(book: Notebook) -> dict:
             "tree_slot": book.tree_slot, "display_order": book.display_order,
             "order_revision": book.order_revision, "is_default": book.is_default,
             "created_at": book.created_at, "updated_at": book.updated_at,
+            "deleted_at": book.deleted_at,
             "cover_url": _cover_url(book)}
 
 
@@ -750,6 +752,17 @@ def restore_deleted_notebook(notebook_id: str, payload: NotebookRestoreDeletedRe
         notebook_order_revision=Course.notebook_order_revision + 1))
     db.commit(); db.refresh(book)
     return _summary(book)
+
+
+@router.delete("/notebooks/{notebook_id}/permanent", status_code=204)
+def purge_deleted_notebook(notebook_id: str, db: Session = Depends(get_db)) -> None:
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is None:
+        raise HTTPException(404, "回收站中没有这篇笔记")
+    try:
+        permanently_delete_notebook(db, book)
+    except DeletionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/courses/{course_id}/notebooks/{notebook_id}", response_model=NotebookRead)
