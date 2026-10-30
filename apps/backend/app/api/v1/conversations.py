@@ -215,14 +215,6 @@ def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[C
     return [_message_read(db, message, conversation.title) for message in messages]
 
 
-@router.get("/courses/{course_id}/conversations/search", response_model=list[ConversationMessageHit])
-def search_course_conversations(
-    course_id: str, q: str = Query(default="", max_length=120), db: Session = Depends(get_db),
-) -> list[dict]:
-    ensure_course(db, course_id)
-    return search_course_messages(db, course_id, q)
-
-
 @router.post("/conversations/{conversation_id}/messages", response_model=ConversationMessageRead, status_code=201)
 def send_message(
     conversation_id: str,
