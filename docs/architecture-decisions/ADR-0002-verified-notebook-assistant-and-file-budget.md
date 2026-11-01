@@ -43,3 +43,5 @@
 ## 审查状态
 
 本条目仅记录用户给定计划及基线调查；待协作者审查后方可改为 Accepted。实施期间若证据迫使业务契约改变，先更新 Proposed ADR 和兼容方案，再继续对应批次。
+
+Notebook 会话兼容与 SQLite 迁移细节见 [A1 会话迁移设计](../notebook-assistant-session-migration-design.md)；该设计已完成只读协作者审查，仍为 Proposed，数据库迁移尚未实施。
