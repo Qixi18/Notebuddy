@@ -5,7 +5,8 @@ import { featurePath, useWorkspace } from '../components/AppLayout'
 import { TeacherCharacter, type TeacherStatus } from '../components/TeacherCharacter'
 import { api } from '../api'
 import { AssistantComposer } from '../features/assistant/AssistantComposer'
-import { AssistantContextBar, type ScopeNext } from '../features/assistant/AssistantContextBar'
+import { AssistantContextBar, type ScopeNext, type ScopeNotebook } from '../features/assistant/AssistantContextBar'
+import { NotebookScopePanel, type NotebookScopeTarget } from '../features/assistant/NotebookScopePanel'
 import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
 import { MistakeBook } from '../features/assistant/MistakeBook'
@@ -45,7 +46,12 @@ export function AssistantPage() {
 
   const [draft, setDraft] = useState('')
   /* 默认仅使用当前课程范围；跨课程检索必须由用户显式切换。 */
-  const [scopeKind, setScopeKind] = useState<'global' | 'course'>('course')
+  const [scopeKind, setScopeKind] = useState<'global' | 'course' | 'notebook'>('course')
+  /* Notebook 范围（P0-QA-03）：独立答疑页也要能真实锁定一本 Notebook。
+     选中后由 NotebookScopePanel 用 /notebooks/{id}/conversations 建会话，
+     不复活旧 Note，也不用伪 courseId。 */
+  const [notebooks, setNotebooks] = useState<ScopeNotebook[]>([])
+  const [notebookTarget, setNotebookTarget] = useState<NotebookScopeTarget>()
   /* 课件收窄（P3）：消息级参数，仅 course 档随请求发送；不写会话 scope、不触发锁定。
      切范围档 / 切会话 / 切课程时复位（见 changeScope 与下方两个 effect）。 */
   const [materialId, setMaterialId] = useState<string>()
@@ -66,7 +72,17 @@ export function AssistantPage() {
 
   const scope: AskScope = useMemo(() => ({ kind: scopeKind }), [scopeKind])
 
-  /* 独立答疑页只提供用户明确选择的课程/全局范围；Notebook 专属问答从 Notebook 页面进入。 */
+  /* 本课程的 Notebook 列表：Notebook 范围必须先让用户看到真实目标，而不是猜。 */
+  useEffect(() => {
+    if (!courseId) { setNotebooks([]); return }
+    let active = true
+    void api.listNotebooks(courseId)
+      .then((items) => { if (active) setNotebooks(items.map((item) => ({ id: item.id, title: item.title }))) })
+      .catch(() => { if (active) setNotebooks([]) })
+    return () => { active = false }
+  }, [courseId])
+
+  /* 独立答疑页只把 Notebook 范围交给 NotebookScopePanel；课程/全局仍走 agent 通道。 */
   const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; allowNoteDiscovery: boolean; allowQuiz: boolean; learningMode: 'direct' | 'guided' }>(() => {
     if (scope.kind === 'global') return { scope: 'global', allowNoteDiscovery: false, allowQuiz: true, learningMode }
     return { scope: 'course', materialId, allowNoteDiscovery: false, allowQuiz: true, learningMode }
@@ -106,6 +122,7 @@ export function AssistantPage() {
     setScopeKind('course')
     setMaterialId(undefined)
     setLearningMode('direct')
+    setNotebookTarget(undefined)
   }, [courseId])
 
   useEffect(() => { void api.getWebSearchStatus().then(setWebStatus).catch(() => setWebStatus({ configured: false, status: 'unavailable' })) }, [])
@@ -226,6 +243,17 @@ export function AssistantPage() {
     setScopeKind(next.kind)
     /* 收窄只在 course 档有意义：离开该档即复位，避免残留一个不可见的消息级参数 */
     if (next.kind !== 'course') setMaterialId(undefined)
+    if (next.kind !== 'notebook') setNotebookTarget(undefined)
+  }
+
+  /* 选定一本 Notebook：进入 Notebook 核验链（独立会话，真正按 notebook_id 建立） */
+  function changeNotebook(notebookId: string) {
+    if (scopeLocked) { flashScopeLockHint(); return }
+    const target = notebooks.find((item) => item.id === notebookId)
+    if (!target) return
+    setNotebookTarget(target)
+    setScopeKind('notebook')
+    setMaterialId(undefined)
   }
 
   function changePetMode(mode: PetMode) {
@@ -435,10 +463,21 @@ export function AssistantPage() {
           </div>
         </header>
 
+        {scopeKind === 'notebook' && notebookTarget && courseId ? (
+          <NotebookScopePanel
+            courseId={courseId}
+            notebook={notebookTarget}
+            onExit={() => { setNotebookTarget(undefined); setScopeKind('course') }}
+          />
+        ) : (
+          <>
         <AssistantContextBar
           courses={courses}
           scopeKind={scopeKind}
+          scopeNotebookId={notebookTarget?.id}
+          notebooks={notebooks}
           onScopeChange={changeScope}
+          onSelectNotebook={changeNotebook}
           onSelectCourse={(id) => {
             /* 选当前课程 = 把范围落到「整门课程」；选别的课程 = 跳到那门课的上下文 */
             if (id === courseId) changeScope({ kind: 'course' })
@@ -506,6 +545,8 @@ export function AssistantPage() {
             onQuickPrompt={useStarter}
           />
         </div>
+          </>
+        )}
       </section>
 
       <MistakeBook

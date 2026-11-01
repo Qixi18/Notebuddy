@@ -1,3 +1,13 @@
+/**
+ * 旧 Note 兼容 API（**退役中，新业务不得使用**）。
+ *
+ * 2026-11-01 复审结论：新业务一律走 Notebook API（`./notebook`）；本文件的
+ * `Note`/`NoteSuggestion` 端点属于历史兼容边界，只在旧数据迁移、审计与历史
+ * 引用排查时保留。它已从 `src/api.ts` 的 `api` 聚集中移除，避免新代码继续误用。
+ *
+ * 删除条件（全部满足才可删）：全仓无运行时 import、无测试依赖、后端旧端点经
+ * 数据审计确认不再需要兼容。
+ */
 import type { Note, NoteRevision, NoteSourceRef, WebSource } from '../types'
 import { request } from './http'
 

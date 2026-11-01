@@ -3,10 +3,16 @@
 ``POST /conversations/{id}/agent-messages``：请求体 ``AgentMessageCreate``，
 响应 ``text/event-stream``，逐条 ``data: {json}\\n\\n`` 事件：
 
-- ``step`` / ``delta``：工具时间线与回答增量（原样转发 agent 循环事件）；
-- ``final``：收尾（answer + sources + suggestions），随后按现有 evidence 机制落库；
-- ``notice`` / ``error``：提示与失败；agent 链路任何失败都会回退旧问答管线
-  （``run_answer``），保证无 key、模型异常时用户体验与现有问答一致。
+- ``status``：阶段性状态（``thinking`` / ``verified`` / ``partially_verified``），
+  不带任何正文或思维链原文；
+- ``step``：工具时间线（不是回答正文，可以安全提前展示）；
+- ``delta``：**核验通过之后**才发送的正文增量；
+- ``final``：收尾（answer + sources + suggestions + 核验摘要），随后按现有 evidence 落库；
+- ``notice`` / ``error``：提示与失败。
+
+发布契约（2026-11-01 复审 P0-QA-02）：所有答疑范围（notebook / course / global /
+历史 note）都必须先缓冲正文、通过证据门禁，才允许输出正文 ``delta``。思维链原文
+只留在进程内，不随事件外发、不落库；未经核验的正文不会写进会话历史。
 
 与传统问答入口共用会话消息及证据持久化服务；SSE 事件仍由本路由管理。
 """
@@ -27,9 +33,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai.agent_loop import run_agent
-from app.ai.evidence import claim_payload, extract_claims
 from app.ai.notebook_qa import NotebookAnswer, claims_for_answer, run_notebook_answer
 from app.ai.orchestrator import run_answer
+from app.ai.verified_answer import AnswerVerificationError, verify_answer
 from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
 from app.db.models import (
@@ -289,8 +295,9 @@ def send_agent_message(
         partial_text: list[str] = []
         completed_suggestions: list[dict[str, Any]] = []
         persisted = False
-        process: dict[str, Any] = {"thinking": "", "thinking_ms": 0, "steps": []}
+        process: dict[str, Any] = {"thinking_ms": 0, "thinking_chars": 0, "steps": []}
         thinking_started: float | None = None
+        thinking_announced = False
 
         def close_thinking() -> None:
             nonlocal thinking_started
@@ -303,16 +310,14 @@ def send_agent_message(
             if persisted:
                 return
             close_thinking()
-            # 工具摘要/状态/耗时 + 思维链全文（限长）一并保留，供历史里展开回看。
             process["steps"] = [
                 {key: value for key, value in step.items() if key != "started"}
                 for step in process["steps"][:60]
             ]
-            process["thinking"] = process["thinking"][:20000]
-            trace = process if process["thinking_ms"] or process["steps"] or process["thinking"] else None
+            trace = process if process["thinking_ms"] or process["steps"] else None
+            # 未核验正文不得写进历史：中断时只留状态，不留草稿。
             _persist_interrupted_agent(
-                db, conversation, "".join(partial_text), payload.learning_goal, trace,
-                completed_suggestions,
+                db, conversation, "", payload.learning_goal, trace, completed_suggestions,
             )
             persisted = True
 
@@ -343,15 +348,21 @@ def send_agent_message(
                     error_message = str(event.get("message") or "agent 执行失败")
                 else:
                     if event["type"] == "thinking":
-                        # 记开始时间用于算耗时；原文随事件透传给前端做实时展示，并累进
-                        # process 供落库（限长），历史里因此能展开回看。
+                        # 思维链原文只用于计时和计数：不外发、不落库，
+                        # 前端最多收到一条"正在思考"的状态事件。
                         if thinking_started is None:
                             thinking_started = time.monotonic()
-                        process["thinking"] += str(event.get("text") or "")
-                    elif event["type"] == "delta":
+                        process["thinking_chars"] += len(str(event.get("text") or ""))
+                        if not thinking_announced:
+                            thinking_announced = True
+                            yield _sse({"type": "status", "status": "thinking"})
+                        continue
+                    if event["type"] == "delta":
+                        # 缓冲正文，等门禁通过后再发；这里绝不 yield。
                         close_thinking()
                         partial_text.append(str(event.get("text") or ""))
-                    elif event["type"] == "step":
+                        continue
+                    if event["type"] == "step":
                         close_thinking()
                         if event.get("status") == "done":
                             suggestions = event.get("suggestions")
@@ -386,7 +397,8 @@ def send_agent_message(
                                     "detail": str(event.get("detail") or ""),
                                     "duration_ms": None,
                                 })
-                    yield _sse(event)
+                        # 工具时间线不是回答正文，可以提前展示。
+                        yield _sse(event)
         except GeneratorExit:
             try:
                 persist_interrupted()
@@ -402,30 +414,56 @@ def send_agent_message(
         if final_event is not None and str(final_event.get("answer") or "").strip():
             chunks = final_event.get("chunks") or []
             web_results = final_event.get("web_results") or []
-            claims = [claim_payload(claim) for claim in extract_claims(str(final_event["answer"]), chunks, web_results)]
+            try:
+                verified = verify_answer(
+                    db, answer=str(final_event["answer"]), chunks=chunks,
+                    web_results=web_results, course_id=conversation.course_id,
+                    scope=effective_scope,
+                )
+            except AnswerVerificationError as exc:
+                # fail closed：核验做不了就不发布正文，也不回退到未核验草稿。
+                db.rollback()
+                failed = ConversationMessage(
+                    conversation_id=conversation_id, role="assistant",
+                    content="本次回答未通过发布前核验，正文已丢弃；请稍后重试。",
+                    learning_goal=payload.learning_goal, status="failed",
+                    failure_type=type(exc).__name__,
+                )
+                db.add(failed)
+                conversation.updated_at = datetime.now(UTC)
+                db.commit()
+                yield _sse({"type": "error", "message": "本次回答未通过发布前核验，请稍后重试"})
+                return
             process["steps"] = [
                 {key: value for key, value in step.items() if key != "started"}
                 for step in process["steps"][:60]
             ]
-            process["thinking"] = process["thinking"][:20000]
-            saved_process = process if process["thinking_ms"] or process["steps"] or process["thinking"] else None
+            process["verification"] = verified.verification
+            saved_process = (
+                process if process["thinking_ms"] or process["steps"] or process["verification"]
+                else None
+            )
             assistant = persist_assistant_message(
                 db, conversation=conversation, learning_goal=payload.learning_goal,
-                content=str(final_event["answer"]), model_version=final_event.get("model_version"),
-                chunks=chunks, web_results=web_results,
-                claims=claims or [{
+                content=verified.answer, model_version=final_event.get("model_version"),
+                chunks=verified.chunks, web_results=web_results,
+                claims=verified.claims or [{
                     "claim_key": "answer",
-                    "chunk_indexes": list(range(len(chunks))),
+                    "chunk_indexes": list(range(len(verified.chunks))),
                     "web_indexes": list(range(len(web_results))),
                 }],
                 process=saved_process,
                 suggestions=final_event.get("suggestions") or None,
             )
             persisted = True
+            yield _sse({"type": "status", "status": verified.mode})
+            for offset in range(0, len(verified.answer), 180):
+                yield _sse({"type": "delta", "text": verified.answer[offset:offset + 180]})
             yield _sse({
                 "type": "final",
-                "answer": final_event["answer"],
-                "mode": "agent",
+                "answer": verified.answer,
+                "mode": "agent-verified",
+                "verification": verified.verification,
                 "model_version": final_event.get("model_version"),
                 "sources": sources_from_evidence(db, assistant),
                 "suggestions": final_event.get("suggestions") or [],
@@ -459,21 +497,29 @@ def send_agent_message(
                 history=history,
                 teacher_persona=payload.teacher_persona,
             )
-            claims = result.get("claims") or [{
+            verified = verify_answer(
+                db, answer=str(result["answer"]), chunks=result["chunks"],
+                web_results=result["web_results"], course_id=conversation.course_id,
+                scope=effective_scope,
+            )
+            claims = verified.claims or [{
                 "claim_key": "answer",
-                "chunk_indexes": list(range(len(result["chunks"]))),
+                "chunk_indexes": list(range(len(verified.chunks))),
                 "web_indexes": list(range(len(result["web_results"]))),
             }]
             assistant = persist_assistant_message(
                 db, conversation=conversation, learning_goal=payload.learning_goal,
-                content=result["answer"], model_version=result.get("model_version"),
-                chunks=result["chunks"], web_results=result["web_results"], claims=claims,
+                content=verified.answer, model_version=result.get("model_version"),
+                chunks=verified.chunks, web_results=result["web_results"], claims=claims,
+                process={"verification": verified.verification},
             )
             persisted = True
+            yield _sse({"type": "status", "status": verified.mode})
             yield _sse({
                 "type": "final",
-                "answer": result["answer"],
+                "answer": verified.answer,
                 "mode": result.get("mode") or "deepseek-rag",
+                "verification": verified.verification,
                 "model_version": result.get("model_version"),
                 "sources": sources_from_evidence(db, assistant),
                 "suggestions": [],

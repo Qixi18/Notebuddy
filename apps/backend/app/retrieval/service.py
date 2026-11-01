@@ -1,4 +1,4 @@
-"""Two-path retrieval over Document IR and Notebook body.
+﻿"""Two-path retrieval over Document IR and Notebook body.
 
 - Source-material path: current ParseRun -> DocumentChunk.
 - Notebook path: derived NotebookSection (rebuilt on every body save).
@@ -15,7 +15,7 @@ import math
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -80,6 +80,59 @@ def retrieve(
     return merged[:limit]
 
 
+# ---------------------------------------------------------------------------
+# 显式的两条检索路径
+#
+# 答疑链路（notebook_qa / verified_answer）需要按"先正文、后原始资料"分别取证据，
+# 并且两者都不能无上界扫描整库。下面两个函数是公开的查询类型：
+# - ``retrieve_notebook_body``：只读 NotebookSection 派生索引（正文投影）。
+# - ``retrieve_document_ir``：只读该 Notebook 归属的当前 completed ParseRun 的 DocumentChunk。
+# 二者共用同一套 RetrievedChunk 来源映射，不重复实现查询。
+# ---------------------------------------------------------------------------
+
+NOTEBOOK_SECTION_LIMIT = 400
+DOCUMENT_CHUNK_CANDIDATE_LIMIT = 600
+
+
+def retrieve_notebook_body(
+    db: Session,
+    *,
+    course_id: str | None,
+    question: str,
+    notebook_id: str | None = None,
+    limit: int = 8,
+) -> list[RetrievedChunk]:
+    """Notebook 正文检索：只命中 ``NotebookSection`` 派生索引。"""
+
+    return sorted(
+        _retrieve_notebooks(
+            db, course_id=course_id, terms=query_terms(question),
+            query_vector=None, notebook_id=notebook_id,
+        ),
+        key=lambda item: item.score, reverse=True,
+    )[:limit]
+
+
+def retrieve_document_ir(
+    db: Session,
+    *,
+    course_id: str | None,
+    question: str,
+    material_id: str | None = None,
+    page_number: int | None = None,
+    limit: int = 10,
+) -> list[RetrievedChunk]:
+    """DocumentIR 检索：只命中当前 ParseRun 的解析块。"""
+
+    return sorted(
+        _retrieve_documents(
+            db, course_id=course_id, terms=query_terms(question), query_vector=None,
+            material_id=material_id, page_number=page_number,
+        ),
+        key=lambda item: item.score, reverse=True,
+    )[:limit]
+
+
 def _embed_query(db: Session, course_id: str, question: str) -> list[float] | None:
     client = EmbeddingClient()
     if not client.configured:
@@ -101,7 +154,7 @@ def _embed_query(db: Session, course_id: str, question: str) -> list[float] | No
 def _retrieve_documents(
     db: Session,
     *,
-    course_id: str,
+    course_id: str | None,
     terms: list[str],
     query_vector: list[float] | None,
     material_id: str | None,
@@ -119,16 +172,31 @@ def _retrieve_documents(
         .join(Notebook, Notebook.id == NotebookAsset.notebook_id)
         .outerjoin(Material, Material.asset_id == Asset.id)
         .where(
-            Notebook.course_id == course_id,
             Notebook.deleted_at.is_(None),
             DocumentParseRun.is_current.is_(True),
             DocumentParseRun.status == "completed",
         )
     )
+    if course_id:
+        query = query.where(Notebook.course_id == course_id)
     if material_id:
         material = db.get(Material, material_id)
         asset_id = material.asset_id if material is not None else material_id
         query = query.where(or_(Material.id == material_id, Asset.id == asset_id))
+    # SQL 层先做候选裁剪：只取"含任一查询词"或"带向量"的块，并给候选集一个硬上界。
+    # 之前是无上界取全量再在 Python 里排序，长课件/多文件课程下会随资料量线性变慢。
+    # 已知边界：排序仍在 Python 侧完成（关键词计数 + 余弦），因此这里的 LIMIT 是
+    # 候选上界而不是最终答案上界；超过上界的匹配会被跳过，需要更大召回时提高常量。
+    match_terms = [term for term in terms if term][:16]
+    if match_terms:
+        lexical_filter = or_(*(
+            func.lower(DocumentChunk.text).like(f"%{term.lower()}%") for term in match_terms
+        ))
+        if query_vector:
+            query = query.where(or_(lexical_filter, DocumentChunk.embedding_json.is_not(None)))
+        else:
+            query = query.where(lexical_filter)
+    query = query.limit(DOCUMENT_CHUNK_CANDIDATE_LIMIT)
     rows = db.execute(query).all()
     results: list[RetrievedChunk] = []
     for chunk, asset, notebook, material in rows:
@@ -177,18 +245,20 @@ def _retrieve_documents(
 
 
 def _retrieve_notebooks(
-    db: Session, *, course_id: str, terms: list[str], query_vector: list[float] | None,
+    db: Session, *, course_id: str | None, terms: list[str], query_vector: list[float] | None,
     notebook_id: str | None = None,
 ) -> list[RetrievedChunk]:
-    rows = db.execute(
+    query = (
         select(NotebookSection, Notebook)
         .join(Notebook, Notebook.id == NotebookSection.notebook_id)
         .where(
-            Notebook.course_id == course_id,
             Notebook.deleted_at.is_(None),
+            *([Notebook.course_id == course_id] if course_id else []),
             *([Notebook.id == notebook_id] if notebook_id else []),
         )
-    ).all()
+        .limit(NOTEBOOK_SECTION_LIMIT)
+    )
+    rows = db.execute(query).all()
     results: list[RetrievedChunk] = []
     for section, notebook in rows:
         heading_score = 3.0 * _lexical_score(section.heading, terms)

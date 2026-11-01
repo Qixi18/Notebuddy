@@ -537,6 +537,8 @@ export type ConversationMessage = {
   conversation_title?: string
   suggestions?: import('./api/agentStream').AgentSuggestion[]
   process?: import('./api/agentStream').AgentProcessTrace | null
+  /** 发布前核验摘要：历史回看也要能分辨「已核实 / 部分未核实 / 未核验」 */
+  verification?: import('./api/agentStream').AgentVerification | null
 }
 
 export type KnowledgeProposal = {

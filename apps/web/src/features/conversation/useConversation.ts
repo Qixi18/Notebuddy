@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
-import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStatusEvent, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent } from '../../api/agent'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStatusEvent, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent, type AgentVerification } from '../../api/agent'
 import type { Conversation, ConversationMessage } from '../../types'
 import { TEACHER_PERSONA, teacherPersonaMeta } from '../persona/personas'
 
@@ -18,11 +18,16 @@ import { TEACHER_PERSONA, teacherPersonaMeta } from '../persona/personas'
  */
 
 export type AskScope = {
-  /** 会话归属：全局可查 / 整门课程 / 锁定笔记 */
-  kind?: 'global' | 'course' | 'note'
-  /** 锁定笔记时的笔记 id（kind === 'note'） */
+  /**
+   * 会话归属：全局可查 / 整门课程 / 锁定一本 Notebook。
+   *
+   * 2026-11-01 复审 P1：新提问不再用遗留的 ``note`` 表达范围；旧会话的
+   * ``note_id`` 快照只作为历史兼容读保留。
+   */
+  kind?: 'global' | 'course' | 'notebook'
+  /** 锁定 Notebook 时的 Notebook id（kind === 'notebook'） */
   targetId?: string
-  /** 锁定笔记时的笔记标题，用于历史分组与标签 */
+  /** 锁定 Notebook 时的标题，用于历史分组与标签 */
   targetTitle?: string
 }
 
@@ -33,10 +38,14 @@ export type AgentRunStep = AgentStepEvent & { startedAt?: number; durationMs?: n
 export type AgentRunState = {
   steps: AgentRunStep[]
   streamingText: string
-  /** 思维链累计文本（所有轮次拼接）；仅展示用，不持久化 */
+  /** 旧版思维链累计文本；服务端已不外发，恒为空字符串，保留字段给旧测试/旧界面 */
   thinking: string
   notice?: string
+  /** 服务端阶段状态（thinking/drafting/…/verified）：区分「还在核验」与「已核验」 */
+  status?: AgentStatusEvent['status']
   final?: AgentFinalEvent
+  /** 发布前核验摘要；用来在实时块里标注「已核实 / 部分未核实 / 未核验」 */
+  verification?: AgentVerification
   /** 用户主动中断：保留已收到的正文，实时块改渲染成「已中断」而不是一直「执行中」 */
   aborted?: boolean
 }
@@ -349,6 +358,9 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
   const ask = useCallback(async (text: string, scope: AskScope = {}): Promise<boolean> => {
     const question = text.trim()
     const requestCourseId = courseId
+    /* Notebook 范围必须走 agent 流式通道（它才带 notebook_context 与核验后发布），
+       课程 JSON 通道不接受 Notebook 归属，不能在这里偷偷降级成课程范围。 */
+    if (scope.kind === 'notebook') return false
     if (!requestCourseId || notebookId || !question || busyRef.current) return false
     busyRef.current = true
     setBusy(true)
@@ -357,9 +369,7 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
        course 也显式传，避免与「未指定」混淆（未指定时由调用方决定默认值）。 */
     const ownership = scope.kind === 'global'
       ? { scope: 'global' as const }
-      : scope.kind === 'note'
-        ? { scope: 'note' as const, noteId: scope.targetId ?? null, noteTitle: scope.targetTitle ?? null }
-        : { scope: 'course' as const }
+      : { scope: 'course' as const }
     let localUserId = ''
     try {
       const targetId = await ensureConversation(ownership)
@@ -388,8 +398,6 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
            会把这条推断分支短路掉，反而更差。 */
         allow_web: true,
         scope: ownership?.scope,
-        note_id: ownership?.noteId ?? null,
-        note_title: ownership?.noteTitle ?? null,
         idempotency_key: `${targetId}-${askedAt}`,
       })
       if (courseRef.current !== requestCourseId) return true
@@ -405,8 +413,9 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
           if (firstTurn && ownership?.scope) {
             next.scope = ownership.scope
             next.default_scope = ownership.scope
-            next.note_id = ownership.scope === 'note' ? (ownership.noteId ?? null) : null
-            next.note_title = ownership.scope === 'note' ? (ownership.noteTitle ?? null) : null
+            /* 新提问不再产生 note 归属；旧会话的 note_id 快照是只读历史，这里只清空本会话的新值 */
+            next.note_id = null
+            next.note_title = null
           }
           return next
         }))
@@ -557,17 +566,27 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
       },
       onStatus: (event: AgentStatusEvent) => {
         if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
-        const labels: Record<AgentStatusEvent['status'], string> = {
+        const labels: Partial<Record<AgentStatusEvent['status'], string>> = {
+          thinking: '正在思考',
           reading_notebook: '正在读取当前笔记', drafting: '正在组织答案',
           checking_sources: '正在逐条核对资料', searching_web: '正在检索外部来源',
           finalizing: '正在整理核验结果',
+          verified: '已通过证据核验',
+          partially_verified: '部分主张未核实（已标注）',
+          verified_no_claims: '无需核验的表达性回答',
+          unverified_no_evidence: '本轮没有可引用来源（未核验）',
+          verification_unavailable: '核验暂不可用（未核验）',
         }
-        setAgentRun((current) => current ? { ...current, notice: labels[event.status] } : current)
+        setAgentRun((current) => current
+          ? { ...current, status: event.status, notice: labels[event.status] ?? current.notice }
+          : current)
       },
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
-          setAgentRun((current) => current ? { ...current, final } : current)
+          setAgentRun((current) => current
+            ? { ...current, final, verification: final.verification ?? undefined }
+            : current)
           /* 建议按产生它的助手消息 id 分桶累计（桶内按 id 去重）：技能卡跟随对应那轮回答渲染，
               生命周期跟随会话，不随下一次提问的 agentRun 重置而消失。
               key 与下方入历史消息的 id 同源，历史重载（服务端 id）后依然对得上。 */
@@ -594,6 +613,7 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
             mode: final.mode,
             sources: final.sources ?? [],
             process: final.process ?? null,
+            verification: final.verification ?? null,
           }])
           // 同步后端回写的标题，并在首轮同步归属（scope/笔记快照）。
           // 归属是会话级属性：只在首轮落库时确定，后续轮次不得按本轮参数改写。

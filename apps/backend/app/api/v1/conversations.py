@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.ai.notebook_qa import NotebookAnswer, claims_for_answer, run_notebook_answer
 from app.ai.orchestrator import run_answer
+from app.ai.verified_answer import verify_answer
 from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
 from app.db.models import (
@@ -365,15 +366,21 @@ def send_message(
             history=history,
             teacher_persona=payload.teacher_persona,
         )
-        claims = result.get("claims") or [{
+        verified = verify_answer(
+            db, answer=str(result["answer"]), chunks=result["chunks"],
+            web_results=result["web_results"], course_id=conversation.course_id,
+            scope=conversation.scope or "course",
+        )
+        claims = verified.claims or [{
             "claim_key": "answer",
-            "chunk_indexes": list(range(len(result["chunks"]))),
+            "chunk_indexes": list(range(len(verified.chunks))),
             "web_indexes": list(range(len(result["web_results"]))),
         }]
         assistant = persist_assistant_message(
             db, conversation=conversation, learning_goal=payload.learning_goal,
-            content=result["answer"], model_version=result.get("model_version"),
-            chunks=result["chunks"], web_results=result["web_results"], claims=claims,
+            content=verified.answer, model_version=result.get("model_version"),
+            chunks=verified.chunks, web_results=result["web_results"], claims=claims,
+            process={"verification": verified.verification},
         )
         return _message_read(db, assistant, conversation.title)
     except Exception as exc:

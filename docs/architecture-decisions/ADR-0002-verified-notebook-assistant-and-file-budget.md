@@ -77,3 +77,57 @@ Fake Provider/隔离 SQLite 验证覆盖预留结算、价格/汇率 fail closed
 两条 Notebook 历史路由现由同一 `NotebookPage` 实现承载，身份与 API 路由由 `useNotebookIdentity` 和 adapter 归一；课程专属资料管理按上下文显示，未分类 Notebook 不传伪造课程 ID。删除旧 `UnboundNotebookPage` 后更新历史对话测试。D 服务调整后完整 `scripts/test.ps1` 通过：后端 463 passed / 4 skipped，Web navigation 52 passed、Vitest 80 files / 412 passed，Web/Desktop build 通过。该测试未覆盖浏览器人工验收。
 
 D 的第一步将生成任务创建逻辑下沉至 `app.services.generation_jobs`；Generation API 保持兼容端点，`notebook_generation_inputs` 不再反向导入 API Router。Ruff 通过，相关生成/预算/森林/DocumentIR 测试 43 passed / 1 warning；随后完整 `scripts/test.ps1` 也通过（后端 463 passed / 4 skipped，Vitest 412 passed，Web/Desktop build 通过）。`api/v1/notebook.py` 的生命周期、文档、历史、资源、建议和关系路由尚未拆分，因此 D 与整体 ADR 仍未完成，ADR 保持 Proposed。
+
+### S1–S7 整改批（2026-11-01 第二轮，本地未提交）
+
+按 `2026-11-01-Notebuddy-最新源码复审-下一阶段开发路线图.md` 逐批实施，全部停在本地工作树：
+
+**S1 P0-QA-01 输入物理隔离。** 新增 `app/ai/qa_evidence.py` 提供带类型的证据标识
+（Notebook=`N*`、DocumentIR=`D*`、Web=`W*`）。`notebook_qa.py` 的 Stage-1 初稿请求
+只序列化 Notebook 证据；DocumentIR 证据从 Stage-2 起才进入请求。`verification`
+记录 `stage1_evidence_ids` / `stage2_evidence_ids` / `document_ir_evidence_count`
+供事后审计。AnswerGate 只接受"格式合法 + 本轮输入内 + 被对应 review 批准"的证据编号，
+因此 D 编号不能凭格式合法就冒充支撑。
+
+**S2 P0-QA-02 统一核验后发布。** 新增 `app/ai/verified_answer.py`：课程/全局/历史
+note 的回答一律先缓冲，再过证据门禁，才发 `status → delta → final`。SSE 不再外发
+思维链原文（只留 `thinking_ms`/`thinking_chars`），也不落库 CoT；`GeneratorExit`
+时只记录中断状态、不落未核验正文。JSON 入口同样经过该门禁。失败模式分明：
+结构无效 → fail closed（不发布）；无证据 → `unverified_no_evidence`；
+模型不可用 → `verification_unavailable`；部分主张缺证据 → `partially_verified`
+并把口径写进 `verification.notice`（不污染正文）。
+
+**S3 前端作用域与核验呈现。** 独立答疑页新增 Notebook 范围：`NotebookScopePanel`
+用 `/notebooks/{id}/conversations` 建立真实 Notebook 会话，提问带
+`notebook_context{notebook_id, revision}`，不复活旧 Note、不用伪 courseId；
+`AssistantContextBar` 三档（全局/课程/Notebook）；`AssistantThread` 展示
+已核实/部分未核实/未核验徽标。`AskScope` 收敛为 `global|course|notebook`；
+`notebookApiAdapter` 用 `courseId: string|null` 表达未分类身份，`unbound` 只保留在
+本地草稿键命名空间。
+
+**S4 检索与来源可信度。** `retrieval/service.py` 拆出 `retrieve_notebook_body` /
+`retrieve_document_ir` 两个受约束查询，DocumentIR 候选在 SQL 层用词面预筛并加
+硬上界（`DOCUMENT_CHUNK_CANDIDATE_LIMIT`），不再无界取全量后 Python 排序。
+`web_search/source_review.py` 增加来源类型/风险/发布年份与 `evidence_support`
+词面评估；模型声称"某来源支持该主张"但词面完全不重合时降级为 `uncertain`。
+
+**S5 预算验收。** 新增 Fake Provider 端到端与账单对账测试（见
+`docs/acceptance-file-budget.md`）。口径仍为"配置假设下的拦截"，不做绝对保证。
+
+**S6 Workspace 内部分层。** 抽出 `useNotebookDocument`（载入/草稿/revision/CAS/
+冲突/生成后安全刷新）、`useNotebookResources`（课程资料、图片资产、恢复、预算展示）、
+`useNotebookGeneration`（上传批次、轮询、重试、进度提示）。`NotebookPage.tsx` 由约
+1209 行降到约 594 行，只做路由身份、深链、选区与页面组合；三条业务线互不直接引用，
+生成完成后由结果对象驱动提示，不再互相调用。
+
+**S7 Router 拆分。** `api/v1/notebook.py` 拆为 `notebook_routes/{common,lifecycle,
+documents,revisions,resources,suggestions,relations,reading_position}.py`，原文件
+降为薄聚合入口（重新导出 `router` 与路由函数名）。拆分前后 OpenAPI 完全一致
+（144 条路径，方法/状态码逐项相同），并新增 `test_notebook_router_contract_snapshot.py`
+与 `test_notebook_routes_module_boundaries.py` 防止契约漂移和重复注册。
+
+**自动验证结果（本地，退出码 0）：** Ruff 通过；后端 502 passed / 4 skipped；
+Web Vitest 81 files / 416 tests passed；TypeScript `tsc -b` 通过。
+**未执行：** 真实模型/真实材料/真实账单/浏览器人工验收；ADR 仍为 Proposed，
+需协作者审核实现与风险后才能改 Accepted。
+

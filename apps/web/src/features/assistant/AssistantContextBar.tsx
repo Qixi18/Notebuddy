@@ -2,23 +2,30 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { Course } from '../../types'
 
-/** 会话归属的下一步选择：全局可查 / 整门课程。 */
-export type ScopeNext = { kind: 'global' | 'course' }
+/** 会话归属的下一步选择：全局可查 / 整门课程 / 锁定一本 Notebook。 */
+export type ScopeNext = { kind: 'global' | 'course' | 'notebook' }
+
+export type ScopeNotebook = { id: string; title: string }
 
 /**
  * 答疑主线顶部的常驻上下文条：范围 chip + 本轮检索摘要。
- * 范围两档：全局可查（无目标）/ 整门课程（选课程→切换课程上下文）。
- * 范围是会话级属性：新会话默认「全局可查」，发出首条消息后锁定，不再允许修改。
+ * 范围三档：全局可查 / 整门课程 / 锁定一本 Notebook（走 Notebook 核验链）。
+ * 范围是会话级属性：新会话默认「整门课程」，发出首条消息后锁定，不再允许修改。
  *
  * 学习目标不在这里设置：后端会按问题关键词自动推断（见 ai/discipline.py），
  * 界面恒定给一个默认值只会短路那条推断，已移除。
  */
-export function AssistantContextBar({ courses, scopeKind, scopeTargetId, onScopeChange, onSelectCourse, summary, scopeMenuOpen, onScopeMenuChange, locked, lockHint, onLockedAttempt }: {
+export function AssistantContextBar({ courses, scopeKind, scopeTargetId, scopeNotebookId, notebooks, onScopeChange, onSelectCourse, onSelectNotebook, summary, scopeMenuOpen, onScopeMenuChange, locked, lockHint, onLockedAttempt }: {
   courses: Course[]
-  scopeKind: 'global' | 'course'
+  scopeKind: 'global' | 'course' | 'notebook'
   scopeTargetId?: string
+  /** 当前锁定的 Notebook id（scopeKind === 'notebook' 时高亮用） */
+  scopeNotebookId?: string
+  /** 当前课程的 Notebook 列表；为空时不展示 Notebook 档 */
+  notebooks?: ScopeNotebook[]
   onScopeChange: (next: ScopeNext) => void
   onSelectCourse: (courseId: string) => void
+  onSelectNotebook?: (notebookId: string) => void
   summary?: { materials: number; items: number } | null
   scopeMenuOpen: boolean
   onScopeMenuChange: (open: boolean) => void
@@ -29,7 +36,7 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, onScope
   /** 锁定态下点击范围 chip 的回调（弹出提示，而不是打开菜单） */
   onLockedAttempt?: () => void
 }) {
-  const [submenu, setSubmenu] = useState<'course' | null>(null)
+  const [submenu, setSubmenu] = useState<'course' | 'notebook' | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -46,17 +53,24 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, onScope
     if (locked) { setSubmenu(null); onScopeMenuChange(false) }
   }, [locked, onScopeMenuChange])
 
+  const selectedNotebook = notebooks?.find((item) => item.id === scopeNotebookId)
   const label = scopeKind === 'global'
     ? '全局可查'
-    : '整门课程'
+    : scopeKind === 'notebook'
+      ? `Notebook《${selectedNotebook?.title ?? '未选择'}》`
+      : '整门课程'
 
-  function pick(kind: 'global' | 'course') {
+  function pick(kind: 'global' | 'course' | 'notebook') {
     if (kind === 'global') {
       onScopeChange({ kind: 'global' })
       onScopeMenuChange(false)
-    } else {
-      setSubmenu((current) => (current === kind ? null : kind))
+      return
     }
+    if (kind === 'notebook') {
+      setSubmenu((current) => (current === kind ? null : kind))
+      return
+    }
+    setSubmenu((current) => (current === kind ? null : kind))
   }
 
   return (
@@ -104,6 +118,15 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, onScope
               className={`workspace-scope-option${scopeKind === 'course' ? ' is-active' : ''}`}
               onClick={() => pick('course')}
             >整门课程</button>
+            {notebooks && onSelectNotebook ? (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={scopeKind === 'notebook'}
+                className={`workspace-scope-option${scopeKind === 'notebook' ? ' is-active' : ''}`}
+                onClick={() => pick('notebook')}
+              >一本 Notebook（核验链）</button>
+            ) : null}
             {submenu === 'course' && (
               <div className="workspace-scope-picker" role="menu">
                 <span className="workspace-scope-picker-title">锁定哪一门课程</span>
@@ -119,6 +142,26 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, onScope
                 </div>
               </div>
             )}
+            {submenu === 'notebook' && notebooks?.length ? (
+              <div className="workspace-scope-picker" role="menu">
+                <span className="workspace-scope-picker-title">锁定哪一本 Notebook</span>
+                <div className="workspace-scope-picker-list">
+                  {notebooks.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`workspace-scope-pick${item.id === scopeNotebookId ? ' is-active' : ''}`}
+                      onClick={() => { onSelectNotebook?.(item.id); onScopeMenuChange(false) }}
+                    >{item.title}</button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {submenu === 'notebook' && !notebooks?.length ? (
+              <div className="workspace-scope-picker" role="menu">
+                <span className="workspace-scope-picker-title">这门课还没有 Notebook</span>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -127,6 +170,10 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, onScope
           而不是等他自己改了范围却被后端静默忽略时才提示。 */}
       {!locked ? (
         <span className="workspace-scope-lock-tip">首条消息后范围将锁定</span>
+      ) : null}
+
+      {scopeKind === 'notebook' ? (
+        <span className="workspace-context-summary">Notebook 范围：答案先读正文，再用原始资料核验</span>
       ) : null}
 
       {summary && (

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+﻿import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 
@@ -14,6 +14,9 @@ vi.mock('../src/api', () => ({
     /* P4：答疑页挂载即按课程拉待确认建议（空列表即可） */
     listCourseSuggestions: vi.fn(async () => []),
     getNote: vi.fn(),
+    /* Notebook 范围选择：答疑页挂载时会拉当前课程的 Notebook 列表 */
+    listNotebooks: vi.fn(async () => []),
+    getNotebookDocument: vi.fn(async () => ({ revision: 0, content: { type: 'doc', content: [] } })),
     /* P6：消息全文搜索 */
     searchMessages: vi.fn(async () => []),
     /* P10：自测卷 */

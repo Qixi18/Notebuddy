@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import type { ConversationMessage } from '../../types'
-import type { AgentSuggestion } from '../../api/agentStream'
+import type { AgentSuggestion, AgentVerification } from '../../api/agentStream'
 import { modeLabels, noEvidenceLabels } from './answerMeta'
 import { AgentSteps } from './AgentSteps'
 import { AgentThinking } from './AgentThinking'
@@ -68,20 +68,44 @@ async function copyText(text: string): Promise<boolean> {
 /** 追问建议：点一下只把话术填进输入框，由用户决定要不要发 */
 const FOLLOW_UPS = ['再展开讲讲', '能举个例子吗', '就这个内容考考我', '这和上一讲有什么关系'] as const
 
+/** 核验状态文案：必须让「已核实 / 部分未核实 / 未核验」在界面上可区分 */
+const VERIFICATION_LABELS: Record<string, string> = {
+  verified: '已通过证据核验',
+  verified_no_claims: '表达性回答（无待核验事实主张）',
+  partially_verified: '部分主张未核实',
+  unverified_no_evidence: '未附来源，未核验',
+  verification_unavailable: '核验不可用，未核验',
+}
+
+function VerificationNote({ verification }: { verification?: AgentVerification | null }) {
+  if (!verification) return null
+  const label = VERIFICATION_LABELS[verification.status] ?? verification.status
+  const tone = verification.status === 'verified' || verification.status === 'verified_no_claims' ? 'ok' : 'warn'
+  return (
+    <p className={`workspace-msg-verification is-${tone}`} role="status">
+      <span>{label}</span>
+      {verification.notice ? <em>{verification.notice}</em> : null}
+    </p>
+  )
+}
+
 function formatProcessSeconds(ms?: number | null): string {
   if (!ms || ms < 500) return ''
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-/** 已完成回答的「过程」折叠块：思考耗时/内容 + 工具步骤与耗时。
-    数据随消息持久化（process_json），刷新/重进会话后依然可展开回看。 */
+/** 已完成回答的「过程」折叠块：思考耗时 + 工具步骤与耗时。
+    数据随消息持久化（process_json），刷新/重进会话后依然可展开回看。
+    注意：服务端自 2026-11-01 起不再外发/落库思维链原文，旧消息里的
+    ``thinking`` 仍兼容渲染。 */
 function MessageProcess({ process }: { process: NonNullable<ConversationMessage['process']> }) {
   const [open, setOpen] = useState(false)
   const steps = process.steps ?? []
-  if (!process.thinking.trim() && steps.length === 0) return null
+  const thinking = (process.thinking ?? '').trim()
+  if (!thinking && steps.length === 0) return null
   const thinkSec = formatProcessSeconds(process.thinking_ms)
   const summary = [
-    thinkSec ? `思考 ${thinkSec}` : (process.thinking.trim() ? '含思考过程' : ''),
+    thinkSec ? `思考 ${thinkSec}` : (thinking ? '含思考过程' : ''),
     steps.length ? `${steps.length} 个工具步骤` : '',
   ].filter(Boolean).join(' · ')
   return (
@@ -97,8 +121,8 @@ function MessageProcess({ process }: { process: NonNullable<ConversationMessage[
       </button>
       {open && (
         <div className="message-process-body">
-          {process.thinking.trim() ? (
-            <pre className="agent-thinking-body agent-thinking-body-open">{process.thinking}</pre>
+          {thinking ? (
+            <pre className="agent-thinking-body agent-thinking-body-open">{thinking}</pre>
           ) : null}
           {steps.length ? (
             <AgentSteps
@@ -175,6 +199,7 @@ function AnswerCard({ message, personaName, onFeedback, onOpenMaterial, onRetry,
         </header>
 
         {message.process ? <MessageProcess process={message.process} /> : null}
+        <VerificationNote verification={message.verification} />
 
         <div className="workspace-msg-content">
           <CitationText content={message.content} sources={sources} onCite={handleCite} />
@@ -398,6 +423,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
             ) : null}
             <AgentThinking thinking={agentRun.thinking} live={!agentRun.final && !agentRun.aborted} />
             <AgentSteps steps={agentRun.steps} />
+            <VerificationNote verification={agentRun.verification} />
             {agentRun.notice ? <p className="workspace-agent-notice">{agentRun.notice}</p> : null}
             {agentRun.streamingText ? (
               <div className="workspace-agent-streaming">

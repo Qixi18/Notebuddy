@@ -424,6 +424,31 @@
   line-height: 1.9;
 }
 
+/* ---- 发布前核验状态：已核实 / 部分未核实 / 未核验 必须一眼可分 ----
+   （2026-11-01 复审 P0-QA-02：不能把「不充分」显示成「已核实」） */
+.workspace-msg-verification {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin: 2px 0 6px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.workspace-msg-verification span {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.workspace-msg-verification em { font-style: normal; color: var(--ws-note); }
+.workspace-msg-verification.is-ok { background: var(--ws-tint); color: var(--nb-forest-deep); }
+.workspace-msg-verification.is-ok span { background: var(--nb-sage); color: #fff; }
+.workspace-msg-verification.is-warn { background: #fdf6e3; color: #7a5a12; }
+.workspace-msg-verification.is-warn span { background: #e0b04a; color: #3a2a05; }
+
 /* ---- P3 课件收窄：composer 工具区的消息级收窄控件（仅 course 档显示） ----
    菜单复用 .workspace-scope-option 的条目样式；composer 在页面底部，菜单向上弹。 */
 .workspace-material-wrap { position: relative; min-width: 0; }

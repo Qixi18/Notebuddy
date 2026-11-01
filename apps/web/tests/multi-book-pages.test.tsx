@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+﻿import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
@@ -12,7 +12,6 @@ vi.mock('../src/api', () => ({ api: {
   getForestRelations: vi.fn().mockResolvedValue([]), getLatestForestJob: vi.fn().mockResolvedValue(null),
   listMaterials: vi.fn().mockResolvedValue([]), listNotes: vi.fn().mockResolvedValue([]), listNotebooks: vi.fn(), createNotebook: vi.fn(),
 } }))
-vi.mock('../src/features/notes/NoteSectionReader', () => ({ NoteSectionReader: ({ noteId }: { noteId: string }) => <p>正文 {noteId}</p> }))
 const section = { id: 'n2', notebook_id: 'b2', material_id: 'm2', tree_slot: 0, title: '第二本知识点' }
 const second = { id: 'b2', course_id: 'c', title: '第二本', tree_slot: 1, order_revision: 0, chapters: [{ id: 'm2', title: '第二讲', sections: [section] }], historical_sections: [], removed_chapters: [] }
 const first = { ...second, id: 'b1', title: '默认本', chapters: [] }

@@ -8,11 +8,21 @@ export type NotebookSaveState = 'saved' | 'unsaved' | 'saving' | 'error' | 'conf
 const AUTOSAVE_DELAY = 850
 const DRAFT_DELAY = 500
 
+/**
+ * Notebook 自动保存 / 本地草稿。
+ *
+ * ``courseId === null`` 表示「未分类 Notebook」（只有 notebook 级路由）。
+ * 用 ``null`` 而不是字符串 ``'unbound'`` 表达这个身份，避免伪课程 ID 继续在
+ * 业务 API 里传播；``unbound`` 只作为本地草稿键命名空间使用（见 draftStore）。
+ */
 export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
-  courseId: string | undefined
+  courseId: string | null | undefined
   notebookId: string | undefined
   onDirtyChange?: (dirty: boolean) => void
 }) {
+  /** courseId 为 undefined 表示身份尚未解析完；null 是合法的未分类身份。 */
+  const ready = Boolean(notebookId) && courseId !== undefined
+  const unbound = courseId === null
   const [state, setState] = useState<NotebookSaveState>('saved')
   const [error, setError] = useState<string>()
   const [revision, setRevision] = useState(0)
@@ -52,7 +62,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     const write = () => queueDraftOperation(() => writeDraft(courseId, notebookId, content, revision))
     if (immediate) write()
     else draftTimer.current = window.setTimeout(write, DRAFT_DELAY)
-  }, [courseId, notebookId, queueDraftOperation])
+  }, [ready, courseId, notebookId, queueDraftOperation])
 
   const isDirty = useCallback(() => {
     if (!contentRef.current) return false
@@ -122,7 +132,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     } finally {
       inFlightRef.current = false
     }
-  }, [courseId, notebookId, persistDraft, queueDraftOperation])
+  }, [ready, unbound, courseId, notebookId, persistDraft, queueDraftOperation])
   const saveNowRef = useRef(saveNow)
   saveNowRef.current = saveNow
 
@@ -170,7 +180,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     revisionRef.current = draft.revision
     setRevision(draft.revision)
     markEdited(draft.content)
-  }, [courseId, notebookId, markEdited])
+  }, [ready, courseId, notebookId, markEdited])
 
   const retry = useCallback(() => {
     if (conflictRef.current) return
@@ -189,7 +199,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
       setError(cause instanceof Error ? cause.message : '服务器版本读取失败')
       return null
     }
-  }, [courseId, notebookId])
+  }, [ready, unbound, courseId, notebookId])
 
   const applyServer = useCallback((document: NotebookDocumentResponse) => {
     reset(document.content, document.revision, document.updated_at)
@@ -205,7 +215,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     setError(undefined)
     setState('unsaved')
     await saveNowRef.current()
-  }, [courseId, fetchServer, notebookId])
+  }, [ready, courseId, fetchServer, notebookId])
 
   const keepLocalDraft = useCallback(() => {
     if (!courseId || !notebookId || !contentRef.current) return
@@ -213,7 +223,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     setConflictOpen(false)
     setState('unsaved')
     setError('本地草稿已保留。自动保存已暂停，处理完冲突后再继续保存。')
-  }, [courseId, notebookId, persistDraft])
+  }, [ready, courseId, notebookId, persistDraft])
 
   useEffect(() => {
     if (!courseId || !notebookId) return
@@ -224,7 +234,7 @@ export function useNotebookSave({ courseId, notebookId, onDirtyChange }: {
     }
     window.addEventListener('beforeunload', beforeUnload)
     return () => window.removeEventListener('beforeunload', beforeUnload)
-  }, [courseId, isDirty, notebookId])
+  }, [ready, isDirty, notebookId])
 
   const flush = useCallback(() => {
     if (saveTimer.current) window.clearTimeout(saveTimer.current)

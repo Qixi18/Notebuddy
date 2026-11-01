@@ -20,6 +20,8 @@ export type {
   AgentStatusEvent,
   AgentSuggestion,
   AgentThinkingEvent,
+  AgentVerification,
+  AgentVerificationStatus,
   AgentStreamHandlers,
 } from './agentStream'
 
