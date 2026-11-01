@@ -58,6 +58,7 @@ MIGRATED_TABLES = PHASE_THREE_TABLES | FOREST_TABLES | {
     "document_parse_runs", "document_pages", "document_blocks", "document_sections",
     "document_chunks", "notebook_block_sources", "notebook_sections",
     "notebook_edit_suggestions",
+    "file_processing_budgets", "provider_usage_reservations",
 }
 LEGACY_COLUMNS = {
     "materials": {"topic_title": "VARCHAR(200)"},

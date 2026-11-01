@@ -21,7 +21,9 @@ from app.schemas.api import (
     SettingsStatus,
     SettingsUpdate,
     SettingsUpdateResponse,
+    VisionCapabilityTestRequest,
 )
+from app.services.provider_audit import begin_call, finish_call, provider_status_from_error
 
 router = APIRouter()
 
@@ -125,6 +127,50 @@ def test_api_connectivity(
         base_url=base_url,
         model=model,
     )
+
+
+@router.post("/config/test-vision-capability")
+def test_vision_image_capability(
+    payload: VisionCapabilityTestRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Explicitly test image input with a tiny PNG; only metadata is audited."""
+    from app.document_processing.engines.vision import preflight_image_support
+
+    if payload.api_key and len(payload.api_key.strip()) < 8:
+        raise HTTPException(status_code=422, detail="视觉 API Key 长度过短")
+    if payload.base_url and not payload.base_url.strip().startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="视觉服务地址必须以 http:// 或 https:// 开头")
+    if payload.base_url:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(payload.base_url.strip())
+        if (not parsed.hostname or parsed.username or parsed.password
+                or parsed.query or parsed.fragment):
+            raise HTTPException(status_code=422, detail="视觉服务地址不能包含账号、密码、查询参数或片段")
+    if payload.model and not all(char.isalnum() or char in "-_.:/" for char in payload.model):
+        raise HTTPException(status_code=422, detail="视觉模型 ID 格式无效")
+    config = {key: value for key, value in {
+        "base_url": payload.base_url, "api_key": payload.api_key,
+        "model": payload.model, "timeout_seconds": payload.timeout_seconds,
+    }.items() if value is not None}
+    audit, started = begin_call(
+        db, provider="vision", operation="image_capability_preflight",
+        model=payload.model, request_units=1,
+        metadata={"has_base_url": bool(payload.base_url), "image_test": True},
+    )
+    db.commit()
+    try:
+        result = preflight_image_support(config)
+    except Exception as exc:
+        finish_call(db, audit, started, status=provider_status_from_error(exc),
+                    error_type=type(exc).__name__)
+        db.commit()
+        raise HTTPException(status_code=502, detail="视觉模型预检失败") from exc
+    finish_call(db, audit, started,
+                status="success" if result.get("supports_image_input") else str(result.get("status") or "failed"),
+                response_units=1 if result.get("supports_image_input") else 0)
+    db.commit()
+    return result
 
 
 @router.get("/config/diagnostics")

@@ -20,7 +20,7 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 BASE_REVISION = "d9e4a7b21c60"
 AGENT_REVISION = "e29a10c7f501"
-HEAD_REVISION = "f2b7d9a1406c"
+HEAD_REVISION = "b6e1a9d420fc"
 PROCESSING_REVISION = "a5e3c8d1f209"
 
 NOTEBOOK_DOCUMENT = json.dumps(
@@ -114,7 +114,8 @@ def test_upgrade_from_scratch_and_stepwise_downgrade(tmp_path):
     with sqlite3.connect(db_path) as connection:
         assert _versions(connection) == {HEAD_REVISION}
         tables = _tables(connection)
-        for table in ("quizzes", "quiz_items", "quiz_attempts", "review_artifacts"):
+        for table in ("quizzes", "quiz_items", "quiz_attempts", "review_artifacts",
+                      "file_processing_budgets", "provider_usage_reservations"):
             assert table in tables
         assert "request_key" in _columns(connection, "quiz_attempts")
         assert "uq_quiz_attempts_item_request" in _indexes(connection, "quiz_attempts")
@@ -160,6 +161,8 @@ def test_upgrade_from_scratch_and_stepwise_downgrade(tmp_path):
         # migration applied, alongside the requested agent branch revision.
         # Alembic stores both rows; their insertion order is not significant.
         assert _versions(connection) == {AGENT_REVISION, PROCESSING_REVISION}
+        assert "file_processing_budgets" not in _tables(connection)
+        assert "provider_usage_reservations" not in _tables(connection)
         assert "request_key" not in _columns(connection, "quiz_attempts")
         assert "uq_quiz_attempts_item_request" not in _indexes(connection, "quiz_attempts")
         assert "quizzes" in _tables(connection)

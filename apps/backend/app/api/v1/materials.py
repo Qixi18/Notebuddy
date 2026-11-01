@@ -536,6 +536,19 @@ def get_document_coverage(asset_id: str, notebook_id: str | None = None,
     }
 
 
+@router.get("/assets/{asset_id}/processing-budget")
+def get_asset_processing_budget(asset_id: str, notebook_id: str | None = None,
+                                db: Session = Depends(get_db)):
+    _ensure_asset(db, asset_id, notebook_id)
+    from app.services.processing_budget import budget_read
+
+    return budget_read(asset_id) or {
+        "asset_id": asset_id, "currency": "CNY", "limit_fen": 1000,
+        "settled_fen": 0, "reserved_fen": 0, "remaining_fen": 1000,
+        "status": "active", "reservations": [],
+    }
+
+
 def _ensure_asset(db: Session, asset_id: str, notebook_id: str | None = None) -> Asset:
     if notebook_id:
         try:
@@ -668,11 +681,17 @@ class ProcessingRouteSelection(BaseModel):
 @router.post('/assets/{asset_id}/processing-route', status_code=202)
 def switch_asset_processing_route(asset_id: str, payload: ProcessingRouteSelection,
                                   db: Session = Depends(get_db)):
-    from app.document_processing.routes import provider_snapshot, resolve_route
+    from app.document_processing.routes import (
+        ensure_vision_preflight,
+        provider_snapshot,
+        resolve_route,
+    )
     try:
         route = resolve_route(payload.processing_route)
+        if route == "llm":
+            ensure_vision_preflight()
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(409 if "预检" in str(exc) or "视觉模型" in str(exc) else 422, str(exc)) from exc
     asset = _ensure_asset(db, asset_id)
     owner = db.scalar(select(NotebookAsset).where(NotebookAsset.asset_id == asset_id,
         NotebookAsset.is_owner.is_(True), NotebookAsset.detached_at.is_(None)))

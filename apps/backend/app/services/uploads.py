@@ -215,6 +215,12 @@ def ingest_document(
         route = resolve_route(processing_route)
     except ValueError as exc:
         raise UploadRejected(str(exc), 422) from exc
+    if route == "llm":
+        from app.document_processing.routes import ensure_vision_preflight
+        try:
+            ensure_vision_preflight()
+        except ValueError as exc:
+            raise UploadRejected(str(exc), 409) from exc
     max_bytes, _ = route_limits(route)
     extension = Path(filename).suffix.lower()
     if extension not in settings.allowed_extensions:

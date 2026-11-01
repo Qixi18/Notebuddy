@@ -325,10 +325,10 @@ def _enqueue_ready_group(db, batch, ready, now) -> int:
     ).encode()).hexdigest()
     key = f'batch-{batch.id[:20]}-{fingerprint[:48]}'
     try:
-        from app.api.v1.generation import create_generation_job
         from app.schemas.generation import NotebookGenerationCreate
-        response = create_generation_job(batch.notebook_id,
-            NotebookGenerationCreate(asset_ids=asset_ids), key, db)
+        from app.services.generation_jobs import create_generation_job
+        response = create_generation_job(db, batch.notebook_id,
+            NotebookGenerationCreate(asset_ids=asset_ids), key)
         task_id = response['id']
         task = db.get(NotebookGenerationJob, task_id)
         for row in ready:

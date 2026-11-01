@@ -34,6 +34,28 @@ def test_invalid_route_is_rejected_before_settings_write():
         settings_store._sanitize('NOTEBOOK_DOCUMENT_PROCESSING_ROUTE', 'unknown')
 
 
+def test_llm_upload_is_rejected_until_current_vision_config_is_verified(session, tmp_path, monkeypatch):
+    from app.document_processing.engines import vision
+    from app.services.uploads import UploadRejected, ingest_document
+    from tests.notebook_fixtures import make_course, make_notebook
+
+    monkeypatch.setattr(settings, 'data_dir', tmp_path)
+    monkeypatch.setenv('NOTEBOOK_VISION_BASE_URL', 'https://vision.example/v1')
+    monkeypatch.setenv('NOTEBOOK_VISION_MODEL', 'vision-test')
+    monkeypatch.setattr(vision, '_capability_path', lambda: tmp_path / 'vision-capabilities.json')
+    monkeypatch.setattr(vision, '_capability_secret_path', lambda: tmp_path / 'vision-capability-hmac.key')
+    course = make_course(session)
+    book = make_notebook(session, course)
+
+    with pytest.raises(UploadRejected) as rejected:
+        ingest_document(session, course_id=course.id, notebook_id=book.id,
+                        source=io.BytesIO(b''), filename='test.pdf', lecture_title='',
+                        topic_title='', media_type='application/pdf', processing_route='llm')
+
+    assert rejected.value.status_code == 409
+    assert '预检' in str(rejected.value)
+
+
 def test_llm_upload_bypasses_standard_docx_position_limit(session, tmp_path, monkeypatch):
     from docx import Document
 
@@ -42,6 +64,7 @@ def test_llm_upload_bypasses_standard_docx_position_limit(session, tmp_path, mon
 
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
     monkeypatch.setattr(settings, 'max_pages', 1)
+    monkeypatch.setattr('app.document_processing.routes.ensure_vision_preflight', lambda: None)
     course = make_course(session)
     book = make_notebook(session, course)
     document = Document()
@@ -93,6 +116,7 @@ def test_switching_failed_asset_keeps_old_parse_and_requeues_same_source(session
         persist_ir,
     )
     book = make_notebook(session, make_course(session))
+    monkeypatch.setattr('app.document_processing.routes.ensure_vision_preflight', lambda: None)
     asset = make_asset(session, book)
     material = make_material(session, book, asset)
     persist_ir(session, book, asset)

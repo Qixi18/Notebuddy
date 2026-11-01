@@ -8,6 +8,8 @@ export type ConnectivityTestPayload = {
   base_url?: string
   model?: string
 }
+export type VisionCapabilityTestPayload = { base_url?: string; api_key?: string; model?: string; timeout_seconds?: number }
+export type VisionCapabilityStatus = { status: string; supports_image_input: boolean; model?: string | null; checked_at?: string | null; message?: string }
 export type OCRStatus = { enabled: boolean; available: boolean; status: string; provider: string; max_pages: number; language: string; timeout_seconds: number }
 export type ProcessingRoute = 'standard' | 'llm'
 export type Capabilities = { allowed_extensions: string[]; max_upload_bytes: number; max_pages: number; ocr: OCRStatus; default_processing_route?: ProcessingRoute; processing_routes?: Record<ProcessingRoute, { max_upload_bytes: number; max_pages: number }> }
@@ -29,6 +31,10 @@ export const configApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+    }),
+  testVisionCapability: (payload: VisionCapabilityTestPayload) =>
+    request<VisionCapabilityStatus>('/api/v1/config/test-vision-capability', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     }),
   getCapabilities: () => request<Capabilities>('/api/v1/config/capabilities'),
 }

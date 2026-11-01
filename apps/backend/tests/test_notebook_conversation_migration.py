@@ -10,7 +10,7 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 BASE = "f1a7c9d3e620"
-HEAD = "f2b7d9a1406c"
+HEAD = "a7c4d2e91b60"
 
 
 def _alembic(data_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:

@@ -157,6 +157,8 @@ def parse_image(
                     # usable only with an explicit review warning.
                     page.status = "partial"
         except Exception as exc:  # pragma: no cover - optional enrichment
+            if getattr(exc, "code", "").startswith("budget_"):
+                raise
             page.warnings.append(f"视觉识别失败：{type(exc).__name__}")
 
     if not blocks:

@@ -11,6 +11,7 @@ vi.mock('../src/features/assistant/AssistantDock', () => ({ AssistantDock: () =>
 const status: SettingsStatus = {
   deepseek: { configured: false, masked_key: null, base_url: 'https://api.example.test', model: 'test', timeout_seconds: 60 },
   embedding: { configured: false, masked_key: null, base_url: null, model: null, timeout_seconds: null },
+  vision: { configured: false, masked_key: null, base_url: null, model: null, timeout_seconds: 60, image_capability: { status: 'unconfigured', supports_image_input: false } },
   storage: { data_dir: 'test', database: 'test.db', max_upload_mb: 50, processing_route: 'standard' },
   limits: { allowed_extensions: ['.pdf'], editable_keys: ['NOTEBOOK_DOCUMENT_PROCESSING_ROUTE'], secret_write_enabled: false, token_required: false },
   source: { env_path: 'test.env', env_exists: true, override_keys: [] },

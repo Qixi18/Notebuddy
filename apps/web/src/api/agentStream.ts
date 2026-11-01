@@ -21,6 +21,7 @@ export type AgentDeltaEvent = { type: 'delta'; text: string }
 export type AgentThinkingEvent = { type: 'thinking'; text: string }
 
 export type AgentNoticeEvent = { type: 'notice'; text: string }
+export type AgentStatusEvent = { type: 'status'; status: 'reading_notebook' | 'drafting' | 'checking_sources' | 'searching_web' | 'finalizing' }
 
 export type AgentSuggestion =
   | { type: 'note_suggestion'; id: string; note_id: string; note_title: string; impact: string }
@@ -81,6 +82,7 @@ export type AgentEvent =
   | AgentDeltaEvent
   | AgentThinkingEvent
   | AgentNoticeEvent
+  | AgentStatusEvent
   | AgentFinalEvent
   | AgentErrorEvent
 
@@ -122,6 +124,7 @@ export type AgentStreamHandlers = {
   onDelta?: (event: AgentDeltaEvent) => void
   onThinking?: (event: AgentThinkingEvent) => void
   onNotice?: (event: AgentNoticeEvent) => void
+  onStatus?: (event: AgentStatusEvent) => void
   onFinal?: (event: AgentFinalEvent) => void
   onError?: (event: AgentErrorEvent) => void
 }

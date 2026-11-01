@@ -195,6 +195,17 @@ export type AssetResource = {
   created_at: string
 }
 
+export type AssetProcessingBudget = {
+  asset_id: string
+  currency: 'CNY'
+  limit_fen: number
+  settled_fen: number
+  reserved_fen: number
+  remaining_fen: number
+  status: 'active' | 'exhausted' | 'uncertain' | 'overrun' | 'closed'
+  reservations: Array<{ stage: string; reserved_fen: number; charged_fen: number | null; state: string }>
+}
+
 export type DocumentParseRunSummary = {
   id: string; asset_id: string; status: string; is_current: boolean
   page_count: number; text_chars: number; quality_status: string
@@ -564,6 +575,8 @@ export type Feedback = {
 export type SettingsStatus = {
   deepseek: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }
   embedding: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }
+  vision: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null; image_capability: { status: string; supports_image_input: boolean; model?: string | null; checked_at?: string | null } }
+  budget?: { limit_cny: string; currency: string; text: Record<string, string | number | boolean | null>; vision: Record<string, string | number | boolean | null>; fx_usd_cny: string; fx_source: string; fx_as_of: string; fx_buffer_percent: string }
   storage: { data_dir: string; database: string; max_upload_mb: number; processing_route?: 'standard' | 'llm' }
   limits: { allowed_extensions: string[]; editable_keys: string[]; secret_write_enabled: boolean; token_required: boolean }
   source: { env_path: string; env_exists: boolean; override_keys: string[] }

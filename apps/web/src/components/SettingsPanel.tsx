@@ -29,8 +29,9 @@ function isFailure(status: string | undefined): boolean {
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const {
     status, draft, secrets, token, setToken, loading, saving, testing, testResults,
+    visionPreflightResult,
     error, setError, notice, changeCount, secretTouched, secretWriteReady,
-    handleSave, handleTest, update, updateSecret,
+    handleSave, handleTest, handleVisionPreflight, update, updateSecret,
     sidebarQuote, setSidebarQuote,
   } = useSettingsDraft()
 
@@ -140,6 +141,52 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
               <section className="settings-section">
                 <div className="settings-section-heading">
+                  <span>视觉模型</span>
+                  <small>仅用于文档页面图片识别</small>
+                </div>
+                <label className="field">
+                  <span>视觉服务地址</span>
+                  <input value={draft.NOTEBOOK_VISION_BASE_URL}
+                    onChange={event => update('NOTEBOOK_VISION_BASE_URL', event.target.value)}
+                    placeholder="https://api.example.com/v1" disabled={saving} />
+                </label>
+                <label className="field">
+                  <span>视觉模型 ID</span>
+                  <input value={draft.NOTEBOOK_VISION_MODEL}
+                    onChange={event => update('NOTEBOOK_VISION_MODEL', event.target.value)}
+                    placeholder="填写支持图片输入的模型 ID" disabled={saving} />
+                </label>
+                <label className="field">
+                  <span>视觉请求超时（秒）</span>
+                  <input value={draft.NOTEBOOK_VISION_TIMEOUT_SECONDS}
+                    onChange={event => update('NOTEBOOK_VISION_TIMEOUT_SECONDS', event.target.value)}
+                    inputMode="decimal" placeholder="60" disabled={saving} />
+                </label>
+                <label className="field">
+                  <span>视觉 API Key{status.vision.masked_key && <em className="field-existing">当前：{status.vision.masked_key}</em>}</span>
+                  <input type="password" value={secrets.NOTEBOOK_VISION_API_KEY}
+                    onChange={event => updateSecret('NOTEBOOK_VISION_API_KEY', event.target.value)}
+                    placeholder="留空表示不修改" autoComplete="new-password" spellCheck={false} disabled={saving} />
+                </label>
+                <div className="field actions-row">
+                  <button className="secondary-button" type="button" disabled={testing !== null}
+                    onClick={() => void handleVisionPreflight()}>
+                    {testing === 'vision' ? '图片预检中…' : '预检图片输入能力'}
+                  </button>
+                  <span className="actions-hint">
+                    {visionPreflightResult?.message ?? (status.vision.image_capability.supports_image_input
+                      ? `已通过图片输入预检（${status.vision.image_capability.model ?? '当前模型'}）`
+                      : '全程 AI 上传前必须先通过；预检会发送一张极小测试图片')}
+                  </span>
+                  {visionPreflightResult && <em className={visionPreflightResult.supports_image_input ? 'field-existing' : 'field-existing test-bad'}>
+                    {visionPreflightResult.supports_image_input ? '图片输入可用' : `预检未通过：${visionPreflightResult.status}`}
+                  </em>}
+                </div>
+                <p className="field-hint">视觉配置独立于文本模型。预检使用当前表单值；用于上传前请保存同一组配置。更换地址、模型或 Key 后需重新预检；未确认图片能力时，后端会拒绝全程 AI 上传。</p>
+              </section>
+
+              <section className="settings-section">
+                <div className="settings-section-heading">
                   <span>模型服务</span>
                   <small>写入 .env 并立即生效</small>
                 </div>
@@ -200,6 +247,31 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                     </em>
                   )}
                 </div>
+              </section>
+              <section className="settings-section">
+                <div className="settings-section-heading"><span>文件处理预算</span><small>每个 Asset 累计上限 ¥10.00</small></div>
+                <p className="field-hint">付费文件处理仅在价格和汇率快照完整时放行。请按供应商公开价格填写 USD / 百万 Token；视觉模型另填每张图片的 Token 上界。共享一次请求给多个文件时，会对每个文件分别预留整次费用，确保不借用其他文件额度。</p>
+                <div className="settings-status-note">文本价格：{status.budget?.text?.ready ? `已配置 · ${status.budget?.text?.tariff_version}` : `未就绪 · ${status.budget?.text?.reason ?? '请补齐价格信息'}`}</div>
+                <div className="settings-status-note">视觉价格：{status.budget?.vision?.ready ? `已配置 · ${status.budget?.vision?.tariff_version}` : `未就绪 · ${status.budget?.vision?.reason ?? '请补齐价格信息'}`}</div>
+                {([
+                  ['DEEPSEEK_INPUT_COST_PER_MILLION', '文本输入价（USD / 百万 Token）'],
+                  ['DEEPSEEK_OUTPUT_COST_PER_MILLION', '文本输出价（USD / 百万 Token）'],
+                  ['DEEPSEEK_PRICE_VERSION', '文本价格版本'],
+                  ['DEEPSEEK_PRICE_SOURCE', '文本价格来源 URL'],
+                  ['NOTEBOOK_VISION_INPUT_COST_PER_MILLION', '视觉输入价（USD / 百万 Token）'],
+                  ['NOTEBOOK_VISION_OUTPUT_COST_PER_MILLION', '视觉输出价（USD / 百万 Token）'],
+                  ['NOTEBOOK_VISION_MAX_IMAGE_TOKENS', '每张图片最大计价 Token'],
+                  ['NOTEBOOK_VISION_PRICE_VERSION', '视觉价格版本'],
+                  ['NOTEBOOK_VISION_PRICE_SOURCE', '视觉价格来源 URL'],
+                  ['NOTEBOOK_BUDGET_USD_CNY_RATE', 'USD/CNY 汇率快照'],
+                  ['NOTEBOOK_BUDGET_FX_RATE_SOURCE', '汇率来源 URL'],
+                  ['NOTEBOOK_BUDGET_FX_RATE_AS_OF', '汇率日期（YYYY-MM-DD）'],
+                  ['NOTEBOOK_BUDGET_FX_BUFFER_PERCENT', '汇率安全缓冲百分比'],
+                ] as const).map(([key, label]) => <label className="field" key={key}>
+                  <span>{label}</span>
+                  <input value={draft[key]} onChange={event => update(key, event.target.value)} disabled={saving}
+                    inputMode={key.includes('COST') || key.includes('RATE') || key.includes('TOKENS') || key.includes('BUFFER') ? 'decimal' : undefined} />
+                </label>)}
               </section>
 
               <section className="settings-section">
@@ -305,7 +377,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <details className="settings-details">
                   <summary>可修改的配置项（白名单）</summary>
                   <div className="key-chips">
-                    {[...status.limits.editable_keys, 'DEEPSEEK_API_KEY', 'EMBEDDING_API_KEY'].map((key) => (
+                    {[...status.limits.editable_keys, 'DEEPSEEK_API_KEY', 'EMBEDDING_API_KEY', 'NOTEBOOK_VISION_API_KEY'].map((key) => (
                       <span className="key-chip" key={key}>{key}</span>
                     ))}
                   </div>

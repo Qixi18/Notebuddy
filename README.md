@@ -8,7 +8,7 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 **整改提案（Proposed，待审）**：按 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md) 与 [实施盘点](implementation-inventory.md) 分批收敛 Notebook 答疑证据门禁、只读正文、未分类会话契约、视觉模型能力预检、单文件 CNY 预算及共享 Workspace。上述内容是开发目标，不代表已实现或验收；实施基线为 2026-11-01 fetch 后的 `feat/overall-inspection`。
 
-**实施进度（2026-11-01）**：A1 会话迁移与旧 Note 答疑入口清理已在 `feat/overall-inspection` 开发中；`f2b7d9a1406c` 为新增 Notebook 会话迁移。Notebook 专属问答目前明确返回未开放状态，A2 尚需实现核验后 SSE；B、C、D 均未完成。ADR-0002 仍为 Proposed，以上不是全项目验收声明。
+**实施进度（2026-11-01）**：A1 会话迁移与旧 Note 答疑入口清理已完成并推送，提交 `0b0c033`；A2 Notebook 第一源、DocumentIR/Web 主张核验、核验后 SSE、B1 视觉模型独立配置与图片能力预检，以及 B2 文件级 10.00 CNY 预算账本，均已在本地实现并通过自动回归。C1/C2 已把课程与未分类 URL 接入同一 `NotebookPage`、统一正文/保存/草稿/历史/附件/AI Bridge，并移除旧未分类页面编排，保留旧 URL。D 已将生成任务创建逻辑下沉到 Application Service，完整 `notebook.py` 拆分仍未完成。当前所有本轮改动仅在本地工作树，未提交、未推送。A2 使用迁移 `a7c4d2e91b60`，B2 使用迁移 `b6e1a9d420fc`。本轮最终完整自动回归：后端 463 passed / 4 skipped，Web navigation 52 passed、Vitest 80 files / 412 passed，Web/Desktop 构建通过；D 服务调整后全量脚本也通过。真实供应商/真实材料和浏览器人工验收未执行；ADR-0002 保持 Proposed，不代表整体规划已全部完成。
 
 ## 当前能力与边界
 

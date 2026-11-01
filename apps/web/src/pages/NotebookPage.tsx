@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useWorkspace } from '../components/AppLayout'
-import type { AssetResource, DeletionPreview, Material, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
+import type { AssetProcessingBudget, AssetResource, DeletionPreview, Material, NotebookDocumentResponse, NotebookGenerationJob, NotebookRead, NotebookUploadBatch } from '../types'
 import { ProcessingRouteControl, useProcessingRoute } from '../features/notebook/useProcessingRoute'
 import type { AssetProcessingJob } from '../types'
 import {
@@ -19,6 +19,8 @@ import { clearDraft, readDraft, type NotebookDraft } from '../features/notebook-
 import { useRegisterNotebookBridge, type NotebookBridgeValue } from '../features/notebook-editor/NotebookBridge'
 import { DocumentSourcePreview } from '../features/notebook-editor/DocumentSourcePreview'
 import { historyOriginLabel, useHistoryDialog } from '../features/notebook-editor/historyDialog'
+import { useNotebookIdentity } from '../features/notebook-workspace/hooks/useNotebookIdentity'
+import { SourceUploadPanel } from '../features/notebook-workspace/SourceUploadPanel'
 import './NotebookPage.css'
 
 function serverDate(value: string): Date {
@@ -63,7 +65,7 @@ export function NotebookPage() {
 }
 
 function NotebookPageBody() {
-  const { courseId, notebookId } = useParams<{ courseId: string; notebookId: string }>()
+  const { isUnbound, courseId, notebookId, api: notebookApi } = useNotebookIdentity()
   const [searchParams, setSearchParams] = useSearchParams()
   const linkedSectionId = searchParams.get('section')
   const linkedChapterId = searchParams.get('chapter')
@@ -102,6 +104,7 @@ function NotebookPageBody() {
   const [materialActionError, setMaterialActionError] = useState<string>()
   const [materialBusyId, setMaterialBusyId] = useState<string>()
   const [assetJobs, setAssetJobs] = useState<Record<string, AssetProcessingJob>>({})
+  const [fileBudgets, setFileBudgets] = useState<Record<string, AssetProcessingBudget>>({})
   const [assetUploadError, setAssetUploadError] = useState<string>()
   const [allowDuplicateUploads, setAllowDuplicateUploads] = useState(false)
   const { route: processingRoute, setRoute: setProcessingRoute } = useProcessingRoute()
@@ -149,7 +152,7 @@ function NotebookPageBody() {
   }, [])
 
   const refreshNotebookAfterUpload = useCallback(async (batchId: string) => {
-    if (!notebookId || !courseId) return
+    if (!notebookId) return
     setUploadProgress((current) => current?.batchId === batchId ? { ...current, phase: 'refreshing' } : current)
     if (documentDirtyRef.current || save.isDirty()) {
       const message = '检测到未保存修改，已保留当前正文；保存后可重新载入最新内容。'
@@ -158,7 +161,7 @@ function NotebookPageBody() {
       return
     }
     try {
-      const latest = await api.getNotebookDocument(courseId, notebookId)
+      const latest = await notebookApi.getDocument()
       if (!pageActiveRef.current) return
       if (documentDirtyRef.current || save.isDirty()) {
         const message = '检测到未保存修改，已保留当前正文；保存后可重新载入最新内容。'
@@ -184,7 +187,7 @@ function NotebookPageBody() {
         message: cause instanceof Error ? `笔记已生成，但正文载入失败：${cause.message}` : '笔记已生成，但正文载入失败。可重试载入。',
       } : current)
     }
-  }, [courseId, finishUploadProgress, notebookId, save.isDirty, save.reset, save.revision])
+  }, [courseId, finishUploadProgress, notebookApi, notebookId, save.isDirty, save.reset, save.revision])
 
   useEffect(() => () => {
     if (uploadProgressTimerRef.current) window.clearTimeout(uploadProgressTimerRef.current)
@@ -219,8 +222,8 @@ function NotebookPageBody() {
     return true
   }, [editVersion, save.isDirty, save.reset, save.revision])
 
-  const bridgeValue = useMemo<NotebookBridgeValue | null>(() => courseId && notebookId && loaded ? {
-    courseId,
+  const bridgeValue = useMemo<NotebookBridgeValue | null>(() => notebookId && loaded ? {
+    courseId: isUnbound ? null : courseId,
     notebookId,
     title,
     revision: save.revision,
@@ -230,7 +233,7 @@ function NotebookPageBody() {
     insertAI,
     isDirty: save.isDirty,
     adoptDocument,
-  } : null, [adoptDocument, content, courseId, editVersion, insertAI, loaded, notebookId, save.isDirty, save.revision, selection, title])
+  } : null, [adoptDocument, content, courseId, editVersion, insertAI, isUnbound, loaded, notebookId, save.isDirty, save.revision, selection, title])
   useRegisterNotebookBridge(bridgeValue)
 
   useEffect(() => {
@@ -239,7 +242,7 @@ function NotebookPageBody() {
   }, [])
 
   useEffect(() => {
-    if (!courseId || !notebookId) return
+    if (!notebookId) return
     let active = true
     setLoaded(false)
     setLoadError(undefined)
@@ -249,7 +252,7 @@ function NotebookPageBody() {
     setEditVersion(0)
     editorReadyRef.current = false
     setEditorReady(false)
-    void Promise.all([api.getNotebookById(courseId, notebookId), api.getNotebookDocument(courseId, notebookId)])
+    void Promise.all([notebookApi.getNotebook(), notebookApi.getDocument()])
       .then(async ([nextOutline, document]) => {
         if (!active) return
         const normalized = normalizeDocument(document.content)
@@ -267,7 +270,7 @@ function NotebookPageBody() {
       })
     return () => { active = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseId, notebookId])
+  }, [courseId, isUnbound, notebookApi, notebookId])
 
   const refreshAssetResources = useCallback(async () => {
     if (!notebookId) return
@@ -411,7 +414,7 @@ function NotebookPageBody() {
             if (trackedByUploadBatch && uploadBatch?.id) finishUploadProgress(uploadBatch.id, message, true)
             return
           }
-          void api.getNotebookDocument(courseId!, notebookId).then((latest) => {
+          void notebookApi.getDocument().then((latest) => {
             if (!active || save.isDirty() || latest.revision <= save.revision) return
             const normalized = normalizeDocument(latest.content)
             editorRef.current?.replaceContent(normalized)
@@ -425,7 +428,7 @@ function NotebookPageBody() {
       })
     }, 1500)
     return () => { active = false; window.clearInterval(timer) }
-  }, [courseId, finishUploadProgress, generationJob?.id, generationJob?.status, notebookId, save.isDirty, save.reset, save.revision, uploadBatch?.id, uploadBatchGenerationJobIds])
+  }, [courseId, finishUploadProgress, generationJob?.id, generationJob?.status, notebookApi, notebookId, save.isDirty, save.reset, save.revision, uploadBatch?.id, uploadBatchGenerationJobIds])
 
   const headings = useMemo(() => extractOutline(content), [content])
   useDocumentReadingPosition({
@@ -434,6 +437,20 @@ function NotebookPageBody() {
     onRestore: setActiveBlockId,
   })
   const bookMaterials = useMemo(() => materials.filter((material) => material.notebook_id === notebookId), [materials, notebookId])
+  const budgetAssetIds = useMemo(() => Array.from(new Set([
+    ...bookMaterials.map(item => item.asset_id), ...assetResources.map(item => item.id),
+  ].filter((id): id is string => Boolean(id)))), [assetResources, bookMaterials])
+  useEffect(() => {
+    if (!notebookId || !budgetAssetIds.length) { setFileBudgets({}); return }
+    let active = true
+    void Promise.all(budgetAssetIds.map(async assetId => {
+      try { return [assetId, await api.getAssetProcessingBudget(assetId, notebookId)] as const }
+      catch { return null }
+    })).then(rows => {
+      if (active) setFileBudgets(Object.fromEntries(rows.filter((row): row is NonNullable<typeof row> => row !== null)))
+    })
+    return () => { active = false }
+  }, [budgetAssetIds, generationJob?.status, notebookId, uploadBatch?.updated_at])
   const generationStatusCoveredByToast = Boolean(
     uploadProgress?.batchId && generationJob?.id && uploadBatchGenerationJobIds.split('|').includes(generationJob.id),
   )
@@ -442,13 +459,13 @@ function NotebookPageBody() {
   ), [assetResources])
 
   useEffect(() => {
-    if (!loaded || !courseId || !notebookId) return
+    if (!loaded || isUnbound || !courseId || !notebookId) return
     let active = true
     void api.listDeletedMaterials(courseId).then((items) => {
       if (active) setDeletedBookMaterials(items.filter((item) => item.notebook_id === notebookId))
     }).catch(() => { if (active) setDeletedBookMaterials([]) })
     return () => { active = false }
-  }, [courseId, loaded, materials, notebookId])
+  }, [courseId, isUnbound, loaded, materials, notebookId])
 
   async function prepareMaterialRemoval(material: Material) {
     if (materialBusyId) return
@@ -561,14 +578,14 @@ function NotebookPageBody() {
 
   async function renameTitle() {
     const nextTitle = title.trim()
-    if (!courseId || !notebookId || !outline || !nextTitle || nextTitle === outline.title || titleSaving) {
+    if (!notebookId || !outline || !nextTitle || nextTitle === outline.title || titleSaving) {
       if (!nextTitle) setTitle(outline?.title ?? '')
       return
     }
     setTitleSaving(true)
     setTitleError(undefined)
     try {
-      const renamed = await api.renameNotebook(courseId, notebookId, nextTitle)
+      const renamed = await notebookApi.rename(nextTitle)
       setOutline(renamed)
       setTitle((current) => current === nextTitle ? renamed.title : current)
       setLastTitleSavedAt(new Date().toISOString())
@@ -580,7 +597,7 @@ function NotebookPageBody() {
   async function handleUploadMaterial(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (!files.length || !courseId || !notebookId) return
+    if (!files.length || isUnbound || !courseId || !notebookId) return
     if (uploadProgressTimerRef.current) window.clearTimeout(uploadProgressTimerRef.current)
     setUploadError(undefined)
     setUploadProgress({ phase: 'uploading', fileNames: files.map((file) => file.name) })
@@ -601,7 +618,7 @@ function NotebookPageBody() {
       const uploadedFiles = files.filter((_, index) => results[index]?.status === 'fulfilled')
       await refreshCurrentMaterials()
       setAllowDuplicateUploads(false)
-      setOutline(await api.getNotebookById(courseId, notebookId))
+      setOutline(await notebookApi.getNotebook())
       setResourcesOpen(true)
       if (uploadFailures < files.length) {
         const batch = await api.closeNotebookUploadBatch(notebookId, batchId)
@@ -723,10 +740,10 @@ function NotebookPageBody() {
   }
 
   async function uploadImage(file: File): Promise<{ src: string; attachmentId: string } | null> {
-    if (!courseId || !notebookId) return null
+    if (!notebookId) return null
     setImageError(undefined)
     try {
-      const attachment = await api.uploadNotebookAttachment(courseId, notebookId, file)
+      const attachment = await notebookApi.uploadAttachment(file)
       return { src: attachment.url, attachmentId: attachment.id }
     } catch (cause) {
       setImageError(cause instanceof Error ? cause.message : '图片上传失败')
@@ -747,7 +764,7 @@ function NotebookPageBody() {
 
   async function discardDraft() {
     setDraftFound(null)
-    if (courseId && notebookId) await clearDraft(courseId, notebookId)
+    if (notebookId) await clearDraft(courseId, notebookId)
   }
 
   async function copyDraft() {
@@ -810,11 +827,11 @@ function NotebookPageBody() {
 
   function openAssistant(action?: AIAction) {
     window.dispatchEvent(new CustomEvent('notebuddy:open-assistant', {
-      detail: { courseId, notebookId, action, selection, revision: save.revision, title },
+      detail: { courseId: isUnbound ? null : courseId, notebookId, action, selection, revision: save.revision, title },
     }))
   }
 
-  if (!courseId || !notebookId) return <section className="route-state-card" role="alert">笔记地址无效。</section>
+  if (!notebookId) return <section className="route-state-card" role="alert">笔记地址无效。</section>
   if (loadError) return <section className="route-state-card" role="alert"><h1>无法打开笔记</h1><p>{loadError}</p><Link className="primary-button link-button" to="/courses">返回课程</Link></section>
 
   const titleDirty = title !== (outline?.title ?? '')
@@ -835,7 +852,7 @@ function NotebookPageBody() {
     <header className="notebook-document-topbar">
       <Link className="notebook-document-back" to="/courses" aria-label="返回课程">← <span>课程</span></Link>
       <span className="notebook-document-top-separator" aria-hidden="true" />
-      <span className="notebook-document-top-course" title={course?.name}>{course?.name ?? '课程'}</span>
+      <span className="notebook-document-top-course" title={isUnbound ? '未分类' : course?.name}>{isUnbound ? '未分类' : course?.name ?? '课程'}</span>
       <span className="notebook-document-top-chevron" aria-hidden="true">›</span>
       <strong className="notebook-document-top-title" title={outline?.title}>{outline?.title ?? '正在读取笔记…'}</strong>
 
@@ -881,6 +898,7 @@ function NotebookPageBody() {
     <div className={`notebook-document-workspace${leftPanelCollapsed ? ' is-left-panel-collapsed' : ''}`}>
       <aside className="notebook-document-sidebar" aria-label="资料与目录">
         <div className="notebook-document-sidebar-heading"><span>资料与目录</span><button type="button" aria-label={leftPanelCollapsed ? '展开资料与目录' : '收起资料与目录'} aria-expanded={!leftPanelCollapsed} onClick={() => setLeftPanelCollapsed((value) => !value)}>{leftPanelCollapsed ? '»' : '«'}</button></div>
+        {isUnbound ? <SourceUploadPanel notebookId={notebookId} onDocumentUpdated={() => void refreshNotebookAfterUpload('unbound-upload')} /> : <>
         <input ref={fileInput} className="notebook-document-file-input" type="file" accept=".pptx,.pdf,.docx" multiple onChange={(event) => void handleUploadMaterial(event)} aria-label="选择课程资料" />
         <ProcessingRouteControl value={processingRoute} onChange={setProcessingRoute} disabled={busy} />
         {Boolean(aiReadingProgress?.count) && <p className="notebook-document-sidebar-empty" role="status">AI 读取：{aiReadingProgress!.total > 0 ? `${aiReadingProgress!.done} / ${aiReadingProgress!.total} 页` : '准备页面中'}</p>}
@@ -893,6 +911,7 @@ function NotebookPageBody() {
             onChange={(event) => setAllowDuplicateUploads(event.target.checked)} />
           相同文件也作为新资料导入
         </label>
+        </>}
         {uploadError && <p className="notebook-document-sidebar-error" role="alert">{uploadError}</p>}
         {assetUploadError && <p className="notebook-document-sidebar-error" role="alert">{assetUploadError}</p>}
         {generationError && <p className="notebook-document-sidebar-error" role="alert">{generationError}</p>}
@@ -904,14 +923,14 @@ function NotebookPageBody() {
         {!generationStatusCoveredByToast && generationJob?.status === 'completed' && <p className="notebook-document-sidebar-empty" role="status">AI 补充内容已写入正式正文</p>}
         <section className="notebook-document-sidebar-section notebook-document-materials-section">
           <button className="notebook-document-section-toggle" type="button" aria-expanded={resourcesOpen} onClick={() => setResourcesOpen((value) => !value)}>
-            <strong>课程资料</strong><span className={`notebook-document-section-chevron${resourcesOpen ? ' is-open' : ''}`} aria-hidden="true">›</span>
+            <strong>{isUnbound ? '笔记资料' : '课程资料'}</strong><span className={`notebook-document-section-chevron${resourcesOpen ? ' is-open' : ''}`} aria-hidden="true">›</span>
           </button>
           {resourcesOpen && <div className="notebook-document-section-body">
             {materialActionError && <p className="notebook-document-sidebar-error" role="alert">{materialActionError}</p>}
             {bookMaterials.length ? <ul className="notebook-document-material-list">{bookMaterials.map((material) => <li className="notebook-document-material-row" key={material.id}>
               <Link className="notebook-document-material"
                 to={`/courses/${courseId}/notebooks/${notebookId}${material.asset_id ? `?asset=${encodeURIComponent(material.asset_id)}` : ''}`} title={material.original_filename}>
-                <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? '已整理' : material.status === 'failed' ? `处理失败${material.document_warning ? ` · ${material.document_warning}` : ''}` : '正在整理'}</small></span>
+                <span><strong>{material.original_filename}</strong><small>{material.status === 'completed' ? '已整理' : material.status === 'failed' ? `处理失败${material.document_warning ? ` · ${material.document_warning}` : ''}` : '正在整理'}{material.asset_id && fileBudgets[material.asset_id] ? ` · 文件预算 ¥${(fileBudgets[material.asset_id].remaining_fen / 100).toFixed(2)} 可用${fileBudgets[material.asset_id].status === 'active' ? '' : ` · ${fileBudgets[material.asset_id].status === 'exhausted' ? '已耗尽' : fileBudgets[material.asset_id].status === 'uncertain' ? '费用待核' : fileBudgets[material.asset_id].status === 'overrun' ? '超出上限' : '已关闭'}`}` : ''}</small></span>
               </Link>
               <details className="notebook-document-material-actions"><summary aria-label={`管理${material.original_filename}`}>⋯</summary>
                 {material.status === 'failed' && material.asset_id && material.processing_route !== 'llm' && <button type="button" onClick={() => {
@@ -929,7 +948,7 @@ function NotebookPageBody() {
             {sourceImages.length > 0 && <div className="notebook-document-image-resources" aria-label="图片资源">
               <strong>图片资源</strong>
               {sourceImages.map((asset) => <div className="notebook-document-image-resource" key={asset.id}>
-                <span title={asset.original_name}>{asset.original_name}</span>
+                <span title={asset.original_name}>{asset.original_name}{fileBudgets[asset.id] && <small> · 预算可用 ¥{(fileBudgets[asset.id].remaining_fen / 100).toFixed(2)}{fileBudgets[asset.id].status === 'active' ? '' : ` · ${fileBudgets[asset.id].status === 'exhausted' ? '已耗尽' : fileBudgets[asset.id].status === 'uncertain' ? '费用待核' : fileBudgets[asset.id].status === 'overrun' ? '超出上限' : '已关闭'}`}</small>}</span>
                 <button type="button" disabled={Boolean(materialBusyId)}
                   onClick={() => void insertSourceAsset(asset)}>插入正文</button>
                 <button type="button" disabled={Boolean(materialBusyId)}
@@ -1008,7 +1027,7 @@ function NotebookPageBody() {
         {!loaded ? <div className="notebook-document-loading" role="status">正在读取笔记正文…</div> : <article className="notebook-document-paper">
           <input className="notebook-document-title" value={title} onChange={(event) => { setTitle(event.target.value); setTitleError(undefined) }} onBlur={() => void renameTitle()} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} aria-label="笔记名称" maxLength={200} />
           <div className="notebook-document-meta">
-            <span>{course?.name ?? '课程'} · {bookMaterials.length} 份资料 · 约 {wordCount.toLocaleString('zh-CN')} 字</span>
+            <span>{isUnbound ? '未分类' : course?.name ?? '课程'} · {bookMaterials.length || assetResources.length} 份资料 · 约 {wordCount.toLocaleString('zh-CN')} 字</span>
             {lastEditedAt && <span title={serverDate(lastEditedAt).toLocaleString('zh-CN')}>最后编辑 {clock(lastEditedAt)}</span>}
           </div>
           {titleError && <p className="notebook-document-error" role="alert">{titleError}</p>}
@@ -1090,7 +1109,7 @@ function NotebookPageBody() {
     </div>}
 
     {historyOpen && <NotebookHistoryPanel
-      courseId={courseId}
+      notebookApi={notebookApi}
       notebookId={notebookId}
       beforeRestore={async () => {
         if (save.isDirty() && !await save.saveNow()) return null
@@ -1110,8 +1129,8 @@ function NotebookPageBody() {
   </div>
 }
 
-function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, onRestored }: {
-  courseId: string
+function NotebookHistoryPanel({ notebookApi, notebookId, beforeRestore, onClose, onRestored }: {
+  notebookApi: ReturnType<typeof useNotebookIdentity>['api']
   notebookId: string
   beforeRestore: () => Promise<number | null>
   onClose: () => void
@@ -1126,20 +1145,20 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
 
   useEffect(() => {
     let active = true
-    void api.listNotebookRevisions(courseId, notebookId).then((rows) => {
+    void notebookApi.listRevisions().then((rows) => {
       if (active) setItems(rows)
     }).catch((cause: unknown) => {
       if (active) setError(cause instanceof Error ? cause.message : '历史版本读取失败')
     })
     return () => { active = false }
-  }, [courseId, notebookId])
+  }, [notebookApi, notebookId])
 
   async function loadPreview(revision: number) {
     if (busy) return
     setBusy(true)
     setSelectedRevision(revision)
     try {
-      const snapshot = await api.getNotebookRevision(courseId, notebookId, revision)
+      const snapshot = await notebookApi.getRevision(revision)
       setPreview(snapshot.content)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '版本内容读取失败')
@@ -1156,7 +1175,7 @@ function NotebookHistoryPanel({ courseId, notebookId, beforeRestore, onClose, on
         setError('当前正文尚未保存，请先完成保存或处理冲突，再恢复历史版本。')
         return
       }
-      const restored = await api.restoreNotebookRevision(courseId, notebookId, selectedRevision, expectedRevision)
+      const restored = await notebookApi.restoreRevision(selectedRevision, expectedRevision)
       onRestored(restored.content, restored.revision, restored.updated_at)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '恢复失败')

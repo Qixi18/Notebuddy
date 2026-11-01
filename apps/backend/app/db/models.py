@@ -370,6 +370,66 @@ class ProcessingStep(Base):
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
 
+class FileProcessingBudget(Base):
+    """Per-original-Asset CNY budget; retries and reparses share this ledger."""
+
+    __tablename__ = "file_processing_budgets"
+    __table_args__ = (
+        CheckConstraint("currency = 'CNY'", name="ck_file_budget_currency"),
+        CheckConstraint("limit_fen >= 0 AND settled_fen >= 0 AND reserved_fen >= 0",
+                        name="ck_file_budget_amounts_nonnegative"),
+        CheckConstraint("status IN ('active','exhausted','uncertain','overrun','closed')",
+                        name="ck_file_budget_status"),
+        Index("ix_file_processing_budgets_notebook", "notebook_id", "status"),
+    )
+
+    asset_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    notebook_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="CNY", server_default="CNY", nullable=False)
+    limit_fen: Mapped[int] = mapped_column(default=1000, server_default="1000", nullable=False)
+    settled_fen: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    reserved_fen: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active", server_default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utc_now, onupdate=utc_now, nullable=False)
+
+
+class ProviderUsageReservation(Base):
+    """Auditable pre-call reservation and one-time usage settlement per Asset."""
+
+    __tablename__ = "provider_usage_reservations"
+    __table_args__ = (
+        UniqueConstraint("call_id", "asset_id", name="uq_provider_usage_call_asset"),
+        CheckConstraint("currency = 'CNY'", name="ck_provider_usage_currency"),
+        CheckConstraint("reserved_fen >= 0 AND (charged_fen IS NULL OR charged_fen >= 0)",
+                        name="ck_provider_usage_amounts_nonnegative"),
+        CheckConstraint("state IN ('reserved','settled','uncertain','overrun')",
+                        name="ck_provider_usage_state"),
+        Index("ix_provider_usage_asset_created", "asset_id", "created_at"),
+        Index("ix_provider_usage_job", "job_id", "stage"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    call_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    notebook_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    stage: Mapped[str] = mapped_column(String(40), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    step_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    tariff_version: Mapped[str] = mapped_column(String(120), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="CNY", server_default="CNY", nullable=False)
+    fx_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    pricing_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    reserved_fen: Mapped[int] = mapped_column(nullable=False)
+    charged_fen: Mapped[int | None] = mapped_column(nullable=True)
+    provider_usage_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    state: Mapped[str] = mapped_column(String(20), default="reserved", server_default="reserved", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, nullable=False)
+    settled_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
 class AssetMigrationIssue(Base):
     """Persistent audit rows for legacy files intentionally left unmapped."""
 
@@ -960,10 +1020,11 @@ class KnowledgeEdge(Base):
 
 class WebSource(Base):
     __tablename__ = "web_sources"
-    __table_args__ = (Index("ix_web_sources_course_id", "course_id"),)
+    __table_args__ = (Index("ix_web_sources_course_id", "course_id"), Index("ix_web_sources_notebook_id", "notebook_id"))
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    course_id: Mapped[str] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"))
+    course_id: Mapped[str | None] = mapped_column(ForeignKey("courses.id", ondelete="CASCADE"), nullable=True)
+    notebook_id: Mapped[str | None] = mapped_column(ForeignKey("notebooks.id", ondelete="CASCADE"), nullable=True)
     material_id: Mapped[str | None] = mapped_column(ForeignKey("materials.id", ondelete="CASCADE"), nullable=True)
     knowledge_node_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_nodes.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)

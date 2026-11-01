@@ -217,9 +217,12 @@ def persist_assistant_message(
             if not isinstance(web_index, int) or not 0 <= web_index < len(web_results):
                 continue
             item = web_results[web_index]
-            source = db.scalar(select(WebSource).where(
-                WebSource.course_id == conversation.course_id, WebSource.url == item["url"],
-            ))
+            source_scope = (
+                WebSource.notebook_id == conversation.notebook_id
+                if conversation.scope == "notebook" and conversation.notebook_id
+                else WebSource.course_id == conversation.course_id
+            )
+            source = db.scalar(select(WebSource).where(source_scope, WebSource.url == item["url"]))
             if source is not None:
                 db.add(MessageEvidence(
                     message_id=assistant.id, web_source_id=source.id,

@@ -23,10 +23,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.ai.agent_loop import run_agent
 from app.ai.evidence import claim_payload, extract_claims
+from app.ai.notebook_qa import NotebookAnswer, claims_for_answer, run_notebook_answer
 from app.ai.orchestrator import run_answer
 from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
@@ -87,11 +89,105 @@ def send_agent_message(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     conversation = ensure_conversation(db, conversation_id)
-    if conversation.scope == "notebook":
-        raise HTTPException(
-            status_code=409,
-            detail="Notebook 专属核验问答将在 A2 接入；此会话历史可正常读取。",
-        )
+    is_notebook_conversation = conversation.scope == "notebook"
+    if is_notebook_conversation:
+        if payload.scope != "notebook" or not conversation.notebook_id:
+            raise HTTPException(409, "本会话已锁定到 Notebook 范围")
+        if payload.material_id:
+            raise HTTPException(422, "Notebook 答疑不接受课程资料覆盖范围")
+        notebook_context = payload.notebook_context
+        if notebook_context is None or notebook_context.notebook_id != conversation.notebook_id:
+            raise HTTPException(409, "请提供与当前会话绑定的 Notebook 上下文")
+        book = db.get(Notebook, conversation.notebook_id)
+        if (book is None or book.deleted_at is not None
+                or notebook_context.course_id != book.course_id
+                or notebook_context.revision != book.document_revision):
+            raise HTTPException(409, "Notebook 不存在或正文版本已变化，请刷新后重试")
+        if payload.idempotency_key and db.scalar(select(ConversationMessage.id).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.role == "user",
+            ConversationMessage.idempotency_key == payload.idempotency_key,
+        )):
+            raise HTTPException(409, "该问题已提交过，请勿重复发送")
+        history = [(message.role, message.content) for message in conversation.messages]
+        db.add(ConversationMessage(
+            conversation_id=conversation_id, role="user", content=payload.question.strip(),
+            learning_goal=payload.learning_goal, status="completed", idempotency_key=payload.idempotency_key,
+        ))
+        if conversation.title.strip() == DEFAULT_CONVERSATION_TITLE:
+            conversation.title = derive_conversation_title(payload.question, "notebook", book.title)
+        conversation.updated_at = datetime.now(UTC)
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            if payload.idempotency_key:
+                raise HTTPException(409, "该问题已提交过，请勿重复发送") from exc
+            raise
+
+        def notebook_event_stream() -> Iterator[str]:
+            persisted = False
+            assistant: ConversationMessage | None = None
+            try:
+                result: NotebookAnswer | None = None
+                for event in run_notebook_answer(
+                    db, notebook_id=book.id, revision=notebook_context.revision,
+                    question=payload.question, history=history, allow_web=payload.allow_web,
+                ):
+                    if event["type"] == "verified_result":
+                        result = event["result"]
+                        continue
+                    yield _sse(event)
+                if result is None:
+                    raise RuntimeError("核验服务未产生最终结果")
+                claims = claims_for_answer(result)
+                assistant = persist_assistant_message(
+                    db, conversation=conversation, learning_goal=payload.learning_goal,
+                    content=result.answer, model_version=result.model_version,
+                    chunks=result.chunks, web_results=result.web_results, claims=claims,
+                    process=result.process,
+                )
+                persisted = True
+                for offset in range(0, len(result.answer), 180):
+                    yield _sse({"type": "delta", "text": result.answer[offset:offset + 180]})
+                yield _sse({
+                    "type": "final", "answer": result.answer, "mode": "notebook-verified",
+                    "model_version": result.model_version,
+                    "sources": sources_from_evidence(db, assistant), "suggestions": [],
+                    "message_id": assistant.id,
+                    "process": {key: value for key, value in (assistant.process or {}).items()
+                                if key != "verification"} or None,
+                    "conversation_title": conversation.title,
+                })
+            except GeneratorExit:
+                if assistant is not None:
+                    try:
+                        assistant.status = "aborted"
+                        assistant.failure_type = "ClientDisconnected"
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                elif not persisted:
+                    try:
+                        _persist_interrupted_agent(db, conversation, "", payload.learning_goal,
+                                                   {"status": "interrupted", "notebook_revision": notebook_context.revision})
+                    except Exception:
+                        db.rollback()
+                raise
+            except Exception as exc:
+                db.rollback()
+                if not persisted:
+                    db.add(ConversationMessage(
+                        conversation_id=conversation_id, role="assistant",
+                        content="本次 Notebook 答疑未完成，未发布未经核验的初稿。请稍后重试。",
+                        learning_goal=payload.learning_goal, status="failed",
+                        failure_type=type(exc).__name__,
+                    ))
+                    conversation.updated_at = datetime.now(UTC)
+                    db.commit()
+                yield _sse({"type": "error", "message": "Notebook 核验问答未完成，请稍后重试"})
+
+        return StreamingResponse(notebook_event_stream(), media_type="text/event-stream")
     course = ensure_course(db, conversation.course_id)
     is_first_turn = not any(message.role == "user" for message in conversation.messages)
     effective_scope = payload.scope if is_first_turn else (

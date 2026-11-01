@@ -52,6 +52,7 @@ from app.schemas.settings import (
     SettingsStatus,
     SettingsUpdate,
     SettingsUpdateResponse,
+    VisionCapabilityTestRequest,
 )
 from app.schemas.terms import TermExplanationRequest, TermExplanationResponse, TermExplanationSource
 
@@ -109,5 +110,6 @@ __all__ = [
     'TermExplanationResponse',
     'TermExplanationSource',
     'UploadMaterialResponse',
+    'VisionCapabilityTestRequest',
     'WebSourceRead',
 ]

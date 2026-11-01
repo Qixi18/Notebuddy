@@ -37,10 +37,11 @@ def test_get_settings_shape_is_sanitized() -> None:
     assert response.status_code == 200
     body = response.json()
     raw = response.text
-    assert set(body) == {"deepseek", "embedding", "storage", "limits", "source"}
+    assert set(body) == {"deepseek", "embedding", "vision", "budget", "storage", "limits", "source"}
+    assert body["budget"]["limit_cny"] == "10.00"
     # 只允许出现布尔/长度提示，不允许出现完整密钥
     assert "api_key" not in raw.lower() or "masked_key" in raw
-    for section in ("deepseek", "embedding"):
+    for section in ("deepseek", "embedding", "vision"):
         assert "masked_key" in body[section]
         assert body[section]["masked_key"] is None or "****" in body[section]["masked_key"]
 

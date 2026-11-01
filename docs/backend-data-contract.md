@@ -18,7 +18,16 @@
 - 旧 `scope='note'` 和 `note_id` 字段仍用于兼容历史。旧标识若能同时解析到不同 Notebook、跨课程、已删除或不可解析，不自动映射；历史消息仍可读。
 - 当前 Agent 工具表不暴露正文编辑建议。AssistantPage/Dock 不再发送 `reading_context.note_id`，Dock 也不提供直接把回答写入正文的入口。历史建议表、API 和迁移保留。
 
-完整的 Notebook→DocumentIR→WebSearch→核验后 SSE 契约仍为 Proposed，并在 A2 实现前不应视为已完成答疑能力。
+Notebook→DocumentIR→WebSearch→核验后 SSE 的实现进度见后续 A2 记录；整体整改 ADR 仍为 Proposed。
+
+## B1 视觉模型配置和预检（本地实现、全量回归与复审已完成）
+
+- `NOTEBOOK_VISION_BASE_URL`、`NOTEBOOK_VISION_MODEL`、`NOTEBOOK_VISION_TIMEOUT_SECONDS` 和 `NOTEBOOK_VISION_API_KEY` 独立于文本模型配置。设置面板的预检使用当前草稿值，不要求先保存。
+- `POST /api/v1/config/test-vision-capability` 向配置的 OpenAI-compatible `/chat/completions` 发送小型已知红蓝图像，要求模型识别图片左侧颜色；仅返回能力结果和模型元数据，API Key 不进入审计 metadata。
+- 能力结果缓存到 `<NOTEBOOK_DATA_DIR>/vision-capabilities.json`，以规范化 base URL + model 的 SHA-256 指纹索引，只存布尔结果和检查时间，不保存 Key、URL 或图片。改模型或地址后指纹改变，需重新预检。
+- 新建 `llm` 上传、图片上传及已存在 Asset 切换到 `llm` 路线前都要求当前配置已验证；未验证返回 409。处理快照固定非敏感视觉模型身份及能力指纹。读页 Worker 再核对快照指纹和能力缓存，实际调用独立的视觉 Provider Client；校验失败在任何页面图片模型请求前终止。
+- `standard` 路线仍可使用本地 OCR/可选视觉增强；B1 不提供文件处理费用上界。按 Asset 原子预留、重试/恢复累计、价格快照以及 10.00 CNY 硬预算属于 B2，当前不可声称付费调用受到统一预算保护。
+- 当前自动化只覆盖 Fake Provider 和临时测试数据；真实模型预检会产生一次外部请求，尚未执行真实供应商/视觉质量或浏览器人工验收。
 ## 双路线处理补充（2026-10-30）
 
 `assets.processing_route` / `processing_config_json` 固定上传所选路线和非敏感模型连接身份，`materials.processing_route` 与其保持一致。批次保存初始路线；失败输入切换后可在同一批次中按实际路线分组生成。历史数据默认 `standard`，新上传的默认值由设置控制。
@@ -98,6 +107,8 @@ Notebook 页面从 document API 读 JSON 与 revision，编辑器提交预期版
 
 知识森林读课程/Notebook 及目录和关系，不另存正文。Agent 服务端工具按会话课程及可选 Notebook 范围加载现有正文、目录、已处理资料和证据；上传解析流程由后台任务处理，Agent 不应重复解析，也不应把浏览器临时内容当作权威。来源和范围须由服务端校验。
 
+Notebook 专属答疑走 `app.ai.notebook_qa.run_notebook_answer`：服务端用会话绑定的 `notebook_id`、当前 `document_revision` 和 `Notebook.document_json` 建立正文证据，再仅从该 Notebook 当前、已完成且未解绑的 owner `NotebookAsset`/ParseRun 检索 DocumentIR。正文初稿、逐主张核验、来源补充审核、最终答案和 AnswerGate 都在服务端缓冲；核验前 SSE 仅发送阶段状态，不发送正文增量。最终主张只可关联通过白名单校验的正文/DocumentIR 块和 WebSource；未分类 Notebook 的 WebSource 以 `notebook_id` 归属且 `course_id=NULL`。普通 JSON 与 Agent SSE 入口共用同一核验服务和证据映射 helper。内部核验记录写入消息过程 JSON，但历史 API 与 SSE final 会剔除 `verification` 字段。审核输出无效、覆盖检查失败、答案 Gate 遇到冲突或上下文快照变化时不会将草稿作为成功答复发布。
+
 ## 备份、迁移与安全
 
 培养方案保持独立的 `CurriculumImport` → `ForestJob` → 预览确认流程，不生成 Notebook/DocumentIR。课程代码、学分（0–100）、学时（0–10000）与必选修保存在导入 `rows_json`；仅学期、层级、先修写入森林 profile。已关联课程必须提交 `expected_profile_revision`，旧预览 GET 会补充当前版本；缺失或过期确认返回409，任何错误回滚整批。
@@ -109,3 +120,11 @@ Notebook 页面从 document API 读 JSON 与 revision，编辑器提交预期版
 本地默认 SQLite 位于 `<NOTEBOOK_DATA_DIR>/notebook.sqlite3`，原始资源位于数据根目录管理的存储路径。备份应保留 Notebook 正文、revision、来源映射、资产和历史可读性；恢复先预览并恢复到隔离目录。迁移只在隔离库验证升级、重复执行和恢复，不得触碰用户真实库。运行时数据库、原始文件、`.env`、密钥和真实会话不得提交。
 
 详见 [架构说明](architecture.md)、[API](api.md)、[解析说明](parsing.md)、[迁移与恢复](migrations.md) 和 [验收矩阵](acceptance.md)。
+
+## 文件处理预算（B2）
+
+`FileProcessingBudget` 按原始 `Asset.id` 累计，使用 CNY fen，标准/全程 AI 的付费解析及后续 Notebook 正文生成共用同一额度。账本不设指向 Asset 的 FK，以便保留费用审计；Notebook 归属在预留时校验。`ProviderUsageReservation` 记录 call ID、Asset、阶段、任务/检查点、供应商/模型、价格版本、FX/价格快照和预留/结算金额。
+
+所有付费非流式模型调用必须先用保守输入、输出及图像 Token 上界完成原子预留。调用成功且供应商返回完整 prompt/completion usage 时结算并释放差额；调用失败、超时或 usage 缺失保留未结算额度并将文件置 `uncertain`，不自动重试/退款。超过预留的实际 usage 标 `overrun`。余额不足、价格缺失、FX 日期超过 30 天或来源/模型配置不合规时不发起请求，错误码通过 Worker 任务暴露为 `budget_*`。供应商最终账单可能偏离本地 usage/维护者配置的计价规则；本契约只保证配置假设下的本地 1000 fen 闸门。
+
+共享一次调用会把整笔保守费用计到每个相关 Asset，允许保守高估，不允许事后按结果不透明分摊。上传完成后自动触发的收费关系任务暂时关闭；普通对话、单独网页搜索和显式发起的关系任务不属于本文件账本。可通过 `GET /api/v1/assets/{asset_id}/processing-budget?notebook_id=...` 查询金额、状态与预留明细；设置 API 的 `budget` 暴露脱敏价目 readiness 与快照元数据，不含密钥。

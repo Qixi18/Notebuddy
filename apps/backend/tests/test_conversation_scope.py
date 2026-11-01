@@ -96,7 +96,7 @@ def test_notebook_conversation_has_no_course_and_is_listed_by_notebook(tmp_path)
             f"/api/v1/conversations/{row['id']}/messages", json={"question": "test"},
         )
         assert rejected.status_code == 409
-        assert "Notebook 专属问答服务" in rejected.json()["detail"]
+        assert "当前会话 Notebook" in rejected.json()["detail"]
         agent_rejected = client.post(
             f"/api/v1/conversations/{row['id']}/agent-messages",
             json={"question": "test", "scope": "notebook", "notebook_context": {

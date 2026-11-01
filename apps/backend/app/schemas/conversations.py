@@ -102,9 +102,10 @@ class ConversationMessageCreate(BaseModel):
     teacher_persona: TeacherPersonaId = "vodyanitsa"
     # 会话归属：仅在会话尚无任何用户消息（首轮）时落库，之后忽略——范围是会话级属性。
     # 用于把答疑页自动建的「整门课程」空会话，在首轮改写成用户实际选择的范围。
-    scope: Literal["course", "global", "note"] | None = None
+    scope: Literal["course", "global", "note", "notebook"] | None = None
     note_id: str | None = Field(default=None, max_length=36)
     note_title: str | None = Field(default=None, max_length=300)
+    notebook_context: dict | None = None
 
 
 class ReadingContext(BaseModel):

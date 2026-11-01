@@ -133,3 +133,60 @@
 - 变更范围：Notebook 会话数据契约/迁移/API、旧 Note ID 安全映射与前端入口清理、Agent 旧写回工具关闭、对应测试及 ADR/契约/README 记录。
 - 人工浏览器验收：未执行。A1 暂时返回 409 阻止 Notebook 问答；实际问答路径属于 A2。
 - 未覆盖风险：A1 未启用 Notebook 专属答疑；全量自动测试不代表真实模型/材料验收。
+
+## 11. A2 完成记录（2026-11-01，本地未提交）
+
+- **当前状态**：A2 实现、测试、独立评审已完成；改动仅在 `D:\工作台\Notebuddy软件开发\Notebuddy` 的本地 `feat/overall-inspection` 工作树，尚未提交或推送。当前 HEAD `0b0c0334faade82c4acdc719e9c0f02976d7515d`；这是最后确认的本地提交，不代表此后远端状态。用户明确要求后续不提交、不推送。
+- **新行为**：新增 `apps/backend/app/ai/notebook_qa.py`；普通 JSON 会话与 Agent SSE 均调用同一 Notebook-first 服务。会话绑定和当前 revision 必须匹配；正文从 `Notebook.document_json` 及其 block_id/revision 建立；DocumentIR 只从同 Notebook 当前 completed ParseRun 和仍有效的 owner `NotebookAsset(role=source_material)` 读取。未分类 Notebook 可以做限定到 Notebook 的 WebSource 持久化。
+- **核验/发布门禁**：初稿不进入 SSE；逐项审核后检查草稿覆盖，必要时复用现有限额 WebSearch 并逐主张审查来源；AnswerGate 只能链接真实输入 ID，且引用需对应审核中已支持的主张；最终答案另做覆盖检查。无效审核、覆盖检查格式错误、最终答案证据冲突/遗漏均 fail closed。核验过程写入 `process_json.verification`，历史 API 与 SSE final 不公开该字段。答案完整持久化后才输出 SSE delta；生成期间的阶段事件仅说明状态，不含正文或推理。
+- **DB/兼容**：新增迁移 `apps/backend/migrations/versions/a7c4d2e91b60_notebook_web_sources.py`，允许 `web_sources.course_id=NULL` 并增加 Notebook FK；降级发现 Notebook 来源时拒绝执行。普通课程 WebSource 仍按原课程路径查询。
+- **关键变更文件**：`apps/backend/app/ai/notebook_qa.py`、`apps/backend/app/api/v1/agent.py`、`apps/backend/app/api/v1/conversations.py`、`apps/backend/app/db/models.py`、`apps/backend/app/services/conversations.py`、`apps/backend/app/web_search/service.py`、`apps/backend/app/schemas/conversations.py`、迁移与 Alembic/会话测试；前端 SSE 状态事件类型和显示更新位于 `apps/web/src/api/agentStream.ts`、`apps/web/src/api/agent.ts`、`apps/web/src/features/conversation/useConversation.ts`。
+- **独立审查**：实现复审确认来源归因与 final-answer coverage 两项 P1 已修复，无剩余阻断问题。coverage 是结构化模型审议，不能数学证明语义完整；对此采用独立覆盖调用和 fail-closed。
+- **最终验证**：命令 `pwsh -NoProfile -File .\scripts\test.ps1`，退出码 0；Ruff 通过；后端 448 passed / 4 skipped / 2 warnings（pytest 插件重写、Starlette/httpx 弃用）；导航测试 52 passed；Vitest 80 files / 411 tests passed；`tsc -b`、Web production build、Desktop main-process build 通过。Vite 主 bundle >500KB 警告仍存在。
+- **未执行/剩余限制**：未用真实模型、真实文件或真实供应商账单验证；未做浏览器人工验收；没有用真实用户数据库。模型调用中的单次请求无法被可靠硬取消；断开后同步请求可能完成当前 provider call，但阶段边界会阻止后续阶段继续并将未发布流程保存为失败；完整答案已持久化后若 SSE 断开则消息标记 `aborted`，用户可从历史恢复完整正文。AI-02/AI-03 的真实冲突案例与真实外部源质量需后续人工验收。
+- **下一批**：B1 视觉模型配置分离和图像能力预检（记录见第 12 节）。B2 预算已完成本地实现与自动回归（记录见第 13 节）；C1/C2 Workspace 统一和 D 分层拆分仍未实施。
+
+## 12. B1 完成记录（2026-11-01，本地未提交）
+
+- **状态**：视觉模型与文本模型配置已分离；全程 AI 页面读取使用视觉配置。当前分支 `feat/overall-inspection`，基线提交仍为 `0b0c0334faade82c4acdc719e9c0f02976d7515d`；全量改动保持本地未提交、未推送。
+- **能力预检**：设置面板可用草稿 URL/Key/model/timeout 调用 `POST /api/v1/config/test-vision-capability`。请求发送随机颜色的 PNG，并要求模型报告左侧颜色；需匹配本次随机值。调用元数据有审计，不保存图像或 Key。
+- **身份与凭据安全**：能力缓存索引包含 base URL、模型与凭据 HMAC 指纹。HMAC Key 在 `NOTEBOOK_DATA_DIR` 内创建，完整写入并 fsync 后 hard-link 发布；原始 Key、完整 URL 和图像均不落入缓存或 Asset 快照。环境 URL 中若含 userinfo/query/fragment 则视为无效，设置状态和处理快照不回显其内容。Worker 单次捕获运行配置，用同一份配置校验后创建视觉客户端。
+- **门禁**：未通过当前视觉配置预检或缺少相应视觉/文本计价快照时，新 `llm` 文件/图片上传和已有 Asset 路线切换返回 409；执行中如配置身份不再匹配，页面读取前 fail closed。
+- **独立评审**：3 个 P1（URL 凭据回显、Key 轮换复用能力证明、校验与建客户端之间的凭据竞态）已修复并复审关闭；HMAC 密钥文件半写并发问题也已用原子发布修复。风险：不支持 hard-link 的数据盘未实测；多进程并发预检可能覆盖另一配置的缓存项，但只会造成再次预检。
+- **验证**：`pwsh -NoProfile -File .\scripts\test.ps1`，退出码 0；Ruff 通过；后端 455 passed / 4 skipped / 2 warnings；Web navigation 52 passed、Vitest 80 files / 412 tests passed；Web TypeScript/生产构建和 Desktop main-process 构建通过。首次全量回归的一个草稿恢复前端用例时序失败，单文件复跑通过，随后全量复跑通过。Vite 主 bundle >500 KB 警告。未调用真实视觉供应商、未做真实资料质量或浏览器人工验收。
+- **下一批**：C1/C2 将课程与未分类 Notebook 的 Workspace 收敛为同一实现，再进行 D 分层整理。
+
+## 13. B2 完成记录（2026-11-01，本地未提交）
+
+- **状态**：新增 `FileProcessingBudget` 与 `ProviderUsageReservation` 账本，以及 Alembic 迁移 `b6e1a9d420fc`；费用按 Asset 累计并与解析重试、Worker 重启共用。limit 使用整数 fen，初始 1000 fen。
+- **价格/汇率**：设置页支持文本/视觉输入输出价格、视觉每图 Token 上界、价格版本/来源、USD/CNY 汇率、日期和安全缓冲。缺价、来源格式不合规、汇率过期或不能计算上界时拒绝请求。费率由维护者按供应商公开价格录入；自动化验证只使用隔离测试中的 Fake tariff，不曾调用真实供应商。
+- **预留/结算**：供应商请求发出前，以事务/CAS 原子预留最大费用；响应须含完整 usage 才能按价格与 FX 快照结算，释放差额。响应超额会登记实际 usage 并标为 `overrun`；超时、失败或 usage 缺失保留全部预留并标为 `uncertain`，后续收费请求被阻止。请求边界在 `DeepSeekClient.complete` 与直接视觉服务中；标准/全程 AI 解析、规划、正文组合和格式修复均设置 Asset/Notebook/阶段范围。普通会话及独立 WebSearch 不进入文件预算。
+- **共享调用策略**：单次共享请求会对每个涉及 Asset 分别预留/记账整笔调用费用，采用保守重复计费以避免跨文件借用额度。此策略可能提前耗尽多个文件额度。上传生成结束后自动触发的知识关系收费任务已停用；用户另行显式创建的关系任务不在本文件流水线。
+- **可观察性**：新增 `GET /api/v1/assets/{asset_id}/processing-budget?notebook_id=...`，Settings 返回价格配置 readiness；Notebook 资料/图片资源可显示剩余金额和耗尽、不确定、超额状态。预算代码错误以 `budget_*` 写入文件解析/生成任务，任务失败保留已完成检查点且不会自动切换 Provider/路线。
+- **Fake Provider 验证**：新增 8 个预算测试，覆盖价格缺失/过期、预留结算/幂等、usage 缺失、超额、共享多 Asset、并发竞争、正常 Fake Provider usage 与超时禁止重试。另更新 SQLite migration drill、生成预算失败用例、自动关系停用及 Settings schema 测试。目标价剩余额度不足时在请求发出前拒绝；不能证明供应商最终账单在所有未知行为下绝对不超额，只保证在已配置价格、每图上界、usage 与限额假设下的本地规则。
+- **验证记录**：当前全量脚本后端 Ruff 通过、463 passed / 4 skipped / 2 warnings；导航 52 用例通过。Vitest 首次全量有 3 个 Settings 用例因旧 mock 缺少新增 `budget` 字段失败，前端已加入兼容性默认值，6 个相关 Settings 用例复跑通过，Web TypeScript/production build 通过；待完整重跑全量脚本确认。Vite 主 bundle >500 KB 警告仍在。
+- **未执行/限制**：未实测真实模型价、真实供应商账单/图像 Token、真实 PDF/图片质量、浏览器人工流程或真实用户数据库迁移。调用前上界依赖维护者配置准确；共享请求保守重复记账；上传触发关系分析已暂停。当前分支工作区仅本地修改，未提交、未推送。
+- **下一批**：C1/C2 Workspace 统一；之后执行 D 分层重构。
+
+## 14. C1/C2 Workspace 统一与 D 分层第一步（2026-11-01）
+
+### C1/C2：课程与未分类 Notebook 共用页面
+
+- **路由**：`/courses/:courseId/notebooks/:notebookId` 与 `/notebooks/unbound/:notebookId` 均渲染 `pages/NotebookPage.tsx`；兼容 URL 保留。`pages/UnboundNotebookPage.tsx` 已删除，前端代码无其他运行时引用。
+- **身份契约**：新增 `features/notebook-workspace/hooks/useNotebookIdentity.ts` 与 `adapters/notebookApiAdapter.ts`。课程/未分类身份映射到相应读取、重命名、附件和历史 API；保存及草稿沿用既有 `useNotebookSave` 的 unbound 分支。AI Bridge 和打开助手事件在未分类情形传 `courseId: null`，不伪造课程 ID。
+- **能力对照**：两类路由共用 Tiptap 编辑器、document JSON、revision/CAS 保存、自动保存/草稿冲突、图片附件、历史预览/恢复及 Bridge；未分类保留 SourceUploadPanel 资料上传，课程资料批量管理与回收能力仍是课程上下文专属。附件/来源资源列表与 Notebook 级预算状态来自同一共享页面编排。
+- **回归**：`scripts/test.ps1` 在 D 服务抽取前退出码 0：Ruff 通过；后端 463 passed / 4 skipped / 2 warnings；导航 52 passed；Vitest 80 files / 412 passed；Web 与 Desktop 主进程构建通过。为本次统一改造更新 `notebook-history-dialog.test.tsx`，课程/未分类历史恢复与焦点用例都在共享路由页面运行。Web 构建仍有主 bundle >500 KB 警告。
+- **未验收**：未执行浏览器人工验证 NB-01…NB-04 的真实页面、绑定/解绑/知识森林跳转及 PDF/图片上传过程；自动组件测试不替代人工验收。需要人工检查保存冲突、后台生成期间编辑保护和预算耗尽提示。
+
+### D：分层拆分起步
+
+- **确认并消除的反向依赖**：原 `services/notebook_generation_inputs.py` 在应用服务层导入 `api.v1.generation.create_generation_job`。新增 `services/generation_jobs.py` 作为生成任务 Application Service；API Router 调用该服务，上传输入编排也直接调用服务，不再从 Service 反向依赖 API。
+- **行为保持**：原 POST `/notebooks/{notebook_id}/generation-jobs` 路径、Header 幂等键、错误码、状态码、校验和响应字段保持；`generation.py` 中查询/重试/取消端点仍复用同一个响应序列化器。未修改数据库和迁移。
+- **验证**：Ruff 三文件通过；`pytest apps/backend/tests/test_generation_pipeline.py apps/backend/tests/test_generation_limits_db.py apps/backend/tests/test_notebook_forest_jobs.py apps/backend/tests/test_document_ir_generation_e2e.py -q`：43 passed / 1 warning。随后完整 `pwsh -NoProfile -File .\scripts\test.ps1` 退出码 0：Ruff 通过、后端 463 passed / 4 skipped / 2 warnings、Web navigation 52 passed、Vitest 80 files / 412 passed、Web/Desktop 构建通过。主 bundle >500 KB 警告仍在。
+- **D 未完成项**：`api/v1/notebook.py` 仍约 1200 行，尚未按 lifecycle/documents/revisions/resources 等模块拆路由与服务；其他 API→Service→Domain 依赖边界及大前端页面职责尚未逐一审计。该工作需后续分批提取并保持 `write_document()` CAS、来源索引、资产归属和历史行为不变。
+
+### 当前工作区和 Git 边界
+
+- 当前分支仍为 `feat/overall-inspection`；本地 HEAD 与本轮 fetch 后 `origin/feat/overall-inspection` 均为 `0b0c0334faade82c4acdc719e9c0f02976d7515d`。本轮未创建提交，工作区包含全部待审改动。
+- 所有本轮 A2/B1/B2/C1/C2/D 第一阶段差异均仅在本地未提交工作树；按用户明确要求，未提交、未推送。未改动已发布历史迁移；新迁移仅为 A2/B2 的新增版本。
+- 整体计划状态：A1/A2/B1/B2 与 C1/C2 自动验证阶段已完成；真实模型/材料/账单/浏览器验收未做；D 只完成生成任务应用服务下沉的第一步，不能标记为整体完成，ADR-0002 继续 Proposed。

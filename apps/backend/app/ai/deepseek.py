@@ -50,6 +50,18 @@ class DeepSeekClient:
     ) -> str:
         if not self.configured:
             raise DeepSeekError("DEEPSEEK_API_KEY 未配置")
+        from app.services.processing_budget import ProcessingBudgetError, active_budget_guard
+
+        guard = active_budget_guard()
+        reservation = None
+        if guard is not None:
+            try:
+                reservation = guard.before_request(
+                    provider="deepseek", model=self.settings.deepseek_model,
+                    messages=messages, max_tokens=max_tokens,
+                )
+            except ProcessingBudgetError as exc:
+                raise DeepSeekError(str(exc), code=exc.code) from exc
         self.last_finish_reason = None
 
         payload: dict[str, Any] = {
@@ -85,6 +97,11 @@ class DeepSeekClient:
                 for key in ("prompt_tokens", "completion_tokens", "total_tokens")
                 if isinstance(usage, dict) and isinstance(usage.get(key), (int, float))
             } or None
+            if guard is not None and reservation is not None:
+                try:
+                    guard.after_response(reservation, self.last_usage)
+                except ProcessingBudgetError as exc:
+                    raise DeepSeekError(str(exc), code=exc.code) from exc
             content = body["choices"][0]["message"]["content"]
             if self.last_finish_reason == "length" and json_mode:
                 # A thinking model may exhaust the budget before emitting any
@@ -99,6 +116,8 @@ class DeepSeekClient:
                 raise DeepSeekError("DeepSeek 返回了空内容", code='provider_empty')
             return content.strip()
         except httpx.HTTPStatusError as exc:
+            if guard is not None and reservation is not None:
+                guard.request_failed(reservation, exc)
             self.last_usage = None
             self.last_finish_reason = None
             raise DeepSeekError(
@@ -106,7 +125,11 @@ class DeepSeekClient:
                 status_code=exc.response.status_code,
                 retry_after=_retry_after(exc.response.headers.get('Retry-After')),
             ) from exc
+        except DeepSeekError:
+            raise
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+            if guard is not None and reservation is not None:
+                guard.request_failed(reservation, exc)
             self.last_usage = None
             self.last_finish_reason = None
             raise DeepSeekError(f"DeepSeek 调用失败：{type(exc).__name__}",

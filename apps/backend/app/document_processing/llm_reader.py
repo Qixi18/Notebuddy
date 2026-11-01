@@ -11,6 +11,14 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.models import ProcessingStep
 from app.document_processing.checkpoints import fingerprint, put_step, structured_call
+from app.document_processing.engines.vision import (
+    VisionCapabilityError,
+    config_fingerprint,
+    require_image_capability,
+)
+from app.document_processing.engines.vision import (
+    _settings as vision_settings,
+)
 from app.document_processing.ir import (
     BLOCK_TYPES,
     BlockIR,
@@ -23,7 +31,8 @@ from app.document_processing.ir import (
     TableData,
 )
 from app.document_processing.rendering import page_images
-from app.document_processing.routes import asset_config, provider_client, route_limits
+from app.document_processing.routes import asset_config, route_limits, vision_client
+from app.services.processing_budget import processing_budget_scope
 
 
 class ReadingPending(Exception):
@@ -79,7 +88,16 @@ def validate_read_page(result, number: int) -> ReadPage:
 
 def read_document(db, run, asset, path, *, progress=None, max_new_pages=None):
     config = asset_config(asset)
-    client = provider_client(config)
+    vision_snapshot = config.get("vision") if isinstance(config.get("vision"), dict) else None
+    # Capture credentials once. The exact same in-memory values are validated
+    # and used to construct the client, even if settings change mid-task.
+    effective_vision = vision_settings(vision_snapshot)
+    if vision_snapshot is not None:
+        expected = config.get("vision_capability_fingerprint")
+        if expected != config_fingerprint(effective_vision):
+            raise VisionCapabilityError("资料中的视觉模型快照校验失败，已阻止付费读取")
+    require_image_capability(effective_vision)
+    client = vision_client(config, effective_vision)
     pages = []
     with page_images(path, asset.id, route_limits('llm')[1]) as (count, render):
         run.page_count = count
@@ -96,7 +114,16 @@ def read_document(db, run, asset, path, *, progress=None, max_new_pages=None):
         for number in selected:
             png = render(number)
             db.commit()
-            parsed = read_page_image(client, png, number)
+            from app.db.models import NotebookAsset
+            owner_notebook_id = db.scalar(select(NotebookAsset.notebook_id).where(
+                NotebookAsset.asset_id == asset.id, NotebookAsset.is_owner.is_(True),
+                NotebookAsset.detached_at.is_(None),
+            ))
+            if not owner_notebook_id:
+                raise RuntimeError("资料没有有效 Notebook 预算归属")
+            with processing_budget_scope(asset_ids=[asset.id], notebook_id=owner_notebook_id,
+                    stage="read", job_id=run.id, step_key=str(number), kind="vision"):
+                parsed = read_page_image(client, png, number)
             if progress:
                 progress(len(cached), count)
             put_step(db, asset.id, 'read', str(number), identities[number], parsed.model_dump(), client.last_usage)

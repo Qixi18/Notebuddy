@@ -33,8 +33,24 @@ EDITABLE_KEYS: frozenset[str] = frozenset(
         "DEEPSEEK_BASE_URL",
         "DEEPSEEK_MODEL",
         "DEEPSEEK_TIMEOUT_SECONDS",
+        "DEEPSEEK_INPUT_COST_PER_MILLION",
+        "DEEPSEEK_OUTPUT_COST_PER_MILLION",
+        "DEEPSEEK_PRICE_VERSION",
+        "DEEPSEEK_PRICE_SOURCE",
         "EMBEDDING_BASE_URL",
         "EMBEDDING_MODEL",
+        "NOTEBOOK_VISION_BASE_URL",
+        "NOTEBOOK_VISION_MODEL",
+        "NOTEBOOK_VISION_TIMEOUT_SECONDS",
+        "NOTEBOOK_VISION_INPUT_COST_PER_MILLION",
+        "NOTEBOOK_VISION_OUTPUT_COST_PER_MILLION",
+        "NOTEBOOK_VISION_MAX_IMAGE_TOKENS",
+        "NOTEBOOK_VISION_PRICE_VERSION",
+        "NOTEBOOK_VISION_PRICE_SOURCE",
+        "NOTEBOOK_BUDGET_USD_CNY_RATE",
+        "NOTEBOOK_BUDGET_FX_RATE_SOURCE",
+        "NOTEBOOK_BUDGET_FX_RATE_AS_OF",
+        "NOTEBOOK_BUDGET_FX_BUFFER_PERCENT",
         "NOTEBOOK_MAX_UPLOAD_MB",
         "NOTEBOOK_DOCUMENT_PROCESSING_ROUTE",
     }
@@ -45,6 +61,7 @@ SECRET_KEYS: frozenset[str] = frozenset(
     {
         "DEEPSEEK_API_KEY",
         "EMBEDDING_API_KEY",
+        "NOTEBOOK_VISION_API_KEY",
     }
 )
 
@@ -122,6 +139,9 @@ def build_status() -> dict[str, object]:
     env_values = read_env_values()
     deepseek_key = settings.deepseek_api_key
     embedding_key = settings.embedding_api_key
+    from app.document_processing.engines.vision import _settings as vision_settings
+    from app.document_processing.engines.vision import capability_status
+    vision_config = vision_settings()
 
     return {
         "deepseek": {
@@ -141,6 +161,15 @@ def build_status() -> dict[str, object]:
             "base_url": settings.embedding_base_url,
             "model": settings.embedding_model,
         },
+        "vision": {
+            "configured": bool(vision_config["base_url"] and vision_config["model"]),
+            "masked_key": mask_secret(vision_config["api_key"] or None),
+            "base_url": vision_config["base_url"] or None,
+            "model": vision_config["model"] or None,
+            "timeout_seconds": vision_config["timeout"],
+            "image_capability": capability_status(vision_config),
+        },
+        "budget": __import__("app.services.processing_budget", fromlist=["pricing_status"]).pricing_status(),
         "storage": {
             "data_dir": str(settings.data_dir),
             "database": str(settings.data_dir / "notebook.sqlite3"),
@@ -184,6 +213,10 @@ def _sanitize(key: str, value: object) -> str:
         raise SettingsWriteError("模型名只能包含字母、数字和连字符")
     if key == "EMBEDDING_MODEL" and cleaned and not cleaned.replace("-", "").isalnum():
         raise SettingsWriteError("模型名只能包含字母、数字和连字符")
+    if key == "NOTEBOOK_VISION_MODEL" and cleaned and not all(
+        char.isalnum() or char in "-_.:/" for char in cleaned
+    ):
+        raise SettingsWriteError("视觉模型 ID 只能包含字母、数字、点、下划线、斜杠、冒号和连字符")
     if key == "DEEPSEEK_TIMEOUT_SECONDS":
         try:
             seconds = float(cleaned)
@@ -202,6 +235,67 @@ def _sanitize(key: str, value: object) -> str:
         raise SettingsWriteError("处理路线仅支持 standard 或 llm")
     if key.endswith("_BASE_URL") and cleaned and not cleaned.startswith(("http://", "https://")):
         raise SettingsWriteError("服务地址必须以 http:// 或 https:// 开头")
+    if key == "NOTEBOOK_VISION_BASE_URL" and cleaned:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(cleaned)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment):
+            raise SettingsWriteError("视觉服务地址不能包含账号、密码、查询参数或片段")
+    if key == "NOTEBOOK_VISION_TIMEOUT_SECONDS":
+        try:
+            seconds = float(cleaned)
+        except ValueError as exc:
+            raise SettingsWriteError("视觉请求超时必须是数字") from exc
+        if not 5 <= seconds <= 600:
+            raise SettingsWriteError("视觉请求超时需在 5 到 600 秒之间")
+    price_keys = {
+        "DEEPSEEK_INPUT_COST_PER_MILLION", "DEEPSEEK_OUTPUT_COST_PER_MILLION",
+        "NOTEBOOK_VISION_INPUT_COST_PER_MILLION", "NOTEBOOK_VISION_OUTPUT_COST_PER_MILLION",
+    }
+    if key in price_keys:
+        try:
+            rate = float(cleaned)
+        except ValueError as exc:
+            raise SettingsWriteError("模型价格必须是数字") from exc
+        if not 0 <= rate <= 1_000_000:
+            raise SettingsWriteError("模型价格须在 0 到 1000000 USD/百万 Token 范围内")
+    if key == "NOTEBOOK_VISION_MAX_IMAGE_TOKENS":
+        try:
+            value = int(cleaned)
+        except ValueError as exc:
+            raise SettingsWriteError("每张图片的计价 Token 上界必须是整数") from exc
+        if not 0 <= value <= 100_000:
+            raise SettingsWriteError("每张图片的计价 Token 上界须在 0 到 100000 之间")
+    if key == "NOTEBOOK_BUDGET_USD_CNY_RATE":
+        try:
+            value = float(cleaned)
+        except ValueError as exc:
+            raise SettingsWriteError("美元兑人民币汇率必须是数字") from exc
+        if not 0 <= value <= 100:
+            raise SettingsWriteError("美元兑人民币汇率须在 0 到 100 之间")
+    if key == "NOTEBOOK_BUDGET_FX_BUFFER_PERCENT":
+        try:
+            value = float(cleaned)
+        except ValueError as exc:
+            raise SettingsWriteError("汇率安全缓冲必须是数字") from exc
+        if not 0 <= value <= 200:
+            raise SettingsWriteError("汇率安全缓冲须在 0 到 200% 之间")
+    if key in {"DEEPSEEK_PRICE_SOURCE", "NOTEBOOK_VISION_PRICE_SOURCE",
+               "NOTEBOOK_BUDGET_FX_RATE_SOURCE"} and cleaned:
+        from urllib.parse import urlsplit
+        try:
+            parsed = urlsplit(cleaned)
+        except ValueError as exc:
+            raise SettingsWriteError("价格来源必须是无凭据的 HTTP(S) URL") from exc
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment):
+            raise SettingsWriteError("价格来源必须是无凭据、无查询参数的 HTTP(S) URL")
+    if key == "NOTEBOOK_BUDGET_FX_RATE_AS_OF" and cleaned:
+        from datetime import date
+        try:
+            date.fromisoformat(cleaned)
+        except ValueError as exc:
+            raise SettingsWriteError("汇率日期格式须为 YYYY-MM-DD") from exc
     return cleaned
 
 

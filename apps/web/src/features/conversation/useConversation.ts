@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
-import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent } from '../../api/agent'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStatusEvent, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent } from '../../api/agent'
 import type { Conversation, ConversationMessage } from '../../types'
 import { TEACHER_PERSONA, teacherPersonaMeta } from '../persona/personas'
 
@@ -554,6 +554,15 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
       onNotice: (event: AgentNoticeEvent) => {
         if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
         setAgentRun((current) => current ? { ...current, notice: event.text } : current)
+      },
+      onStatus: (event: AgentStatusEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        const labels: Record<AgentStatusEvent['status'], string> = {
+          reading_notebook: '正在读取当前笔记', drafting: '正在组织答案',
+          checking_sources: '正在逐条核对资料', searching_web: '正在检索外部来源',
+          finalizing: '正在整理核验结果',
+        }
+        setAgentRun((current) => current ? { ...current, notice: labels[event.status] } : current)
       },
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {

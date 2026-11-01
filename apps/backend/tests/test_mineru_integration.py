@@ -318,13 +318,19 @@ def test_mineru_vision_emits_searchable_equation_block(monkeypatch, tmp_path):
     assert equation.source and equation.source.asset_id == "asset-1"
 
 
-def test_vision_engine_sends_openai_compatible_image_and_parses_json(monkeypatch):
+def test_vision_engine_sends_openai_compatible_image_and_parses_json(monkeypatch, tmp_path):
 
     from app.document_processing.engines import vision
 
     monkeypatch.setenv("NOTEBOOK_VISION_BASE_URL", "https://vision.example/v1")
     monkeypatch.setenv("NOTEBOOK_VISION_API_KEY", "secret-test")
     monkeypatch.setenv("NOTEBOOK_VISION_MODEL", "vision-test")
+    monkeypatch.setattr(vision, "_capability_path", lambda: tmp_path / "vision-capabilities.json")
+    monkeypatch.setattr(vision, "_capability_secret_path", lambda: tmp_path / "vision-capability-hmac.key")
+    config = vision._settings()
+    (tmp_path / "vision-capabilities.json").write_text(json.dumps({
+        vision.config_fingerprint(config): {"supports_image_input": True, "checked_at": "test"},
+    }), encoding="utf-8")
     captured = {}
 
     class Response:

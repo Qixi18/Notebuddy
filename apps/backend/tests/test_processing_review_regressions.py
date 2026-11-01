@@ -62,6 +62,7 @@ def test_changed_route_in_same_batch_generates_separate_jobs(session):
 def test_resuming_six_pages_renders_each_page_only_once(session, tmp_path, monkeypatch):
     from app.ai.deepseek import DeepSeekClient
     from app.document_processing import llm_reader, service
+    monkeypatch.setattr(llm_reader, 'require_image_capability', lambda *_args, **_kwargs: None)
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
     book = make_notebook(session, make_course(session))
     asset = make_asset(session, book)

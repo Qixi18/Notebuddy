@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.ai.notebook_qa import NotebookAnswer, claims_for_answer, run_notebook_answer
 from app.ai.orchestrator import run_answer
 from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
@@ -100,7 +101,7 @@ def _message_read(db: Session, message: ConversationMessage, conversation_title:
         evidence=evidence,
         mode=_mode_from_evidence(message),
         sources=sources_from_evidence(db, message),
-        process=message.process,
+        process={key: value for key, value in (message.process or {}).items() if key != "verification"} or None,
         suggestions=message.suggestions,
         conversation_title=conversation_title or DEFAULT_CONVERSATION_TITLE,
     )
@@ -252,8 +253,6 @@ def send_message(
     db: Session = Depends(get_db),
 ) -> ConversationMessageRead:
     conversation = ensure_conversation(db, conversation_id)
-    if conversation.scope == "notebook":
-        raise HTTPException(status_code=409, detail="Notebook 专属问答服务将在下一批接入；本会话历史可正常读取")
     if payload.idempotency_key:
         existing = db.scalar(select(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,
@@ -268,6 +267,59 @@ def send_message(
             ).order_by(ConversationMessage.created_at).limit(1))
             if answer is not None:
                 return _message_read(db, answer)
+
+    if conversation.scope == "notebook":
+        context = payload.notebook_context or {}
+        book = db.get(Notebook, conversation.notebook_id) if conversation.notebook_id else None
+        if (book is None or book.deleted_at is not None
+                or context.get("notebook_id") != book.id
+                or context.get("course_id") != book.course_id
+                or not isinstance(context.get("revision"), int)
+                or context["revision"] != book.document_revision):
+            raise HTTPException(409, "请刷新并提供当前会话 Notebook 的最新正文版本")
+        if payload.material_id or payload.page_number:
+            raise HTTPException(422, "Notebook 答疑不接受课程资料或页码覆盖范围")
+        history = [(message.role, message.content) for message in conversation.messages]
+        db.add(ConversationMessage(
+            conversation_id=conversation_id, role="user", content=payload.question.strip(),
+            learning_goal=payload.learning_goal, status="completed", idempotency_key=payload.idempotency_key,
+        ))
+        conversation.updated_at = datetime.now(UTC)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(409, "该问题已提交过，请勿重复发送") from None
+        try:
+            result: NotebookAnswer | None = None
+            for event in run_notebook_answer(
+                db, notebook_id=book.id, revision=context["revision"],
+                question=payload.question, history=history, allow_web=payload.allow_web,
+            ):
+                if event["type"] == "verified_result":
+                    result = event["result"]
+            if result is None:
+                raise RuntimeError("核验服务未产生最终结果")
+            claims = claims_for_answer(result)
+            assistant = persist_assistant_message(
+                db, conversation=conversation, learning_goal=payload.learning_goal,
+                content=result.answer, model_version=result.model_version,
+                chunks=result.chunks, web_results=result.web_results, claims=claims,
+                process=result.process,
+            )
+            return _message_read(db, assistant, conversation.title)
+        except Exception as exc:
+            db.rollback()
+            failed = ConversationMessage(
+                conversation_id=conversation_id, role="assistant",
+                content="本次 Notebook 答疑未完成，未发布未经核验的初稿。请稍后重试。",
+                learning_goal=payload.learning_goal, status="failed", failure_type=type(exc).__name__,
+            )
+            db.add(failed)
+            conversation.updated_at = datetime.now(UTC)
+            db.commit()
+            db.refresh(failed)
+            return _message_read(db, failed, conversation.title)
 
     selected = db.get(Material, payload.material_id) if payload.material_id else None
     if payload.material_id and (

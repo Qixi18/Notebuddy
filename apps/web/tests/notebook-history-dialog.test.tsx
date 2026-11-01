@@ -4,7 +4,6 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { api } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { NotebookPage } from '../src/pages/NotebookPage'
-import { UnboundNotebookPage } from '../src/pages/UnboundNotebookPage'
 
 vi.mock('../src/api', () => ({
   ApiError: class ApiError extends Error {},
@@ -40,10 +39,10 @@ afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 async function mountNotebook(unbound: boolean, busy = false) {
   const workspace = { course: { id: 'course', name: '课程' }, materials: [], busy, setDocumentDirty: vi.fn(), uploadMaterial: vi.fn(), refreshCurrentMaterials: vi.fn() } as unknown as WorkspaceContextValue
-  render(<MemoryRouter initialEntries={[unbound ? '/notebooks/history-book' : '/courses/course/notebooks/history-book']}>
+  render(<MemoryRouter initialEntries={[unbound ? '/notebooks/unbound/history-book' : '/courses/course/notebooks/history-book']}>
     <WorkspaceProvider value={workspace}><Routes>
       <Route path="/courses/:courseId/notebooks/:notebookId" element={<NotebookPage />} />
-      <Route path="/notebooks/:notebookId" element={<UnboundNotebookPage />} />
+      <Route path="/notebooks/unbound/:notebookId" element={<NotebookPage />} />
     </Routes></WorkspaceProvider>
   </MemoryRouter>)
   await screen.findByDisplayValue('历史测试笔记')
@@ -106,7 +105,7 @@ test.each([false, true])('history stays open during restore and allows retry aft
   expect((within(dialog).getByRole('button', { name: /恢复到此版本/ }) as HTMLButtonElement).disabled).toBe(false)
   vi.mocked(restore).mockResolvedValueOnce({ ...documentResponse, revision: 5 })
   fireEvent.click(within(dialog).getByRole('button', { name: /恢复到此版本/ }))
-  await screen.findByText(unbound ? '已恢复历史版本。' : '已恢复到选中的历史版本，并生成新的修订。')
+  await screen.findByText('已恢复到选中的历史版本，并生成新的修订。')
   expect(restore).toHaveBeenLastCalledWith(...(unbound ? ['history-book', 1, 4] : ['course', 'history-book', 1, 4]))
   expect(screen.queryByRole('dialog', { name: '历史版本' })).toBeNull()
   expect(document.activeElement).toBe(opener)

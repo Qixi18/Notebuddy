@@ -410,6 +410,8 @@ def _build_figure(
                     uncertain = bool(getattr(result, "uncertain", True))
                     warnings = list(getattr(result, "warnings", []) or [])
                 except Exception as exc:  # pragma: no cover - optional enrichment
+                    if getattr(exc, "code", "").startswith("budget_"):
+                        raise
                     warnings.append(f"视觉识别失败：{type(exc).__name__}")
     if description is None and latex is None:
         warnings.append("图像内容未解释（视觉引擎不可用或未启用）")
@@ -459,7 +461,9 @@ def _describe_page_image(
 ) -> list[BlockIR]:
     try:
         result = describe(png)
-    except Exception:  # pragma: no cover - optional enrichment
+    except Exception as exc:  # pragma: no cover - optional enrichment
+        if getattr(exc, "code", "").startswith("budget_"):
+            raise
         return []
     table = getattr(result, "table", None)
     latex = getattr(result, "latex", None)

@@ -130,6 +130,12 @@ def ingest_source_image(
         route = resolve_route(processing_route)
     except ValueError as exc:
         raise ImageUploadRejected(str(exc)) from exc
+    if route == "llm":
+        from app.document_processing.routes import ensure_vision_preflight
+        try:
+            ensure_vision_preflight()
+        except ValueError as exc:
+            raise ImageUploadRejected(str(exc), 409) from exc
     if notebook is None or notebook.deleted_at is not None:
         raise ImageUploadRejected("笔记不存在", 404)
     if not data:
