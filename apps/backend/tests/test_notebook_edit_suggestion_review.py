@@ -1,8 +1,8 @@
-"""Agent 正文修改的确认契约，以及 Notebook 删除/恢复的数据完整性。
+"""Legacy NotebookEditSuggestion review compatibility and deletion integrity.
 
 架构约束（不可放宽）：
 - 正文唯一真源是 ``Notebook.document_json``，版本由 ``document_revision`` 守护；
-- Agent 只能产出 ``NotebookEditSuggestion``，必须经用户确认才写入；
+- 当前 Agent 不再创建建议；既有 ``NotebookEditSuggestion`` 数据仍须经用户确认才写入；
 - 未确认（提案、拒绝、失效、跨课程、已删除）时正文与 revision 必须一字不动。
 
 本文件补的是交接文档点名的缺口：拒绝确认、批量合并（apply-all 此前没有任何
@@ -18,7 +18,6 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.ai.agent_tools import execute_tool
 from app.api.v1.notebook import (
     apply_course_edit_suggestions,
     delete_course_notebook,
@@ -31,7 +30,8 @@ from app.api.v1.notebook import (
 from app.core.config import settings
 from app.db.forest_models import ForestJob
 from app.db.models import NotebookEditSuggestion
-from app.notes.document import load_document, normalize_document
+from app.notes.document import dump_document, load_document, normalize_document
+from app.notes.edits import apply_edits
 from app.notes.store import write_document
 from app.schemas.notebook import (
     NotebookDocumentUpdate,
@@ -64,7 +64,7 @@ def checkpoint_ready(tmp_path, monkeypatch):
 
 
 def _setup(session):
-    """一门课、一本有正文的 Notebook（revision=1），可直接提案。"""
+    """一门课、一本有正文的 Notebook（revision=1），用于历史数据兼容测试。"""
     course = make_course(session)
     book = make_notebook(session, course)
     asset = make_asset(session, book)
@@ -84,14 +84,20 @@ def _setup(session):
 
 
 def _propose(session, course, book, content: str) -> str:
-    outcome = execute_tool(
-        session, course_id=course.id, name="propose_notebook_edits",
-        arguments={"rationale": "补充", "edits": [{"op": "append", "content": content}]},
-        scope="course", editable_notebook_id=book.id,
+    """Seed a historical suggestion row for backwards-compatibility review tests."""
+    edits = [{"op": "append", "content": content}]
+    proposed = apply_edits(load_document(book.document_json).content, edits)
+    suggestion = NotebookEditSuggestion(
+        notebook_id=book.id,
+        base_revision=book.document_revision,
+        rationale="历史兼容测试",
+        ops_json=json.dumps(edits, ensure_ascii=False),
+        proposed_document_json=dump_document(proposed),
+        status="pending",
     )
+    session.add(suggestion)
     session.commit()
-    assert outcome.suggestions, "提案没有生成修改建议"
-    return outcome.suggestions[0]["id"]
+    return suggestion.id
 
 
 def _body(session, book) -> tuple[str, int]:

@@ -75,3 +75,44 @@ def test_global_scope_and_list_returns_it(tmp_path) -> None:
         assert [item["scope"] for item in listed] == ["global"]
     finally:
         app.dependency_overrides.clear()
+
+
+def test_notebook_conversation_has_no_course_and_is_listed_by_notebook(tmp_path) -> None:
+    client, course_id, notebook_id = _client(tmp_path)
+    try:
+        created = client.post(
+            f"/api/v1/notebooks/{notebook_id}/conversations", json={"title": "Notebook 问答"},
+        )
+        assert created.status_code == 201
+        row = created.json()
+        assert row["scope"] == "notebook"
+        assert row["default_scope"] == "notebook"
+        assert row["notebook_id"] == notebook_id
+        assert row["course_id"] is None
+        assert client.get(f"/api/v1/notebooks/{notebook_id}/conversations").json() == [row]
+        assert client.get(f"/api/v1/courses/{course_id}/conversations").json() == []
+        assert client.get(f"/api/v1/conversations/{row['id']}/messages").json() == []
+        rejected = client.post(
+            f"/api/v1/conversations/{row['id']}/messages", json={"question": "test"},
+        )
+        assert rejected.status_code == 409
+        assert "Notebook 专属问答服务" in rejected.json()["detail"]
+        agent_rejected = client.post(
+            f"/api/v1/conversations/{row['id']}/agent-messages",
+            json={"question": "test", "scope": "notebook", "notebook_context": {
+                "course_id": None, "notebook_id": notebook_id, "revision": 0,
+            }},
+        )
+        assert agent_rejected.status_code == 409
+
+        unbound = client.post("/api/v1/notebooks/unbound", json={"title": "未分类 Notebook"})
+        assert unbound.status_code == 201
+        unbound_id = unbound.json()["id"]
+        unbound_conversation = client.post(
+            f"/api/v1/notebooks/{unbound_id}/conversations", json={"title": "未分类会话"},
+        )
+        assert unbound_conversation.status_code == 201
+        assert unbound_conversation.json()["course_id"] is None
+        assert unbound_conversation.json()["notebook_id"] == unbound_id
+    finally:
+        app.dependency_overrides.clear()

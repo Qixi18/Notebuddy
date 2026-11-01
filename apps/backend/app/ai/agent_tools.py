@@ -1,9 +1,9 @@
-"""Agent 工具层：只读检索 + 「建议-确认」写入（Notebook 正文）。
+"""Agent 工具层：只读检索与学习技能。
 
 安全边界：
 - 只读工具全部校验课程归属（经 Notebook.course_id）；
-- 写工具只创建 pending 的 Notebook 修改建议，绝不直接修改正文；
-- 可编辑目标仅限当前打开的 Notebook（editable_notebook_id）；
+- 本轮 Agent 只读 Notebook 正文，不提供正文编辑工具；
+- 可编辑目标仅供历史/兼容辅助逻辑保留，不暴露给当前工具集；
 - 工具回填文本一律截断，防止多轮循环撑爆上下文。
 """
 
@@ -59,6 +59,14 @@ def build_tool_specs(
     allow_quiz: bool = False,
     fixed_material_id: str | None = None,
 ) -> list[dict]:
+    if scope == "notebook":
+        # Notebook sessions get no course/global/skill/edit tools. The current
+        # answer endpoint is intentionally guarded until the A2 verifier exists.
+        return [_spec(
+            "read_notebook",
+            "只读取本轮锁定的 Notebook 正文，不得检索课程或其他 Notebook。",
+            {}, [],
+        )]
     search_scope_desc = (
         "只检索本轮锁定的 Notebook 正文，不得访问课程其他笔记或课件。"
         if scope == "note" else
@@ -115,45 +123,18 @@ def build_tool_specs(
             {"query": {"type": "string", "description": "课程名、笔记标题或知识点关键词"}},
             ["query"],
         ))
-    if editable_notebook:
+    if editable_notebook and scope in ("course", "global"):
         specs.append(_spec(
-            "propose_notebook_edits",
-            "对当前打开的笔记提交结构化修改建议（pending，用户确认后才生效，不会直接改动正文）。"
-            "不要提交整篇重写：只提交真正需要变更的操作。anchor 填笔记中某个标题的原文（不含 # 号）。",
+            "propose_knowledge_node",
+            "提议在课程知识图谱中新增一个知识点节点（pending，用户审核后才进入图谱）。",
             {
-                "rationale": {"type": "string", "description": "一句话说明这批改动做什么"},
-                "edits": {
-                    "type": "array",
-                    "description": "1-8 个操作，按笔记从头到尾的顺序给出、依次执行",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "op": {
-                                "type": "string",
-                                "enum": ["append", "insert_after_heading", "replace_section", "remove_section"],
-                                "description": "append=文末追加；insert_after_heading=在 anchor 小节末尾插入；replace_section=替换 anchor 小节正文（保留标题行）；remove_section=删除 anchor 小节（含标题与子小节）",
-                            },
-                            "anchor": {"type": "string", "description": "目标小节的标题原文（append 不需要）"},
-                            "content": {"type": "string", "description": "Markdown 正文（remove_section 不需要；只能包含笔记本身，禁止对话文字）"},
-                        },
-                        "required": ["op"],
-                    },
-                },
+                "candidate_name": {"type": "string", "description": "知识点名称（≤20 字）"},
+                "candidate_summary": {"type": "string", "description": "一句话概括"},
+                "rationale": {"type": "string", "description": "提议依据"},
+                "confidence": {"type": "number", "description": "0-1 置信度"},
             },
-            ["rationale", "edits"],
+            ["candidate_name", "candidate_summary", "rationale"],
         ))
-        if scope in ("course", "global"):
-            specs.append(_spec(
-                "propose_knowledge_node",
-                "提议在课程知识图谱中新增一个知识点节点（pending，用户审核后才进入图谱）。",
-                {
-                    "candidate_name": {"type": "string", "description": "知识点名称（≤20 字）"},
-                    "candidate_summary": {"type": "string", "description": "一句话概括"},
-                    "rationale": {"type": "string", "description": "提议依据"},
-                    "confidence": {"type": "number", "description": "0-1 置信度"},
-                },
-                ["candidate_name", "candidate_summary", "rationale"],
-            ))
     if allow_quiz:
         specs.extend([
             _spec(
@@ -440,7 +421,6 @@ _EXECUTORS = {
     "get_source_coverage": _get_source_coverage,
     "explain_term": _explain_term,
     "web_search": _web_search,
-    "propose_notebook_edits": _propose_notebook_edits,
     "propose_knowledge_node": _propose_knowledge_node,
     "generate_quiz": _generate_quiz,
     "generate_review_outline": _generate_review_outline,
@@ -455,7 +435,6 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "get_source_coverage": ("course_id", "arguments"),
     "explain_term": ("course_id", "arguments", "scope", "locked_notebook_id", "fixed_material_id"),
     "web_search": ("course_id", "arguments", "allow_web"),
-    "propose_notebook_edits": ("course_id", "arguments", "editable_notebook_id"),
     "propose_knowledge_node": ("course_id", "arguments"),
     "generate_quiz": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),
     "generate_review_outline": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),

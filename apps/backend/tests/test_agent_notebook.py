@@ -1,8 +1,9 @@
-"""Agent tools and Notebook edit suggestions (no legacy Note bodies)."""
+"""Notebook-scoped read tools and legacy suggestion compatibility."""
 
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,10 +12,12 @@ from app.api.v1.agent import send_agent_message
 from app.api.v1.conversations import create_conversation
 from app.api.v1.notebook import list_edit_suggestions, review_edit_suggestion
 from app.db.models import Conversation, ConversationMessage, NotebookEditSuggestion
-from app.notes.document import load_document, normalize_document
+from app.notes.document import dump_document, load_document, normalize_document
+from app.notes.edits import apply_edits
 from app.notes.store import write_document
 from app.schemas.api import AgentMessageCreate, ConversationCreate
 from app.schemas.notebook import NotebookEditSuggestionReview
+from app.services.conversations import resolve_legacy_note_target
 from tests.notebook_fixtures import (
     make_asset,
     make_course,
@@ -44,13 +47,53 @@ def _setup(session):
     return course, book, asset
 
 
+def _seed_existing_suggestion(session, book, edits, rationale="测试遗留建议"):
+    """为兼容 API 测试种入既有数据；Agent 不再具备创建建议的工具。"""
+    proposed = apply_edits(load_document(book.document_json).content, edits)
+    suggestion = NotebookEditSuggestion(
+        notebook_id=book.id,
+        base_revision=book.document_revision,
+        rationale=rationale,
+        ops_json=json.dumps(edits, ensure_ascii=False),
+        proposed_document_json=dump_document(proposed),
+        status="pending",
+    )
+    session.add(suggestion)
+    session.flush()
+    return suggestion
+
+
 def test_tool_specs_use_notebook_names():
     specs = build_tool_specs(scope="global", editable_notebook=True, allow_web=False)
     names = {spec["function"]["name"] for spec in specs}
     assert {"search_course", "read_notebook", "list_course_notebooks",
-            "search_forest", "get_source_coverage", "propose_notebook_edits"}.issubset(names)
+            "search_forest", "get_source_coverage"}.issubset(names)
+    assert "propose_notebook_edits" not in names
     assert "read_note" not in names
     assert "propose_note_edits" not in names
+
+
+def test_notebook_scope_has_only_locked_notebook_read_tool():
+    specs = build_tool_specs(scope="notebook", editable_notebook=True, allow_web=True, allow_quiz=True)
+    assert {spec["function"]["name"] for spec in specs} == {"read_notebook"}
+
+
+def test_legacy_note_resolution_rejects_cross_table_id_collision():
+    notebook_a = SimpleNamespace(id="shared-id", course_id="course-1", deleted_at=None)
+    notebook_b = SimpleNamespace(id="book-b", course_id="course-1", deleted_at=None)
+    legacy_note = SimpleNamespace(id="shared-id", notebook_id="book-b")
+
+    class Lookup:
+        def get(self, model, identifier):
+            if model.__name__ == "Notebook":
+                return {"shared-id": notebook_a, "book-b": notebook_b}.get(identifier)
+            if model.__name__ == "Note" and identifier == "shared-id":
+                return legacy_note
+            return None
+
+    resolved, error = resolve_legacy_note_target(Lookup(), "shared-id", "course-1")
+    assert resolved is None
+    assert error is not None and "同时指向" in error
 
 
 def test_search_course_and_read_notebook(session):
@@ -141,7 +184,7 @@ def test_agent_rejects_notebook_context_from_foreign_course(session):
     assert captured.value.status_code == 404
 
 
-def test_propose_notebook_edits_is_pending_and_body_unchanged(session):
+def test_agent_cannot_create_notebook_edit_suggestions(session):
     course, book, _asset = _setup(session)
     before = book.document_json
     outcome = execute_tool(
@@ -154,25 +197,19 @@ def test_propose_notebook_edits_is_pending_and_body_unchanged(session):
         scope="course", editable_notebook_id=book.id,
     )
     session.commit()
-    assert outcome.suggestions and outcome.suggestions[0]["type"] == "notebook_edit_suggestion"
+    assert "工具" in outcome.payload_text
+    assert "建议" not in outcome.suggestions
     session.refresh(book)
     assert book.document_json == before
-    suggestion = session.get(NotebookEditSuggestion, outcome.suggestions[0]["id"])
-    assert suggestion.status == "pending"
-    proposed = load_document(suggestion.proposed_document_json).content
-    assert "左右极限不相等" in json.dumps(proposed, ensure_ascii=False)
+    assert session.query(NotebookEditSuggestion).filter_by(notebook_id=book.id).count() == 0
 
 
 def test_accepting_suggestion_writes_document(session):
-    course, book, _asset = _setup(session)
-    outcome = execute_tool(
-        session, course_id=course.id, name="propose_notebook_edits",
-        arguments={"rationale": "补充", "edits": [
-            {"op": "append", "content": "补充：极限的四则运算法则。"}]},
-        scope="course", editable_notebook_id=book.id,
-    )
-    session.commit()
-    suggestion_id = outcome.suggestions[0]["id"]
+    _course, book, _asset = _setup(session)
+    suggestion = _seed_existing_suggestion(session, book, [
+        {"op": "append", "content": "补充：极限的四则运算法则。"},
+    ])
+    suggestion_id = suggestion.id
     revision = book.document_revision
     result = review_edit_suggestion(
         book.id, suggestion_id,
@@ -186,17 +223,13 @@ def test_accepting_suggestion_writes_document(session):
 
 
 def test_partial_acceptance_replays_only_selected_structured_operations(session):
-    course, book, _asset = _setup(session)
-    outcome = execute_tool(
-        session, course_id=course.id, name="propose_notebook_edits",
-        arguments={"rationale": "补充两点", "edits": [
-            {"op": "append", "content": "补充：极限的四则运算法则。"},
-            {"op": "insert_after_heading", "anchor": "第一章 极限",
-             "content": "易错点：左右极限不相等时极限不存在。"},
-        ]}, scope="course", editable_notebook_id=book.id,
-    )
-    session.commit()
-    suggestion_id = outcome.suggestions[0]["id"]
+    _course, book, _asset = _setup(session)
+    suggestion = _seed_existing_suggestion(session, book, [
+        {"op": "append", "content": "补充：极限的四则运算法则。"},
+        {"op": "insert_after_heading", "anchor": "第一章 极限",
+         "content": "易错点：左右极限不相等时极限不存在。"},
+    ], rationale="补充两点")
+    suggestion_id = suggestion.id
     listed = list_edit_suggestions(book.id, "pending", session)
     assert listed[0]["operations"][1]["op"] == "insert_after_heading"
     assert listed[0]["proposed_content"]
@@ -214,15 +247,11 @@ def test_partial_acceptance_replays_only_selected_structured_operations(session)
 
 
 def test_stale_suggestion_is_rejected_after_user_edit(session):
-    course, book, _asset = _setup(session)
-    outcome = execute_tool(
-        session, course_id=course.id, name="propose_notebook_edits",
-        arguments={"rationale": "补充", "edits": [
-            {"op": "append", "content": "补充内容。"}]},
-        scope="course", editable_notebook_id=book.id,
-    )
-    session.commit()
-    suggestion_id = outcome.suggestions[0]["id"]
+    _course, book, _asset = _setup(session)
+    suggestion = _seed_existing_suggestion(session, book, [
+        {"op": "append", "content": "补充内容。"},
+    ])
+    suggestion_id = suggestion.id
     base_revision = book.document_revision
     # User edits after the suggestion was created.
     updated = normalize_document(load_document(book.document_json).content)

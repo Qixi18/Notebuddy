@@ -27,7 +27,7 @@ function Harness({ locked = false }: { locked?: boolean }) {
     courseId: 'c1', conversationCourseId: 'c1', courses: [{ id: 'c1', name: '逻辑电路' }],
     materials: [], teacherPersona: 'elf', openMaterialSource: () => {},
     conversation: {
-      messages: [], conversations: [{ id: 'a', scope: 'course' }], conversationId: 'a',
+      messages: [], conversations: [{ id: 'a', scope: 'notebook', notebook_id: 'book-1' }], conversationId: 'a',
       hasMessages: locked, busy: false, askAgent,
     },
   } as never}><NotebookBridgeProvider>
@@ -39,23 +39,21 @@ function Harness({ locked = false }: { locked?: boolean }) {
 beforeEach(() => { askAgent.mockClear() })
 afterEach(cleanup)
 
-test('真实 Notebook 上下文首轮显式选择全局后按 global 发送', async () => {
+test('真实 Notebook 上下文固定使用 Notebook 范围，答疑不修改正文', async () => {
   render(<Harness />)
-  expect(await screen.findByText(/正在编辑整篇笔记/)).toBeTruthy()
-  fireEvent.change(screen.getByLabelText('本次提问的作用范围'), { target: { value: '__global__' } })
-  fireEvent.change(screen.getByLabelText('快速提问'), { target: { value: '其他课程有哪些相关内容？' } })
+  expect(await screen.findByText(/正在查看整篇 Notebook/)).toBeTruthy()
+  expect(screen.queryByLabelText('本次提问的作用范围')).toBeNull()
+  fireEvent.change(screen.getByLabelText('快速提问'), { target: { value: '这份笔记的核心内容是什么？' } })
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
   await waitFor(() => expect(askAgent).toHaveBeenCalled())
-  expect(askAgent.mock.calls[0]?.[1]).toMatchObject({ scope: 'global', notebookContext: { notebook_id: 'book-1' } })
+  expect(askAgent.mock.calls[0]?.[1]).toMatchObject({
+    scope: 'notebook', notebookContext: { course_id: 'c1', notebook_id: 'book-1', revision: 3 },
+  })
+  expect(screen.queryByRole('button', { name: '插入到选区后' })).toBeNull()
 })
 
-test('锁定 course 会话优先于之前未发送的 global 选择', async () => {
-  const view = render(<Harness />)
-  fireEvent.change(screen.getByLabelText('本次提问的作用范围'), { target: { value: '__global__' } })
-  view.rerender(<Harness locked />)
-  expect((screen.getByLabelText('本次提问的作用范围') as HTMLSelectElement).value).toBe('')
-  fireEvent.change(screen.getByLabelText('快速提问'), { target: { value: '继续问题' } })
-  fireEvent.click(screen.getByRole('button', { name: '发送' }))
-  await waitFor(() => expect(askAgent).toHaveBeenCalled())
-  expect(askAgent.mock.calls[0]?.[1].scope).toBe('course')
+test('Notebook 会话不暴露课程或全局范围切换', () => {
+  render(<Harness locked />)
+  expect(screen.queryByLabelText('本次提问的作用范围')).toBeNull()
+  expect(screen.getByText('作用范围：当前 Notebook')).toBeTruthy()
 })

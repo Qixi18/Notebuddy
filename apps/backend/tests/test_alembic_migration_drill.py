@@ -20,7 +20,7 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 BASE_REVISION = "d9e4a7b21c60"
 AGENT_REVISION = "e29a10c7f501"
-HEAD_REVISION = "f1a7c9d3e620"
+HEAD_REVISION = "f2b7d9a1406c"
 PROCESSING_REVISION = "a5e3c8d1f209"
 
 NOTEBOOK_DOCUMENT = json.dumps(

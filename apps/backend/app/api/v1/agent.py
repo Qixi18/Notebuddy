@@ -34,7 +34,6 @@ from app.db.models import (
     Conversation,
     ConversationMessage,
     Material,
-    Note,
     Notebook,
 )
 from app.schemas.api import AgentMessageCreate
@@ -43,6 +42,7 @@ from app.services.conversations import (
     DEFAULT_CONVERSATION_TITLE,
     derive_conversation_title,
     persist_assistant_message,
+    resolve_legacy_note_target,
 )
 from app.services.course_scope import material_in_course
 
@@ -87,6 +87,11 @@ def send_agent_message(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     conversation = ensure_conversation(db, conversation_id)
+    if conversation.scope == "notebook":
+        raise HTTPException(
+            status_code=409,
+            detail="Notebook 专属核验问答将在 A2 接入；此会话历史可正常读取。",
+        )
     course = ensure_course(db, conversation.course_id)
     is_first_turn = not any(message.role == "user" for message in conversation.messages)
     effective_scope = payload.scope if is_first_turn else (
@@ -121,14 +126,15 @@ def send_agent_message(
     locked_notebook_id = notebook_context.notebook_id if notebook_context else None
     if effective_scope == "note" and not locked_notebook_id:
         raise HTTPException(status_code=422, detail="锁定当前笔记模式需要先打开一本笔记")
-    if (not is_first_turn and effective_scope == "note"
-            and conversation.note_id != locked_notebook_id):
-        legacy_note = db.get(Note, conversation.note_id) if conversation.note_id else None
-        if legacy_note is None or legacy_note.notebook_id != locked_notebook_id:
-            raise HTTPException(409, "本会话锁定的笔记与当前笔记不一致，请新建对话")
-        # Older conversations stored a Note ID. Upgrade the compatibility field
-        # only after proving that the legacy Note belongs to the supplied Notebook.
-        conversation.note_id = locked_notebook_id
+    if not is_first_turn and effective_scope == "note":
+        resolved, resolution_error = resolve_legacy_note_target(
+            db, conversation.note_id or "", conversation.course_id,
+        )
+        if resolved is None or resolved.id != locked_notebook_id:
+            raise HTTPException(
+                409,
+                resolution_error or "本会话锁定的笔记与当前 Notebook 不一致，请新建对话",
+            )
 
     notebook_title = ""
     if notebook_context is not None:

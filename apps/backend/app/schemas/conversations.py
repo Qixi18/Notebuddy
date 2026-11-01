@@ -23,7 +23,8 @@ class ConversationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    course_id: str
+    course_id: str | None
+    notebook_id: str | None = None
     title: str
     default_scope: str
     scope: str | None = None
@@ -119,7 +120,7 @@ class NotebookDocumentContext(BaseModel):
     """整篇 Notebook 编辑器的上下文，与分节 Note 的 ReadingContext 互斥。"""
 
     model_config = ConfigDict(extra="forbid")
-    course_id: str = Field(min_length=1, max_length=36)
+    course_id: str | None = Field(default=None, max_length=36)
     notebook_id: str = Field(min_length=1, max_length=36)
     revision: int = Field(ge=0)
     title: str | None = Field(default=None, max_length=200)
@@ -131,8 +132,8 @@ class AgentMessageCreate(BaseModel):
     """悬浮坞 agent 提问（SSE 流式端点的请求体）。"""
 
     question: str = Field(min_length=1, max_length=2000)
-    # note=锁定当前笔记 / course=整门课程 / global=跨课程全局可查（写建议仍只对打开的笔记）
-    scope: Literal["note", "course", "global"] = "course"
+    # notebook=仅当前 Notebook；note 保留给旧历史会话兼容。
+    scope: Literal["notebook", "note", "course", "global"] = "course"
     learning_goal: str | None = Field(default=None, max_length=60)
     material_id: str | None = None
     allow_web: bool = True

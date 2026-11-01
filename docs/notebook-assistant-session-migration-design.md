@@ -1,7 +1,7 @@
 # Notebook 答疑会话兼容与迁移设计（A1 提案）
 
-- 状态：Proposed，尚未实施
-- 基线：`feat/overall-inspection` @ `67677dd8771f2fe756d2f29a986102a64655a730`
+- 状态：Proposed；原设计已审查，A1 代码已落地到工作区，待本轮实现评审与完整回归
+- 原设计基线：`feat/overall-inspection` @ `67677dd8771f2fe756d2f29a986102a64655a730`
 - 依据：ADR-0002 和用户指定的 2026-11-01 核心架构整改规划
 
 ## 1. 已确认的现状
@@ -69,4 +69,14 @@ Notebook-scope 答案不得流经要求有效 Course 的旧普通答疑实现。
 - 全局会话的明确入口可以保留，但新用户状态不得默认选 `global`。
 - A1 验收：新增 Notebook 会话没有虚构 course_id；Notebook A 会话无法打开 Notebook B 或课程资料；旧历史按真实关系只读映射；读写入口不再创建 NoteSuggestion；助手问答不改变正文 revision。
 
-本设计仍为 Proposed；如果实现中发现外键删除、反馈审计或历史读取要求与本提案冲突，需修订设计并重新评审后再迁移。
+## 7. A1 当前实施记录
+
+- 新增迁移 `f2b7d9a1406c`：`Conversation.course_id` 可空、添加 `notebook_id` 外键（Notebook 删除时 `SET NULL`）、索引及 `scope='notebook'` 无课程约束；降级遇到任何 Notebook 会话会停止。
+- 新增 `POST/GET /notebooks/{notebook_id}/conversations`。新会话固定 `scope='notebook'`、真实 `notebook_id` 和 `course_id=NULL`；普通课程会话接口未改。
+- Notebook 路由加载会话历史时不使用最近课程；Notebook 普通/Agent 问答暂时以明确 409 拒绝，等待 A2 专属问答服务，避免误进课程检索链。
+- 旧 `scope='note'` 的历史会话保留原字段；跨 Notebook/旧 Note ID 冲突、跨课程、已软删除或不可解析的映射不会被猜测。列表映射只影响返回对象，不提交历史改写。
+- AssistantPage/Dock 已移除旧 Note picker、`reading_context.note_id` 发送和正文插入/替换入口；Agent 工具注册不再暴露 `propose_notebook_edits`，Notebook scope 工具表仅有锁定 Notebook 的读取工具。
+- 自动验证：后端隔离 SQLite 会话/迁移测试、前端 scope/Dock/hook 测试、TypeScript 与 Vite 构建已跑；完整 `scripts/test.ps1` 仍待本批结束前运行。迁移没有连接真实 `data/notebook.sqlite3`。
+- 当前未完成：Notebook Agent 端点暂不回答；AssistantPage 只提供课程/显式全局范围，Notebook 问答入口在 Notebook Dock；A2 需补正文→当前 DocumentIR→必要 WebSearch→验证后 SSE 及专属证据持久化。
+
+本设计与 ADR 仍为 Proposed；如果实现中发现外键删除、反馈审计或历史读取要求与本提案冲突，需修订设计并重新评审后再迁移或接受。

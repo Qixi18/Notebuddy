@@ -15,7 +15,6 @@ from app.db.models import (
     ConversationMessage,
     Material,
     MessageEvidence,
-    Note,
     Notebook,
     PageBlock,
     SourceRef,
@@ -34,6 +33,7 @@ from app.services.conversations import (
     DEFAULT_CONVERSATION_TITLE,
     derive_conversation_title,
     persist_assistant_message,
+    resolve_legacy_note_target,
     search_course_messages,
 )
 from app.services.course_scope import material_in_course
@@ -127,12 +127,10 @@ def create_conversation(course_id: str, payload: ConversationCreate, db: Session
     note_id = payload.note_id if scope == "note" else None
     note_title = payload.note_title if scope == "note" else None
     if scope == "note":
-        notebook = db.get(Notebook, note_id) if note_id else None
-        if notebook is None and note_id:
-            legacy_note = db.get(Note, note_id)
-            notebook = db.get(Notebook, legacy_note.notebook_id) if legacy_note and legacy_note.notebook_id else None
-        if notebook is None or notebook.deleted_at is not None or notebook.course_id != course.id:
-            raise HTTPException(status_code=404, detail="锁定的笔记不存在或不属于当前课程")
+        notebook, resolution_error = resolve_legacy_note_target(db, note_id or "", course.id)
+        if notebook is None:
+            raise HTTPException(status_code=409 if "同时指向" in (resolution_error or "") else 404,
+                                detail=resolution_error or "锁定的笔记不存在或不属于当前课程")
         note_id = notebook.id
         note_title = (note_title or notebook.title)[:300]
     conversation = Conversation(
@@ -147,6 +145,41 @@ def create_conversation(course_id: str, payload: ConversationCreate, db: Session
     db.commit()
     db.refresh(conversation)
     return conversation
+
+
+@router.post("/notebooks/{notebook_id}/conversations", response_model=ConversationRead, status_code=201)
+def create_notebook_conversation(
+    notebook_id: str, payload: ConversationCreate, db: Session = Depends(get_db),
+) -> Conversation:
+    """Create a transcript owned by one Notebook, independent of its course binding."""
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    conversation = Conversation(
+        course_id=None,
+        notebook_id=notebook.id,
+        title=payload.title.strip(),
+        default_scope="notebook",
+        scope="notebook",
+        note_title=notebook.title[:300],
+    )
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+@router.get("/notebooks/{notebook_id}/conversations", response_model=list[ConversationRead])
+def list_notebook_conversations(notebook_id: str, db: Session = Depends(get_db)) -> list[Conversation]:
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None:
+        # A deleted Notebook's conversations remain readable by conversation ID;
+        # this collection endpoint cannot authorize a missing owner.
+        raise HTTPException(status_code=404, detail="笔记不存在")
+    return list(db.scalars(select(Conversation).where(
+        Conversation.notebook_id == notebook_id,
+        Conversation.scope == "notebook",
+    ).order_by(Conversation.updated_at.desc())).all())
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ConversationRead)
@@ -182,11 +215,8 @@ def list_conversations(course_id: str, db: Session = Depends(get_db)) -> list[Co
     for conversation in conversations:
         if conversation.scope != "note" or not conversation.note_id:
             continue
-        if db.get(Notebook, conversation.note_id) is not None:
-            continue
-        legacy_note = db.get(Note, conversation.note_id)
-        notebook = db.get(Notebook, legacy_note.notebook_id) if legacy_note and legacy_note.notebook_id else None
-        if notebook is not None and notebook.course_id == course_id and notebook.deleted_at is None:
+        notebook, _error = resolve_legacy_note_target(db, conversation.note_id, course_id)
+        if notebook is not None:
             conversation.note_id = notebook.id
             conversation.note_title = conversation.note_title or notebook.title
     return conversations
@@ -222,6 +252,8 @@ def send_message(
     db: Session = Depends(get_db),
 ) -> ConversationMessageRead:
     conversation = ensure_conversation(db, conversation_id)
+    if conversation.scope == "notebook":
+        raise HTTPException(status_code=409, detail="Notebook 专属问答服务将在下一批接入；本会话历史可正常读取")
     if payload.idempotency_key:
         existing = db.scalar(select(ConversationMessage).where(
             ConversationMessage.conversation_id == conversation_id,

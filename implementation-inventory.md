@@ -9,7 +9,7 @@
 本盘点所在工作区：`feat/overall-inspection`，HEAD 与上述远端基线相同。
 状态定义：**确认存在**=在该基线源码中定位到；**已消失**=在约定搜索范围中核实不存在；**未确认**=仅凭静态源码不能确定，需运行态或更深入验证。
 
-> 本文仅记录源码、路由、测试和迁移现状，不代表规划功能已经实现或验收。调查未读取本地 `.env`、用户真实数据库或上传材料；未执行迁移、真实供应商调用或浏览器人工验收。
+> 第 1–9 节为初始静态调查快照，不代表规划功能已经实现或验收。调查未读取本地 `.env`、用户真实数据库或上传材料；后续批次状态见第 10 节。
 
 ## 1. 基线与工作区
 
@@ -114,3 +114,22 @@
 - 生产代码、数据库、迁移、配置和真实用户数据：未更改。
 - 已执行：fetch `origin`、确认目标 HEAD、建立隔离 worktree、源码/测试/迁移静态盘点、读取 Alembic head metadata。
 - 远端状态记录：盘点期间 `origin/feat/overall-inspection` 的已 fetch HEAD 为 `67677dd8771f2fe756d2f29a986102a64655a730`；进入每个代码批次前须重新 fetch 并再次审查同名分支。
+
+## 10. 后续批次状态：A1（2026-11-01）
+
+此状态更新于主工作树 `D:\工作台\Notebuddy软件开发\Notebuddy` 的 `feat/overall-inspection`；初始盘点从隔离 worktree 迁移到主工作树后继续开发。前文的分支/路径说明只描述当时状态。
+
+- **已实现（待最终批次评审）**：新增 `f2b7d9a1406c`，将 Notebook 会话目标独立保存为 `notebook_id`，`course_id=NULL`，保留历史 Note 字段和数据；Notebook 删除设空目标但保留会话历史；降级前遇到 Notebook-scope 行会拒绝执行。
+- **已实现**：Notebook 专属创建/列表 API；课程与全局会话接口保留；通用消息读取允许无课程的 Notebook 历史；普通消息和 Agent 请求在 A1 返回 409，等待 A2，不回退到课程或最近访问上下文。
+- **已实现**：旧 `scope='note'` ID 映射只在 Notebook/Note 唯一、同课程、未删除时返回；冲突、跨课程或目标失效时不猜测。AssistantPage/Dock 移除旧 Note 选择与 `reading_context.note_id` 发送，Dock 移除回答写入/替换正文入口。
+- **已实现**：Agent 工具集合隐藏 `propose_notebook_edits`，Notebook scope 工具规范只包含锁定 Notebook 读取；已保留既有建议表、审查 API 和已发布迁移。
+- **已通过的相关检查**：后端测试子集 `test_agent_notebook.py test_conversation_scope.py test_notebook_conversation_migration.py test_alembic_migration_drill.py` 在增补新断言后为 `20 passed, 2 warnings`；前端 `assistant-layout.test.tsx agent-dock.test.tsx use-conversation.test.tsx agent-conversation-scope.test.tsx` 为 `48 passed`；TypeScript `tsc -b`、Ruff 相关文件检查和 Vite 生产构建通过。Vite 提示主 bundle 超 500KB；未进行浏览器人工验收。完整 `scripts/test.ps1` 与本轮实现的协作者审核仍待完成。
+- **下一步**：完成 A1 全库回归及实现评审后，提交 A1；随后按规划实现 A2 核验后 SSE 和专属证据服务。B1/B2/C1/C2/D 仍未实施。
+
+### A1 完成记录（2026-11-01）
+
+- 独立协作者审查：未发现阻断问题；明确 A2 需移除 Agent 对课程 ID 的假设并将 `read_notebook` 限定为会话绑定 Notebook。
+- 完整验证命令：`pwsh -NoProfile -File .\scripts\test.ps1`，退出码 0；后端 Ruff 通过，pytest 439 passed / 4 skipped（2 warnings）；Web navigation 52 tests passed；Vitest 80 files / 411 tests passed；TypeScript、Web production build、Desktop main-process build 通过。Vite 有主 bundle 超 500 KB 警告。
+- 变更范围：Notebook 会话数据契约/迁移/API、旧 Note ID 安全映射与前端入口清理、Agent 旧写回工具关闭、对应测试及 ADR/契约/README 记录。
+- 人工浏览器验收：未执行。A1 暂时返回 409 阻止 Notebook 问答；实际问答路径属于 A2。
+- 未覆盖风险：A1 未启用 Notebook 专属答疑；全量自动测试不代表真实模型/材料验收。

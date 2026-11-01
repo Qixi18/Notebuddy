@@ -7,7 +7,7 @@ import type { AssistantSource } from '../types'
  * ``agent.ts`` 的流式客户端与这里共享同一套事件类型与解析规则。
  */
 
-export type AgentScope = 'note' | 'course' | 'global'
+export type AgentScope = 'notebook' | 'note' | 'course' | 'global'
 
 export type AgentStepEvent = {
   type: 'step'
@@ -92,7 +92,7 @@ export type AgentReadingContext = {
 }
 
 export type AgentNotebookContext = {
-  course_id: string
+  course_id?: string | null
   notebook_id: string
   revision: number
   title?: string

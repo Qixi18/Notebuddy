@@ -7,7 +7,7 @@ from typing import Literal
 
 from app.retrieval.service import RetrievedChunk
 
-AgentScope = Literal["note", "course", "global"]
+AgentScope = Literal["notebook", "note", "course", "global"]
 
 
 @dataclass

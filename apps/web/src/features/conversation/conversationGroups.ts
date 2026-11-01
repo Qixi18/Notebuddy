@@ -88,7 +88,8 @@ export type HistorySection = {
   latest: number
 }
 
-function conversationScope(item: Conversation): 'course' | 'global' | 'note' {
+function conversationScope(item: Conversation): 'course' | 'global' | 'note' | 'notebook' {
+  if (item.scope === 'notebook') return 'notebook'
   if (item.scope === 'global' || item.scope === 'note') return item.scope
   /* 历史字段只有 course / material / page；后两者都属于"整门课程"这一档 */
   return item.default_scope === 'global' ? 'global' : 'course'
@@ -118,6 +119,9 @@ export function buildHistory(
 
   for (const item of conversations) {
     const scope = conversationScope(item)
+    // Notebook sessions are listed inside their owning Notebook workspace and
+    // must never be grouped under a null or recently visited course.
+    if (scope === 'notebook' || !item.course_id) continue
     if (scope === 'global') {
       globalItems.push(item)
       continue

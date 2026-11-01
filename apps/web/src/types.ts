@@ -484,13 +484,14 @@ export type KnowledgeChange = {
 
 export type Conversation = {
   id: string
-  course_id: string
+  course_id: string | null
+  notebook_id?: string | null
   title: string
   default_scope: string
   created_at: string
   updated_at: string
-  /** 会话归属：course=整门课程 / global=跨课程 / note=锁定笔记（后端 B1 落地后可用） */
-  scope?: 'course' | 'global' | 'note' | null
+  /** 会话归属：course / global / notebook；note 仅用于历史兼容 */
+  scope?: 'course' | 'global' | 'notebook' | 'note' | null
   note_id?: string | null
   note_title?: string | null
 }

@@ -15,6 +15,8 @@ from app.db.models import (
     Material,
     MaterialPage,
     MessageEvidence,
+    Note,
+    Notebook,
     PageBlock,
     SourceRef,
     WebSource,
@@ -48,6 +50,29 @@ class ConversationUnavailable(Exception):
     def __init__(self, detail: str) -> None:
         self.detail = detail
         super().__init__(detail)
+
+
+def resolve_legacy_note_target(db: Session, note_id: str, course_id: str) -> tuple[Notebook | None, str | None]:
+    """Resolve old note_id data only when every matching legacy target is unambiguous."""
+    candidates: list[Notebook] = []
+    direct = db.get(Notebook, note_id)
+    if direct is not None:
+        candidates.append(direct)
+    legacy_note = db.get(Note, note_id)
+    if legacy_note is not None:
+        mapped = db.get(Notebook, legacy_note.notebook_id) if legacy_note.notebook_id else None
+        if mapped is None:
+            return None, "旧笔记对应的 Notebook 已不存在，历史会话不可继续提问"
+        candidates.append(mapped)
+    if not candidates:
+        return None, "旧笔记目标无法唯一解析，历史会话仅可阅读"
+    distinct = {item.id: item for item in candidates}
+    if len(distinct) != 1:
+        return None, "旧笔记 ID 同时指向不同 Notebook，历史会话仅可阅读"
+    notebook = next(iter(distinct.values()))
+    if notebook.deleted_at is not None or notebook.course_id != course_id:
+        return None, "旧笔记目标已删除或不属于原课程，历史会话仅可阅读"
+    return notebook, None
 
 
 def _hit_snippet(content: str, keyword: str, *, window: int = 60) -> str:
@@ -96,9 +121,15 @@ def load_conversation(db: Session, conversation_id: str) -> Conversation:
     )
     if conversation is None:
         raise ConversationUnavailable("会话不存在")
-    course = db.get(Course, conversation.course_id)
-    if course is None or course.deleted_at is not None:
-        raise ConversationUnavailable("课程不存在")
+    if conversation.scope == "notebook":
+        # Notebook deletion nulls the target FK but intentionally keeps the
+        # transcript readable as historical content.
+        if conversation.course_id is not None:
+            raise ConversationUnavailable("Notebook 会话归属无效")
+    else:
+        course = db.get(Course, conversation.course_id) if conversation.course_id else None
+        if course is None or course.deleted_at is not None:
+            raise ConversationUnavailable("课程不存在")
     return conversation
 
 

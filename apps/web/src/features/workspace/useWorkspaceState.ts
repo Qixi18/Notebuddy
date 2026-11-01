@@ -15,6 +15,8 @@ const emptyGraph: KnowledgeGraph = { nodes: [], edges: [] }
 export function useWorkspaceState() {
   const location = useLocation()
   const courseId = matchPath('/courses/:courseId/*', location.pathname)?.params.courseId
+  const notebookConversationId = matchPath('/courses/:courseId/notebooks/:notebookId', location.pathname)?.params.notebookId
+    ?? matchPath('/notebooks/unbound/:notebookId', location.pathname)?.params.notebookId
   const currentCourseId = useRef(courseId)
   currentCourseId.current = courseId
   const [courses, setCourses] = useState<Course[]>([])
@@ -52,7 +54,12 @@ export function useWorkspaceState() {
     () => resolveConversationCourseId(courseId, courses, (key) => localStorage.getItem(key)),
     [courseId, courses],
   )
-  const conversation = useConversation(conversationCourseId)
+  // Notebook routes own their transcript directly. An unbound Notebook must
+  // never inherit the most recently visited course as a synthetic owner.
+  const conversation = useConversation(
+    notebookConversationId ? undefined : conversationCourseId,
+    notebookConversationId,
+  )
 
   useEffect(() => {
     if (!courseId || !course) return

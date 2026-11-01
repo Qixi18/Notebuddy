@@ -2,15 +2,23 @@
 
 本文的既有契约段落记录本地 `feat/debug-integration` 历史快照（2026-10-30）；2026-11-01 的整改审查基线为 `origin/feat/overall-inspection` @ `67677dd8771f2fe756d2f29a986102a64655a730`。云端多用户安全不在当前本地实现保证范围内。字段和错误以对应基线的 `apps/backend/app/schemas/`、路由及服务源码为准。下列整改目标为 Proposed，不应误读为已实现契约。
 
-## Notebook 答疑整改提案（Proposed）
+## Notebook 答疑整改提案（Proposed；A1 部分已实现）
 
 - 目标范围固定为一个明确的 Notebook 或用户明确选择的课程；不得静默退化为全局跨课程检索。
 - Notebook 第一来源是所选 Notebook 当前已保存 `document_json` 与 revision。核验材料限于该 Notebook 有效 `NotebookAsset` 关联的当前完成 ParseRun；来源不完整时不得扩大到其他 Notebook 或课程文件。
 - 核验前的草稿不向客户端发送正文 delta，也不向用户暴露内部推理。只有完成主张核验和证据 ID 校验后才允许流式发送最终回答。
-- 新会话目标计划使用 `notebook_id`；`course_id` 可空仅表示 Notebook 级范围。历史 `scope='note'` 的读取映射需要显式兼容，不得依据最近访问课程猜测归属。
+- 新会话目标使用 `notebook_id`；`course_id` 可空仅表示 Notebook 级范围。历史 `scope='note'` 的读取映射必须显式兼容，不得依据最近访问课程猜测归属。
 - 本轮 Agent 不创建 Notebook 编辑建议；既有 `NotebookEditSuggestion` 和 Note 历史数据/迁移留存，旧写回入口在兼容风险核查后关闭。
 
-该提案的迁移和端点 JSON 变化仍需 A1 逐项设计并验证；审查接受前保留为待议目标。
+### A1 当前代码契约
+
+- Alembic `f2b7d9a1406c` 增加 nullable `Conversation.course_id`、nullable `notebook_id` 和 `scope='notebook' => course_id IS NULL` 约束；Notebook 删除后目标 FK 设为空，消息历史保留。降级遇到任何 Notebook-scope 会话会拒绝。
+- `POST/GET /api/v1/notebooks/{notebook_id}/conversations` 创建/列出指定 Notebook 会话。新行使用 `scope=default_scope='notebook'`、`notebook_id=<真实 ID>`、`course_id=null`，不随 Notebook 绑定状态变化。
+- 通用 `GET /api/v1/conversations/{id}/messages` 可读该历史。普通消息和 Agent 消息暂时返回 409；不得用课程检索或最近课程兜底。专属答疑服务属于 A2。
+- 旧 `scope='note'` 和 `note_id` 字段仍用于兼容历史。旧标识若能同时解析到不同 Notebook、跨课程、已删除或不可解析，不自动映射；历史消息仍可读。
+- 当前 Agent 工具表不暴露正文编辑建议。AssistantPage/Dock 不再发送 `reading_context.note_id`，Dock 也不提供直接把回答写入正文的入口。历史建议表、API 和迁移保留。
+
+完整的 Notebook→DocumentIR→WebSearch→核验后 SSE 契约仍为 Proposed，并在 A2 实现前不应视为已完成答疑能力。
 ## 双路线处理补充（2026-10-30）
 
 `assets.processing_route` / `processing_config_json` 固定上传所选路线和非敏感模型连接身份，`materials.processing_route` 与其保持一致。批次保存初始路线；失败输入切换后可在同一批次中按实际路线分组生成。历史数据默认 `standard`，新上传的默认值由设置控制。

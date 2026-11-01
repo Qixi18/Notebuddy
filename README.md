@@ -8,11 +8,13 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 **整改提案（Proposed，待审）**：按 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md) 与 [实施盘点](implementation-inventory.md) 分批收敛 Notebook 答疑证据门禁、只读正文、未分类会话契约、视觉模型能力预检、单文件 CNY 预算及共享 Workspace。上述内容是开发目标，不代表已实现或验收；实施基线为 2026-11-01 fetch 后的 `feat/overall-inspection`。
 
+**实施进度（2026-11-01）**：A1 会话迁移与旧 Note 答疑入口清理已在 `feat/overall-inspection` 开发中；`f2b7d9a1406c` 为新增 Notebook 会话迁移。Notebook 专属问答目前明确返回未开放状态，A2 尚需实现核验后 SSE；B、C、D 均未完成。ADR-0002 仍为 Proposed，以上不是全项目验收声明。
+
 ## 当前能力与边界
 
 - 一门课程可有多本笔记本；笔记按讲次、章节和小节组织，知识树叶子定位到具体笔记小节。课程、资料、笔记、会话及修改记录保存在本地 SQLite。
 - 资料上传后进入持久任务队列，由独立执行器解析。解析结果保留来源位置与告警；扫描 PDF 等缺少可提取文字的情况需要检查或启用 OCR。
-- Notebook 上传后的初始/增量生成通过质量门禁后可写入正式正文；Agent 主动编辑已有正文则通过待审建议或受控操作，保留用户修改与 revision 保护。旧 Note 路径另有兼容建议流程。
+- Notebook 上传后的初始/增量生成通过质量门禁后可写入正式正文；当前 Agent 答疑不修改正文，旧编辑建议数据与审核 API 暂保留兼容但不由 Agent 新建。
 - 课程答疑支持持久会话、资料检索、来源展示与可选的网络搜索。未配置外部模型时存在本地降级路径；降级结果不代表真实模型质量。
 - 首页展示近期课程知识树，森林页浏览全部课程。培养方案先预览再确认导入。
 

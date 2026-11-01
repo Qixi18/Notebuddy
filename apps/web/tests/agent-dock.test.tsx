@@ -76,22 +76,20 @@ function scopeSelect() {
   return screen.getByLabelText(/本次提问的作用范围/) as HTMLSelectElement
 }
 
-test('笔记本页的作用范围提供「锁定当前笔记」，并发送时按所选档位调用 askAgent', async () => {
+test('旧 Note 路径不再提供锁定入口，也不发送 reading_context.note_id', async () => {
   renderShell()
   const select = scopeSelect()
   const options = Array.from(select.options).map((option) => option.value)
-  expect(options).toContain('__note__')
+  expect(options).not.toContain('__note__')
   expect(options).toContain('__global__')
 
-  fireEvent.change(select, { target: { value: '__note__' } })
   fireEvent.change(screen.getByLabelText(/快速提问/), { target: { value: '帮我整理这一节' } })
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
 
   await waitFor(() => expect(askAgent).toHaveBeenCalled())
   expect(askAgent.mock.calls[0]?.[0]).toBe('帮我整理这一节')
-  expect(askAgent.mock.calls[0]?.[1].scope).toBe('note')
-  expect(askAgent.mock.calls[0]?.[1].readingContext?.note_id).toBe('n1')
-  expect(askAgent.mock.calls[0]?.[1].readingContext?.excerpt).toBeTruthy()
+  expect(askAgent.mock.calls[0]?.[1].scope).toBe('course')
+  expect(askAgent.mock.calls[0]?.[1].readingContext).toBeUndefined()
 })
 
 test('全局档不带笔记节选，scope 传 global', async () => {
@@ -140,41 +138,15 @@ test('agent 完成后展示知识提议卡', async () => {
   expect(await screen.findByText(/提议新增知识点「克拉默法则」/)).toBeTruthy()
 })
 
-test('建议卡展示红删绿增 diff，采纳后可一键撤销', async () => {
-  vi.mocked(api.listSuggestions).mockResolvedValue([
-    { id: 'sug-9', note_id: 'n1', proposed_markdown: '# 行列式\n建议后的全文', impact: '整理正文', status: 'pending' },
-  ])
+test('AI Dock 隐藏旧 Note 修改建议和回写入口', () => {
   renderShell({ conversation: {
     messages: [], busy: false, error: undefined, agentRun: null,
     ask: async () => true, askAgent, startNewConversation: async () => {},
   } })
 
-  await screen.findByText(/整理正文/)
-  // 红删绿增：removed 行是原文，added 行是建议新文
-  expect(document.querySelector('.agent-diff-removed')?.textContent).toBe('已有正文。')
-  expect(document.querySelector('.agent-diff-added')?.textContent).toBe('建议后的全文')
-
-  fireEvent.click(screen.getByRole('button', { name: '采纳' }))
-  await waitFor(() => expect(api.reviewSuggestion).toHaveBeenCalledWith('n1', 'sug-9', 'confirm', undefined, '# 行列式\n建议后的全文'))
-
-  const undo = await screen.findByRole('button', { name: /撤销本次 AI 改动/ })
-  fireEvent.click(undo)
-  await waitFor(() => expect(api.updateNote).toHaveBeenCalledWith('n1', '# 行列式\n已有正文。', 1))
-})
-
-test('取消勾选变更块后按部分采纳提交', async () => {
-  vi.mocked(api.listSuggestions).mockResolvedValue([
-    { id: 'sug-7', note_id: 'n1', proposed_markdown: '# 行列式\n建议后的全文', impact: '整理正文', status: 'pending' },
-  ])
-  renderShell({ conversation: {
-    messages: [], busy: false, error: undefined, agentRun: null,
-    ask: async () => true, askAgent, startNewConversation: async () => {},
-  } })
-
-  await screen.findByText(/整理正文/)
-  fireEvent.click(screen.getByRole('checkbox'))
-  fireEvent.click(screen.getByRole('button', { name: /采纳所选项（0\/1 块）/ }))
-  await waitFor(() => expect(api.reviewSuggestion).toHaveBeenCalledWith('n1', 'sug-7', 'confirm', undefined, '# 行列式\n已有正文。'))
+  expect(screen.queryByRole('button', { name: '写入当前笔记' })).toBeNull()
+  expect(screen.queryByText(/整理正文/)).toBeNull()
+  expect(api.listSuggestions).not.toHaveBeenCalled()
 })
 
 test('agent 回答中的 GFM 表格按表格渲染而不是管道文本', () => {
@@ -194,10 +166,10 @@ test('agent 回答中的 GFM 表格按表格渲染而不是管道文本', () => 
   expect(document.querySelectorAll('.assistant-dock-answer td').length).toBe(4)
 })
 
-test('未打开笔记时显示「如何打开」提示且没有锁定选项', () => {
+test('普通页面不再提示进入旧 Note 编辑流程，也没有锁定 Note 范围', () => {
   renderShell({ selectedNote: undefined })
 
-  expect(screen.getByText(/点开一个具体小节/)).toBeTruthy()
+  expect(screen.queryByText(/点开一个具体小节/)).toBeNull()
   const select = screen.getByRole('combobox', { name: '本次提问的作用范围' }) as HTMLSelectElement
   expect(Array.from(select.options).some((option) => option.value === '__note__')).toBe(false)
 })

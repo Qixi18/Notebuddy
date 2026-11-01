@@ -1,28 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { Course } from '../../types'
-import type { AskScope } from '../conversation/useConversation'
 
-/** 会话归属的下一步选择：全局可查 / 整门课程 / 锁定笔记（后两者带二级选择器） */
-export type ScopeNext = { kind: 'global' | 'course' | 'note'; targetId?: string; targetTitle?: string }
+/** 会话归属的下一步选择：全局可查 / 整门课程。 */
+export type ScopeNext = { kind: 'global' | 'course' }
 
 /**
  * 答疑主线顶部的常驻上下文条：范围 chip + 本轮检索摘要。
- * 范围三档：全局可查（无目标）/ 整门课程（选课程→切换课程上下文）/ 锁定笔记（选笔记）。
+ * 范围两档：全局可查（无目标）/ 整门课程（选课程→切换课程上下文）。
  * 范围是会话级属性：新会话默认「全局可查」，发出首条消息后锁定，不再允许修改。
  *
  * 学习目标不在这里设置：后端会按问题关键词自动推断（见 ai/discipline.py），
  * 界面恒定给一个默认值只会短路那条推断，已移除。
  */
-export function AssistantContextBar({ courses, scopeKind, scopeTargetId, scopeTargetTitle, onScopeChange, onSelectCourse, onOpenNotePicker, summary, scopeMenuOpen, onScopeMenuChange, locked, lockHint, onLockedAttempt }: {
+export function AssistantContextBar({ courses, scopeKind, scopeTargetId, onScopeChange, onSelectCourse, summary, scopeMenuOpen, onScopeMenuChange, locked, lockHint, onLockedAttempt }: {
   courses: Course[]
-  scopeKind: 'global' | 'course' | 'note'
+  scopeKind: 'global' | 'course'
   scopeTargetId?: string
-  scopeTargetTitle?: string
   onScopeChange: (next: ScopeNext) => void
   onSelectCourse: (courseId: string) => void
-  /** 选「锁定笔记」时打开笔记选择框（按课程筛 + 按名称搜） */
-  onOpenNotePicker: () => void
   summary?: { materials: number; items: number } | null
   scopeMenuOpen: boolean
   onScopeMenuChange: (open: boolean) => void
@@ -33,7 +29,7 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, scopeTa
   /** 锁定态下点击范围 chip 的回调（弹出提示，而不是打开菜单） */
   onLockedAttempt?: () => void
 }) {
-  const [submenu, setSubmenu] = useState<'course' | 'note' | null>(null)
+  const [submenu, setSubmenu] = useState<'course' | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -52,18 +48,12 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, scopeTa
 
   const label = scopeKind === 'global'
     ? '全局可查'
-    : scopeKind === 'note'
-      ? (scopeTargetTitle ?? '锁定笔记')
-      : '整门课程'
+    : '整门课程'
 
-  function pick(kind: 'global' | 'course' | 'note') {
+  function pick(kind: 'global' | 'course') {
     if (kind === 'global') {
       onScopeChange({ kind: 'global' })
       onScopeMenuChange(false)
-    } else if (kind === 'note') {
-      /* 锁定笔记走独立选择框：平铺列表既搜不了也换不了课程 */
-      onScopeMenuChange(false)
-      onOpenNotePicker()
     } else {
       setSubmenu((current) => (current === kind ? null : kind))
     }
@@ -114,14 +104,6 @@ export function AssistantContextBar({ courses, scopeKind, scopeTargetId, scopeTa
               className={`workspace-scope-option${scopeKind === 'course' ? ' is-active' : ''}`}
               onClick={() => pick('course')}
             >整门课程</button>
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={scopeKind === 'note'}
-              className={`workspace-scope-option${scopeKind === 'note' ? ' is-active' : ''}`}
-              onClick={() => pick('note')}
-            >锁定笔记</button>
-
             {submenu === 'course' && (
               <div className="workspace-scope-picker" role="menu">
                 <span className="workspace-scope-picker-title">锁定哪一门课程</span>
