@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { ProviderStatus } from '../api'
 import type { SettingsStatus } from '../types'
+import { readSidebarQuote, saveSidebarQuote } from '../features/navigation/sidebarQuote'
 
 type Draft = {
   NOTEBOOK_DOCUMENT_PROCESSING_ROUTE: string
@@ -48,6 +49,8 @@ export function useSettingsDraft() {
   const [testResults, setTestResults] = useState<Partial<Record<ConnectiveProvider, ProviderStatus>>>({})
   const [error, setError] = useState<string>()
   const [notice, setNotice] = useState<string>()
+  const [sidebarQuote, setSidebarQuote] = useState(readSidebarQuote)
+  const [originalSidebarQuote, setOriginalSidebarQuote] = useState(sidebarQuote)
 
   useEffect(() => {
     void load()
@@ -83,7 +86,8 @@ export function useSettingsDraft() {
     status?.limits.secret_write_enabled &&
     (status.limits.token_required ? token.trim().length > 0 : true)
 
-  const changeCount = dirty.length + secretTouched.length
+  const quoteChanged = sidebarQuote !== originalSidebarQuote
+  const changeCount = dirty.length + secretTouched.length + Number(quoteChanged)
 
   async function handleSave() {
     if (changeCount === 0) return
@@ -104,17 +108,29 @@ export function useSettingsDraft() {
       setSaving(true)
       setError(undefined)
       setNotice(undefined)
-      const response = await api.updateSettings(updates, token || undefined)
+      let savedCount = 0
+      let backup = ''
+      let warn = ''
+      if (Object.keys(updates).length > 0) {
+        const response = await api.updateSettings(updates, token || undefined)
+        setStatus(response.status)
+        const nextDraft = buildDraft(response.status)
+        setDraft(nextDraft)
+        setOriginal(nextDraft)
+        setSecrets(EMPTY_SECRETS)
+        setToken('')
+        savedCount = response.updated.length
+        backup = response.backup_path ? `，原配置已备份至 ${response.backup_path}` : ''
+        warn = response.warnings.length > 0 ? `　⚠ ${response.warnings.join('；')}` : ''
+      }
+      if (quoteChanged) {
+        const savedQuote = saveSidebarQuote(sidebarQuote)
+        setSidebarQuote(savedQuote)
+        setOriginalSidebarQuote(savedQuote)
+        savedCount += 1
+      }
       window.dispatchEvent(new Event('notebuddy-settings-changed'))
-      setStatus(response.status)
-      const nextDraft = buildDraft(response.status)
-      setDraft(nextDraft)
-      setOriginal(nextDraft)
-      setSecrets(EMPTY_SECRETS)
-      setToken('')
-      const backup = response.backup_path ? `，原配置已备份至 ${response.backup_path}` : ''
-      const warn = response.warnings.length > 0 ? `　⚠ ${response.warnings.join('；')}` : ''
-      setNotice(`已保存 ${response.updated.length} 项配置${backup}${warn}`)
+      setNotice(`已保存 ${savedCount} 项配置${backup}${warn}`)
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : '设置保存失败'
       setError(message)
@@ -165,5 +181,6 @@ export function useSettingsDraft() {
     status, draft, secrets, token, setToken, loading, saving, testing, testResults,
     error, setError, notice, changeCount, secretTouched, secretWriteReady,
     handleSave, handleTest, update, updateSecret,
+    sidebarQuote, setSidebarQuote,
   }
 }

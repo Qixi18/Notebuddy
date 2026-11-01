@@ -53,7 +53,8 @@ test.each(['home', 'forest'])('%s root creation reaches the real upload page and
   await waitFor(() => expect((screen.getByLabelText('目标笔记本') as HTMLSelectElement).value).toBe(added.id))
   fireEvent.click(screen.getByRole('button', { name: '浏览器返回' }))
   await screen.findByRole('button', { name: '续读笔记本：新增笔记本' })
-  expect(container.querySelectorAll('.kt-branch-growth')).toHaveLength(1)
+  // Directory controls render before the playback effect consumes its receipt.
+  await waitFor(() => expect(container.querySelectorAll('.kt-branch-growth')).toHaveLength(1))
   // Changing the notebook count selects a new crown silhouette. The existing
   // knowledge point keeps its real identity and notebook ownership as it moves.
   const oldLeaf = screen.getByRole('button', { name: '打开知识点：旧知识点' })

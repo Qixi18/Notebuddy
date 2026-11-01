@@ -56,8 +56,6 @@
 .home-garden-page .kt-camera-controls button[aria-label="适应全部课程"] { min-width: 44px; font-size: 12px; }
 .home-garden-page .kt-camera-controls button:hover { background: #e9eadb; }
 .home-garden-page .kt-camera-controls output { color: #59694f; font: 11px var(--nb-sans); }
-.home-view-caption { margin-left: auto; white-space: nowrap; font-size: 11px; letter-spacing: .4px; color: #647254; }
-.home-view-caption > span { margin: 0 7px; color: #8b966e; }
 .home-garden-page .knowledge-tree-scene { flex: 1; height: auto; min-height: 0; color: #284b39; background-color: transparent; background-image: radial-gradient(ellipse at 22% 90%, #b7be7718, transparent 40%), radial-gradient(ellipse at 78% 94%, #6f865014, transparent 38%); }
 .home-garden-page .kt-hint, .home-garden-page .kt-empty { display: none; }
 .home-garden-page .kt-course-title { fill: #284b39; font-size: 23px; font-weight: 500; }
@@ -96,7 +94,6 @@
   .home-garden-page .home-canvas { padding-inline: 30px; }
   .home-garden-header { gap: 16px; padding-top: 36px; }
   .home-garden-actions { gap: 16px; }
-  .home-view-caption { display: none; }
   .home-garden-page .kt-camera-controls { margin-left: auto; }
   .home-garden-footer small { display: none; }
 }
@@ -134,7 +131,6 @@
 @container home-garden (max-width: 800px) {
   .home-garden-header { flex-wrap: wrap; gap: 18px; padding-top: 28px; padding-bottom: 22px; }
   .home-garden-actions { flex-wrap: wrap; width: 100%; justify-content: space-between; gap: 12px; }
-  .home-view-caption { display: none; }
   .home-garden-page .kt-camera-controls { margin-left: auto; }
   .home-garden-footer small { display: none; }
 }

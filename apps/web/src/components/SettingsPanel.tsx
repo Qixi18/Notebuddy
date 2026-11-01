@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 
 import { useSettingsDraft } from './useSettingsDraft'
+import { SIDEBAR_QUOTE_MAX_LENGTH } from '../features/navigation/sidebarQuote'
 
 type SettingsPanelProps = {
   onClose: () => void
@@ -30,6 +31,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     status, draft, secrets, token, setToken, loading, saving, testing, testResults,
     error, setError, notice, changeCount, secretTouched, secretWriteReady,
     handleSave, handleTest, update, updateSecret,
+    sidebarQuote, setSidebarQuote,
   } = useSettingsDraft()
 
   useEffect(() => {
@@ -68,11 +70,28 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           )}
           {notice && <div className="settings-notice">{notice}</div>}
 
+          <section className="settings-section">
+            <div className="settings-section-heading"><span>个性化</span><small>保存到当前浏览器</small></div>
+            <label className="field">
+              <span>侧边栏寄语</span>
+              <textarea
+                value={sidebarQuote}
+                onChange={(event) => setSidebarQuote(event.target.value)}
+                maxLength={SIDEBAR_QUOTE_MAX_LENGTH}
+                rows={3}
+                disabled={saving}
+                aria-describedby="sidebar-quote-hint"
+              />
+            </label>
+            <p className="field-hint" id="sidebar-quote-hint">显示在左下角，支持换行，最多 {SIDEBAR_QUOTE_MAX_LENGTH} 个字符。留空保存可恢复默认寄语。</p>
+          </section>
+
           {status && draft && (
             <>
               <section className="settings-section">
                 <div className="settings-section-heading"><span>文档处理</span><small>用于新上传的资料</small></div>
-                <label>默认文档处理路线
+                <label className="field">
+                  <span>默认文档处理路线</span>
                   <select aria-label="默认文档处理路线" value={draft.NOTEBOOK_DOCUMENT_PROCESSING_ROUTE}
                     disabled={saving} onChange={event => update('NOTEBOOK_DOCUMENT_PROCESSING_ROUTE', event.target.value)}>
                     <option value="standard">标准处理</option>

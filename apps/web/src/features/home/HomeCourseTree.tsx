@@ -5,6 +5,7 @@ import { CourseCanopy, type LeafPreview } from '../tree/CourseCanopy'
 import type { GrowthAnimations } from '../tree/growth/useGrowthPlayback'
 import { playTreeGrowth } from '../tree/growth/paint'
 import { growthVisible } from '../tree/growth/visibility'
+import { HOME_TREE_GROWTH_TIME_SCALE } from '../tree/growth/timing'
 import '../tree/knowledge-tree.css'
 
 export { homePreviewBooks } from '../tree/courseCanopyGeometry'
@@ -26,7 +27,7 @@ export function HomeCourseTree({ courseId, books, selectedBookId, previewId, pre
     const growingBooks = new Set([...growth.books].filter(id => bookIds.has(id)))
     const growingNotes = growth.sections
     if (!course && !growingBooks.size && !growingNotes.size) return
-    const playback = playTreeGrowth(element, { course, books: growingBooks, notes: growingNotes })
+    const playback = playTreeGrowth(element, { course, books: growingBooks, notes: growingNotes }, HOME_TREE_GROWTH_TIME_SCALE)
     const finish = () => playback.finish()
     element.addEventListener('pointerdown', finish, true)
     element.addEventListener('focusin', finish, true)
@@ -36,7 +37,7 @@ export function HomeCourseTree({ courseId, books, selectedBookId, previewId, pre
       finish()
     }
   }, [growth, courseId, books])
-  return <svg className="home-course-tree" viewBox={`${bounds.x - 18} ${bounds.y - 8} ${bounds.width + 36} ${bounds.height + 16}`} preserveAspectRatio="xMidYMax meet" aria-label="课程知识树，枝干打开笔记本，叶子打开知识点">
+  return <svg className="home-course-tree kt-growth-managed" viewBox={`${bounds.x - 18} ${bounds.y - 8} ${bounds.width + 36} ${bounds.height + 16}`} preserveAspectRatio="xMidYMax meet" aria-label="课程知识树，枝干打开笔记本，叶子打开知识点">
     <g ref={root}><CourseCanopy canopy={{ items, variant, bounds }} empty={!books.length} previewId={previewId} previewNoteId={previewNoteId} onPreview={onPreview} onLeave={onLeave} onNotebook={onNotebook} onNote={onNote} growingBooks={growth?.books} growingNotes={growth?.sections} /></g>
   </svg>
 }

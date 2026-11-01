@@ -20,7 +20,7 @@ export type LeafGeometry = {
   anchor: Point; center: Point; angle: number; variant: number;
   transform: string; hit: { cx: 0; cy: -30; rx: 26; ry: 35 };
 };
-export type BookGeometry = { book: BookInput; primary: Limb; limbs: Limb[]; leaves: LeafGeometry[]; hitPath: string };
+export type BookGeometry = { book: BookInput; trunk: Limb; primary: Limb; limbs: Limb[]; leaves: LeafGeometry[]; hitPath: string };
 export type TreeGeometry = { input: TreeInput; books: BookGeometry[]; bounds: { x: number; y: number; width: number; height: number } };
 type XY = [number, number];
 type Recipe = {
@@ -164,6 +164,24 @@ function paintLimb(id: string, bookId: string, level: 1|2|3, curves: Cubic[], ro
   return {id,bookId,level,parentId,parentT,curves,rootRadius,tipRadius,centerPath:curvePath(curves),outline,grain,textureSpans};
 }
 
+/** A shared living stem, rather than a pointed stock with several tubes on top.
+ * Lower controls follow the three root illustrations. The upper stem changes
+ * its lean and girth for a single leader, an asymmetric Y, or three forks.
+ */
+export function trunkGeometry(variant: 0|1|2, crownSize: 1|2|3): Limb {
+  const bases = [P(-19,-125), P(2,-125), P(-25,-125)];
+  const bends = [P(-8,-205), P(-10,-205), P(-13,-205)];
+  const lean = crownSize === 1 ? [-4,-12,-14][variant] : crownSize === 2 ? [9,5,3][variant] : [-10,8,-19][variant];
+  const top = P(lean, crownSize === 1 ? -294 : crownSize === 2 ? -274 : -292);
+  const base = bases[variant], bend = bends[variant];
+  const incoming = P(bend.x + (variant === 1 ? 4 : -2), -175);
+  return paintLimb(`trunk-${variant}-${crownSize}`, '', 1,
+    [[base, P(base.x + (variant === 2 ? 14 : 5), -146), incoming, bend],
+     [bend, add(bend,sub(bend,incoming)), P(top.x + (crownSize === 2 ? -9 : 5), top.y+24), top]],
+    crownSize === 1 ? 22 : crownSize === 2 ? 24 : 26,
+    crownSize === 3 ? 12 : 13.5);
+}
+
 /** Continue the existing leader down into the redrawn stock without moving it. */
 export function rootstockJoin(primary: Limb, scaleY = 1): Limb {
   const end = pointAt(primary.curves, 0);
@@ -199,16 +217,29 @@ function assertSlot(slot: number, label: string): void {
  * Scope: three notebook lanes, six reserved Note sites per lane for the home overview.
  * A bank >0 requires a separate/expanded tree, deliberately not silent modulo aliasing.
  */
-export function notebookGeometry(book: BookInput, variant: 0|1|2, crownSize: 1|2|3 = 3): BookGeometry {
+export function notebookGeometry(book: BookInput, variant: 0|1|2, crownSize: 1|2|3 = 3, scaleY = 1): BookGeometry {
   assertSlot(book.treeSlot,'book');
   if(book.treeSlot>2) throw new RangeError('Home design has lanes 0..2. Pass a persisted homeLayoutSlot; do not compact by array index.');
   if(book.treeSlot>=crownSize) throw new RangeError('A main branch must belong to one of the visible notebooks.');
   const recipe=crownSize===1?SINGLE_RECIPE:crownSize===2?DUAL_RECIPES[book.treeSlot]:RECIPES[variant][book.treeSlot], seed=book.id;
   const spread=[.86,.82,.74][variant];
   const raw=recipe.axis.map(([x,y],i)=>P(x*spread+(i===0?0:noise(seed,'axis-x-'+i)*2),y+(i===0?0:noise(seed,'axis-y-'+i)*2)));
+  const trunk=trunkGeometry(variant,crownSize);
+  // The last leader continues the stem. Lateral leaders depart at different
+  // heights and initially follow the parent tangent before opening outward.
+  const parentT=crownSize===1?1:crownSize===2?[.65,1][book.treeSlot]:[.51,.75,1][book.treeSlot];
+  raw[0]=pointAt(trunk.curves,parentT);
+  const departure=tangentAt(trunk.curves,parentT);
+  const reach=Math.min(48,Math.hypot(raw[3].x-raw[0].x,raw[3].y-raw[0].y)*.3);
+  // The renderer scales tall banks around this attachment. Invert it here so
+  // their world-space tangent and collar width still match the unscaled stem.
+  raw[1]=add(raw[0],P(departure.x*reach,departure.y*reach/scaleY));
   // Exact C1 tangent continuity across the two primary cubic segments.
   raw[4]=add(raw[3],sub(raw[3],raw[2]));
-  const primary=paintLimb(book.id+':primary',book.id,1,[[raw[0],raw[1],raw[2],raw[3]],[raw[3],raw[4],raw[5],raw[6]]],15.2+noise(seed,'girth')*1.1,1.4);
+  const parentRadius=radiusAt(trunk,parentT);
+  const collarScale=Math.hypot(departure.x*scaleY,departure.y);
+  const primary=paintLimb(book.id+':primary',book.id,1,[[raw[0],raw[1],raw[2],raw[3]],[raw[3],raw[4],raw[5],raw[6]]],
+    parentRadius*(parentT===1?1:.72+noise(seed,'girth')*.025)/collarScale,1.4,trunk.id,parentT);
   const limbs: Limb[]=[primary];
   const seconds=recipe.forks.map(([t,[x,y],bend],i)=>{
     const limb=fork(primary,t,P(x*spread+noise(seed,'fork-x-'+i)*2,y+noise(seed,'fork-y-'+i)*2),bend,book.id+':secondary:'+i,2);
@@ -234,7 +265,7 @@ export function notebookGeometry(book: BookInput, variant: 0|1|2, crownSize: 1|2
     return {note,bookId:book.id,twigId:twig.id,petiole,anchor,center,angle,variant:hashId(note.id)%6,
       transform:`translate(${fmt(anchor.x)} ${fmt(anchor.y)}) rotate(${fmt(angle)})`,hit:{cx:0 as const,cy:-30 as const,rx:26 as const,ry:35 as const}};
   });
-  return {book,primary,limbs,leaves,hitPath:limbs.filter(l=>l.level<3).map(l=>l.centerPath).join(' ')};
+  return {book,trunk,primary,limbs,leaves,hitPath:limbs.filter(l=>l.level<3).map(l=>l.centerPath).join(' ')};
 }
 
 export function buildTree(input: TreeInput): TreeGeometry {
@@ -257,7 +288,7 @@ export function buildTree(input: TreeInput): TreeGeometry {
 
 /** Geometry audit, usable without a browser. No stateful collision solver. */
 export function auditTree(tree: TreeGeometry) {
-  const limbs=tree.books.flatMap(b=>b.limbs),map=new Map(limbs.map(l=>[l.id,l]));
+  const limbs=tree.books.flatMap(b=>b.limbs),map=new Map([...tree.books.map(b=>b.trunk),...limbs].map(l=>[l.id,l]));
   let maxJoinError=0,maxPetioleError=0,minLeafDistance=Infinity;
   limbs.forEach(l=>{if(l.parentId){const parent=map.get(l.parentId)!;const p=pointAt(parent.curves,l.parentT);const q=l.curves[0][0];maxJoinError=Math.max(maxJoinError,Math.hypot(p.x-q.x,p.y-q.y))}});
   const leaves=tree.books.flatMap(b=>b.leaves);

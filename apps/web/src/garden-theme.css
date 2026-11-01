@@ -40,7 +40,7 @@ html, body, #root { background: var(--nb-paper); }
 .app-shell-garden .sidebar-link:hover { color: #fffdf0; background: #ffffff0e; }
 .app-shell-garden .sidebar-link-active { color: #fffbea; background: #ffffff15; box-shadow: inset 3px 0 var(--nb-sage-light); }
 .app-shell-garden .sidebar-link-active .sidebar-link-icon { color: #d6dfa9; }
-.app-shell-garden .home-sidebar-quote { margin: auto 12px 28px; padding-top: 40px; color: #c4ceb5; font: 15px/1.9 var(--nb-serif); letter-spacing: 1px; }
+.app-shell-garden .home-sidebar-quote { margin: auto 12px 28px; padding-top: 40px; color: #c4ceb5; font: 15px/1.9 var(--nb-serif); letter-spacing: 1px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .app-shell-garden .sidebar-footer { margin-top: 0; padding: 17px 12px 0; border-color: #f7f5ea25; color: #e0e5d4; }
 .app-shell-garden.app-shell-sidebar-collapsed .sidebar-footer { margin-top: auto; }
 .app-shell-garden .sidebar-settings-button { min-height: 44px; color: #d5deca; }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 
@@ -26,6 +26,7 @@ import { api } from '../src/api'
 import type { ConversationMessage } from '../src/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { AssistantPage } from '../src/pages/AssistantPage'
+import { PET_STORAGE_KEY } from '../src/features/pet/petStorage'
 
 afterEach(cleanup)
 
@@ -150,6 +151,37 @@ function renderPage(overrides: {
   )
   return { ...renderResult, conversation }
 }
+
+test('a floating pet keeps its identity visible on narrow screens and returns to floating when widened', () => {
+  let wide = true
+  const listeners = new Set<(event: { matches: boolean }) => void>()
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+    get matches() { return query.includes('min-width') && wide },
+    media: query,
+    addEventListener: (_name: string, callback: (event: { matches: boolean }) => void) => { if (query.includes('min-width')) listeners.add(callback) },
+    removeEventListener: (_name: string, callback: (event: { matches: boolean }) => void) => { listeners.delete(callback) },
+  })))
+  localStorage.setItem(PET_STORAGE_KEY, JSON.stringify({ version: 1, mode: 'float', xRatio: .5, yRatio: .5 }))
+  try {
+    const view = renderPage()
+    expect(document.querySelector('.workspace-petfloat')).toBeTruthy()
+    expect(view.container.querySelector('.workspace-pet-anchor')).toBeTruthy()
+
+    act(() => { wide = false; for (const listener of listeners) listener({ matches: false }) })
+    expect(document.querySelector('.workspace-petfloat')).toBeNull()
+    expect(view.container.querySelector('.workspace-pet-identity-avatar')).toBeTruthy()
+    expect(view.container.querySelector('.workspace-pet-anchor')).toBeNull()
+    expect(JSON.parse(localStorage.getItem(PET_STORAGE_KEY)!).mode).toBe('float')
+
+    act(() => { wide = true; for (const listener of listeners) listener({ matches: true }) })
+    expect(document.querySelector('.workspace-petfloat')).toBeTruthy()
+    expect(view.container.querySelector('.workspace-pet-anchor')).toBeTruthy()
+  } finally {
+    cleanup()
+    localStorage.removeItem(PET_STORAGE_KEY)
+    vi.unstubAllGlobals()
+  }
+})
 
 test('三区骨架渲染：左栏课程历史、中栏上下文条与对话、右栏改动栏', () => {
   renderPage()

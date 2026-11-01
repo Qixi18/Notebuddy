@@ -83,7 +83,6 @@ function HomeScene() {
       </header>
       <div className="home-garden-toolbar">
         <HomeSearch courses={courses} onCourse={id => navigate(`/forest?course=${encodeURIComponent(id)}`)} onNote={(item: ForestSearchResult) => navigate(item.block_id ? `/courses/${item.course_id}/notebooks/${item.notebook_id}?section=${encodeURIComponent(item.block_id)}` : `/courses/${item.course_id}/notebooks/${item.notebook_id}`, { state: returnState })} />
-        <span className="home-view-caption">随窗口自适应 <span aria-hidden="true">·</span> 点击枝叶继续阅读</span>
         {vines.records.length > 0 && <button className="home-relations-link" onClick={() => { setSelectedRelation(undefined); setRelationsOpen(true) }}>查看知识关联 ↗</button>}
       </div>
       <div className="home-tree-surface">

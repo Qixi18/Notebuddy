@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
-TeacherPersonaId = Literal["vodyanitsa"]
+
+def _normalize_teacher_persona(value: object) -> object:
+    # Historical clients may still send the retired persona IDs.
+    if value in ("elf", "doubao", "feiyu"):
+        return "vodyanitsa"
+    return value
+
+
+TeacherPersonaId = Annotated[Literal["vodyanitsa"], BeforeValidator(_normalize_teacher_persona)]
 
 
 class AssistantRequest(BaseModel):

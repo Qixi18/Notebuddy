@@ -3,4 +3,9 @@
 .home-leaf-preview > small span { padding-inline: 3px; }
 .home-leaf-preview > strong { display: block; font: 500 19px/1.5 var(--nb-serif); overflow-wrap: anywhere; }
 .home-leaf-preview p { margin: 9px 0 12px; font-size: 12px; line-height: 1.85; color: #4e6449; overflow-wrap: anywhere; }
+.home-leaf-preview-content { max-height: min(180px, 40dvh); overflow: auto; margin: 9px 0 12px; font-size: 12px; line-height: 1.85; color: #4e6449; }
+.home-leaf-preview-content > :first-child { margin-top: 0; }
+.home-leaf-preview-content > :last-child { margin-bottom: 0; }
+.home-leaf-preview .katex { font-size: 1.05em; }
+.home-leaf-preview .katex-display { max-width: 100%; margin: .5em 0; overflow-x: auto; overflow-y: hidden; }
 .home-leaf-preview-hint { display: block; border-top: 1px solid #e0e3d0; padding-top: 8px; font-size: 10px; color: #71815d; }

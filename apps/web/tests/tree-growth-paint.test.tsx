@@ -5,7 +5,7 @@ beforeEach(() => {
   Object.defineProperty(Element.prototype, 'animate', { configurable: true, writable: true, value: () => {} })
   Object.defineProperty(SVGElement.prototype, 'getBBox', { configurable: true, value: () => ({ x: -40, y: -200, width: 100, height: 210 }) })
 })
-afterEach(() => { vi.restoreAllMocks(); delete (Element.prototype as Partial<Element>).animate; document.body.innerHTML = '' })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); delete (Element.prototype as Partial<Element>).animate; document.body.innerHTML = '' })
 function fixture() {
   document.body.innerHTML = '<svg><g id="tree"><g data-growth-limb="book:primary" data-growth-book="book" data-growth-path="M0,0L0,-100" data-growth-radius="16" data-growth-level="1"><path d="M-10,0L0,-100L10,0Z"/></g><g data-note-id="note"><g data-leaf-paint="true" transform="translate(20,-100)"><g data-growth-leaf="note"><path d="M0,0L10,-20Z"/></g></g><ellipse data-home-leaf-id="note" cx="20" cy="-100" rx="22" ry="33"/></g></g></svg>'
   return document.getElementById('tree') as unknown as SVGGElement
@@ -45,4 +45,32 @@ test('completed native effects remove masks instead of retaining a clipped final
   await p.finished
   expect(root.querySelector('[mask]')).toBeNull()
   expect(root.querySelector('[data-growth-defs]')).toBeNull()
+})
+
+test('slower tree playback scales every phase and keeps masks past the original cleanup deadline', async () => {
+  vi.useFakeTimers()
+  const root = fixture()
+  const timings: KeyframeAnimationOptions[] = []
+  vi.spyOn(Element.prototype, 'animate').mockImplementation((_frames, options) => {
+    timings.push(options as KeyframeAnimationOptions)
+    return { finished: new Promise<Animation>(() => {}), cancel: vi.fn() } as unknown as Animation
+  })
+  const playback = playTreeGrowth(root, { course: false, books: new Set(['book']), notes: new Set(['note']) }, 1.4)
+  expect(timings[0].duration).toBeCloseTo(616)
+  expect(timings[1].duration).toBeCloseTo(504)
+  expect(timings[1].delay).toBeCloseTo(196)
+  vi.advanceTimersByTime(1600)
+  expect(root.querySelector('[mask]')).not.toBeNull()
+  vi.advanceTimersByTime(640)
+  await playback.finished
+  expect(root.querySelector('[mask]')).toBeNull()
+  expect(root.querySelector('[data-growth-defs]')).toBeNull()
+})
+
+test('default tree playback keeps its original pace', () => {
+  const root = fixture()
+  const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(() => ({ finished: new Promise<Animation>(() => {}), cancel: vi.fn() }) as unknown as Animation)
+  const playback = playTreeGrowth(root, { course: false, books: new Set(['book']), notes: new Set() })
+  expect(animate.mock.calls[0][1]).toMatchObject({ duration: 440, delay: 0 })
+  playback.finish()
 })

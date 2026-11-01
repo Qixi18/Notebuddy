@@ -17,6 +17,7 @@ import { MistakeBook } from '../features/assistant/MistakeBook'
 import { TermDialog } from '../features/assistant/TermDialog'
 import { teacherPersonaMeta } from '../features/persona/personas'
 import { PetAvatar, type PetAvatarHandle } from '../features/pet/PetAvatar'
+import { usePetWideViewport } from '../features/pet/usePetViewport'
 import type { PetMode } from '../features/pet/petLayout'
 import { loadPetPlacement, savePetPlacement } from '../features/pet/petStorage'
 import { reportQuestion } from '../features/pet/petEggs'
@@ -72,6 +73,8 @@ export function AssistantPage() {
   const [railDrawerOpen, setRailDrawerOpen] = useState(false)
   const [pendingInitialQuestion, setPendingInitialQuestion] = useState<string>()
   const [petMode, setPetMode] = useState<PetMode>(() => loadPetPlacement()?.mode ?? 'rail')
+  const petWide = usePetWideViewport()
+  const visiblePetMode = petWide ? petMode : 'rail'
 
   const scope: AskScope = useMemo(
     () => ({ kind: scopeKind, targetId: scopeTargetId, targetTitle: scopeTargetTitle }),
@@ -372,9 +375,9 @@ export function AssistantPage() {
         </div>
 
         {/* PetAvatar 必须常挂载：浮层是它内部的 portal，放进条件分支会在切形态时连人一起卸载 */}
-        <div className={`workspace-pet-block${petMode === 'float' ? ' is-floating' : ''}`}>
+        <div className={`workspace-pet-block${visiblePetMode === 'float' ? ' is-floating' : ''}`}>
           <PetAvatar
-            mode={petMode}
+            mode={visiblePetMode}
             onModeChange={changePetMode}
             status={teacherStatus}
             /* 只认「本次请求已开始吐正文」：工具阶段/思考阶段都还在 thinking */
@@ -382,7 +385,7 @@ export function AssistantPage() {
             draft={draft}
             bubbleHint={busy ? '正在翻课程资料，稍等一下…' : hasAsked ? '回答里的角标可以点，右栏能看到原文。' : `问我「${course?.name ?? '这门课'}」的问题吧`}
           />
-          {petMode === 'rail' && (
+          {visiblePetMode === 'rail' && (
             <div className="workspace-pet-identity">
               <span className="workspace-pet-identity-avatar" aria-hidden="true">
                 <TeacherCharacter status={teacherStatus} compact />
@@ -406,7 +409,7 @@ export function AssistantPage() {
           )}
         </div>
 
-        {petMode === 'float' && (
+        {visiblePetMode === 'float' && (
           <div className="workspace-pet-anchor">
             <span className="workspace-pet-anchor-avatar" aria-hidden="true">
               <TeacherCharacter status={teacherStatus} compact />

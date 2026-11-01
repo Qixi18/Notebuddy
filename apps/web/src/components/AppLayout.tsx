@@ -19,6 +19,7 @@ import { SettingsPanel } from './SettingsPanel'
 import { shouldBlockNoteNavigation } from '../features/notebook/navigation'
 import { readStorage, writeStorage } from '../utils/safeStorage'
 import { footerNavItems, primaryNavItems, resolveActiveNav, type SidebarNavId } from '../features/navigation/sidebarNav'
+import { readSidebarQuote } from '../features/navigation/sidebarQuote'
 import { DOCK_STORAGE, resolveDockOpen, resolveDockWidth } from '../features/assistant/dockLayout'
 
 export type Feature = 'notes' | 'materials' | 'assistant'
@@ -121,6 +122,7 @@ export function AppLayout() {
   const activeNav = resolveActiveNav(location.pathname)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readStorage('notebuddy.sidebar-collapsed') === 'true')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sidebarQuote, setSidebarQuote] = useState(readSidebarQuote)
   const [createOpen, setCreateOpen] = useState(false)
   const createAreaRef = useRef<HTMLDivElement>(null)
   /* 抽屉开合与宽度都由外壳持有：宽度要写进 CSS 变量驱动网格列，正文才能跟着让位 */
@@ -154,6 +156,16 @@ export function AppLayout() {
   useEffect(() => {
     writeStorage('notebuddy.sidebar-collapsed', String(sidebarCollapsed))
   }, [sidebarCollapsed])
+
+  useEffect(() => {
+    const refreshQuote = () => setSidebarQuote(readSidebarQuote())
+    window.addEventListener('notebuddy-settings-changed', refreshQuote)
+    window.addEventListener('storage', refreshQuote)
+    return () => {
+      window.removeEventListener('notebuddy-settings-changed', refreshQuote)
+      window.removeEventListener('storage', refreshQuote)
+    }
+  }, [])
 
   useEffect(() => {
     if (!createOpen) return
@@ -236,7 +248,7 @@ export function AppLayout() {
           ))}
         </nav>
 
-        {!sidebarCollapsed && <p className="home-sidebar-quote">每一页积累，<br />都在悄悄生长。</p>}
+        {!sidebarCollapsed && <p className="home-sidebar-quote">{sidebarQuote}</p>}
 
         {isHome && !sidebarCollapsed && <svg className="home-sidebar-doodle" viewBox="0 0 220 132" aria-hidden="true">
           <path d="M14 116c47-8 128-9 192 1" fill="none" stroke="#ded7c3" strokeWidth="3" strokeLinecap="round"/>

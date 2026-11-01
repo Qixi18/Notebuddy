@@ -353,6 +353,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
 
       {conversationCourseId ? (
         <>
+          <div className="assistant-dock-body">
           {/* 上下文行：说明这轮问答挂在哪门课、哪个范围上，落回最近课程时讲清原因 */}
           <p className="assistant-dock-context" aria-live="polite">
             上下文：<strong>「{conversationCourse?.name ?? '课程'}」</strong> · {contextLabel}
@@ -471,6 +472,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
             {adoptNotice ? <p role="status">{adoptNotice}</p> : null}
           </section> : null}
 
+          </div>
           <form className="assistant-dock-form" onSubmit={submitQuestion}>
             <textarea ref={inputRef} aria-label="快速提问" placeholder={`问问「${conversationCourse?.name ?? '当前课程'}」…`} value={draft} onChange={(event) => setDraft(event.target.value)} rows={2} />
             <div className="assistant-dock-actions">

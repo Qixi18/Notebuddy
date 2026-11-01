@@ -5,9 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.assistant import AssistantSource
-
-TeacherPersonaId = Literal["elf", "doubao", "feiyu"]
+from app.schemas.assistant import AssistantSource, TeacherPersonaId
 
 
 class ConversationCreate(BaseModel):
@@ -99,8 +97,8 @@ class ConversationMessageCreate(BaseModel):
     page_number: int | None = Field(default=None, ge=1)
     allow_web: bool = True
     idempotency_key: str | None = Field(default=None, max_length=120)
-    # 本次回答使用哪一位 AI 教师的人设；未知取值由 app.ai.personas 回落到默认角色的做法保持一致
-    teacher_persona: TeacherPersonaId = "elf"
+    # 与普通答疑共用唯一人设及历史角色 ID 的兼容归一化。
+    teacher_persona: TeacherPersonaId = "vodyanitsa"
     # 会话归属：仅在会话尚无任何用户消息（首轮）时落库，之后忽略——范围是会话级属性。
     # 用于把答疑页自动建的「整门课程」空会话，在首轮改写成用户实际选择的范围。
     scope: Literal["course", "global", "note"] | None = None
@@ -141,6 +139,6 @@ class AgentMessageCreate(BaseModel):
     allow_quiz: bool = True
     learning_mode: Literal["direct", "guided"] = "direct"
     idempotency_key: str | None = Field(default=None, max_length=120)
-    teacher_persona: TeacherPersonaId = "elf"
+    teacher_persona: TeacherPersonaId = "vodyanitsa"
     reading_context: ReadingContext | None = None
     notebook_context: NotebookDocumentContext | None = None

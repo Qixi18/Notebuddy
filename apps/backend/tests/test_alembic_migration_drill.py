@@ -66,8 +66,8 @@ def _indexes(connection: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in connection.execute(f"PRAGMA index_list({table})")}
 
 
-def _version(connection: sqlite3.Connection) -> str:
-    return connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+def _versions(connection: sqlite3.Connection) -> set[str]:
+    return {row[0] for row in connection.execute("SELECT version_num FROM alembic_version")}
 
 
 def _seed_notebook(db_path: Path) -> None:
@@ -112,7 +112,7 @@ def test_upgrade_from_scratch_and_stepwise_downgrade(tmp_path):
     # 1) 从零升级到 head
     _migrate(data_dir, "upgrade", "head")
     with sqlite3.connect(db_path) as connection:
-        assert _version(connection) == HEAD_REVISION
+        assert _versions(connection) == {HEAD_REVISION}
         tables = _tables(connection)
         for table in ("quizzes", "quiz_items", "quiz_attempts", "review_artifacts"):
             assert table in tables
@@ -157,8 +157,9 @@ def test_upgrade_from_scratch_and_stepwise_downgrade(tmp_path):
     _migrate(data_dir, "downgrade", AGENT_REVISION)
     with sqlite3.connect(db_path) as connection:
         # Downgrading the agent branch keeps the independent processing
-        # migration applied; the Alembic version table therefore points at it.
-        assert _version(connection) == PROCESSING_REVISION
+        # migration applied, alongside the requested agent branch revision.
+        # Alembic stores both rows; their insertion order is not significant.
+        assert _versions(connection) == {AGENT_REVISION, PROCESSING_REVISION}
         assert "request_key" not in _columns(connection, "quiz_attempts")
         assert "uq_quiz_attempts_item_request" not in _indexes(connection, "quiz_attempts")
         assert "quizzes" in _tables(connection)
@@ -168,6 +169,7 @@ def test_upgrade_from_scratch_and_stepwise_downgrade(tmp_path):
     # 5) 再回滚一级：这是不可逆点，agent 学习相关表整表消失
     _migrate(data_dir, "downgrade", BASE_REVISION)
     with sqlite3.connect(db_path) as connection:
+        assert _versions(connection) == {BASE_REVISION}
         tables = _tables(connection)
         for table in ("quizzes", "quiz_items", "quiz_attempts", "review_artifacts"):
             assert table not in tables
@@ -180,7 +182,7 @@ def test_upgrade_from_scratch_and_stepwise_downgrade(tmp_path):
     # 6) 回滚后可以再次升级（迁移可重入，不留半成品）
     _migrate(data_dir, "upgrade", "head")
     with sqlite3.connect(db_path) as connection:
-        assert _version(connection) == HEAD_REVISION
+        assert _versions(connection) == {HEAD_REVISION}
         assert "uq_quiz_attempts_item_request" in _indexes(connection, "quiz_attempts")
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
         # 回滚时被删掉的作答不会复活 —— 回滚是有数据代价的，这里如实记录

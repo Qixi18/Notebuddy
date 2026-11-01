@@ -100,6 +100,8 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 | 反馈 | `POST/GET/PATCH /courses/{course_id}/feedback` | 答案、笔记、提案和来源反馈按目标去重并验证课程归属；PATCH 只更新人工处理状态和脱敏处理说明 |
 | 术语说明 | `POST /courses/{course_id}/terms/explain` | 返回原文、常见译法、学科语境和出处不确定性；未配置可核验服务时保守返回，不伪造词源 |
 
+三个提问入口（单次答疑、普通会话消息、Agent 流式消息）的 `teacher_persona` 均默认使用 `vodyanitsa`（沃雅妮莎）。历史客户端传入的 `elf`、`doubao`、`feiyu` 会归一为当前角色；其他未知值仍返回参数校验错误。前端统一发送 `vodyanitsa`。
+
 答疑先检索课程内部资料；只有没有直接命中且策略允许时才调用联网搜索。回答来源按课件、网络补充、直接支持/相关支持分别标记。
 
 独立的 `POST /courses/{course_id}/assistant` 是单次答疑，不写入会话历史。连续追问与刷新后恢复使用上述会话端点；数据库位置、失败记录和两种传输的共享规则见 [后端调用与业务数据存储契约](backend-data-contract.md)。

@@ -60,4 +60,5 @@ test-*.pptx
 
 # Local browser visual experiments and bundled previews
 /apps/web/output/playwright/
+/apps/web/output/tree-inspection/
 

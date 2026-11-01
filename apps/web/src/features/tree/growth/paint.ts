@@ -1,3 +1,5 @@
+import { TREE_GROWTH_LIFETIME_MS } from './timing'
+
 export type Playback = { finished: Promise<void>; finish: () => void }
 export type TreeGrowth = { course: boolean; books: Set<string>; notes: Set<string> }
 const SVG = 'http://www.w3.org/2000/svg'
@@ -6,7 +8,7 @@ type Timing = { delay: number; duration: number }
 const sectionKey = (bookId: string, blockId: string) => JSON.stringify([bookId, blockId])
 
 /** Temporary masks affect paint only; every resource is removed on every exit. */
-function painter(root: SVGGElement) {
+function painter(root: SVGGElement, timeScale = 1) {
   const effects: Animation[] = [], undo: (() => void)[] = []
   let done = false, timer: ReturnType<typeof setTimeout> | undefined, resolve!: () => void
   const finished = new Promise<void>(r => { resolve = r })
@@ -19,7 +21,7 @@ function painter(root: SVGGElement) {
     resolve()
   }
   const animate = (element: Element, frames: Keyframe[], timing: Timing) => {
-    const effect = element.animate(frames, { ...timing, easing: 'cubic-bezier(.22,.61,.36,1)', fill: 'both' })
+    const effect = element.animate(frames, { delay: Math.round(timing.delay * timeScale), duration: Math.round(timing.duration * timeScale), easing: 'cubic-bezier(.22,.61,.36,1)', fill: 'both' })
     effects.push(effect)
   }
   const mask = (element: SVGGraphicsElement, path: string, width: number, timing: Timing) => {
@@ -48,7 +50,7 @@ function painter(root: SVGGElement) {
       if (!effects.length) finish()
       else {
         void Promise.all(effects.map(effect => effect.finished)).then(finish, finish)
-        timer = setTimeout(finish, 1600)
+        timer = setTimeout(finish, Math.round(TREE_GROWTH_LIFETIME_MS * timeScale))
       }
     } catch { finish() }
     return { finished, finish }
@@ -56,8 +58,8 @@ function painter(root: SVGGElement) {
   return { animate, mask, leaf, run }
 }
 
-export function playTreeGrowth(root: SVGGElement, growth: TreeGrowth): Playback {
-  const paint = painter(root)
+export function playTreeGrowth(root: SVGGElement, growth: TreeGrowth, timeScale = 1): Playback {
+  const paint = painter(root, timeScale)
   return paint.run(() => {
     const limbs = [...root.querySelectorAll<SVGGElement>('[data-growth-limb]')]
     const timings = new Map<string, Timing>()

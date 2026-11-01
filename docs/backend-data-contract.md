@@ -74,6 +74,8 @@ Notebook
 
 ## 前端、森林和 Agent
 
+提问人设由单次答疑、普通会话和 Agent 流式请求共用的 `TeacherPersonaId` 校验：当前值及默认值均为 `vodyanitsa`，历史 `elf` / `doubao` / `feiyu` 在请求边界归一为当前角色，未知值拒绝。此兼容不迁移历史会话或修改数据库结构。
+
 Notebook 页面从 document API 读 JSON 与 revision，编辑器提交预期版本；未知/不可渲染节点及数学错误的具体表现由当前编辑器组件负责，真实浏览器边界仍待验收。`NotebookSection` 由 `document_json` 重建，供树、搜索、阅读位置等定位；稳定 block ID 用于锚定正文。
 
 知识森林读课程/Notebook 及目录和关系，不另存正文。Agent 服务端工具按会话课程及可选 Notebook 范围加载现有正文、目录、已处理资料和证据；上传解析流程由后台任务处理，Agent 不应重复解析，也不应把浏览器临时内容当作权威。来源和范围须由服务端校验。

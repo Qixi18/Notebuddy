@@ -36,8 +36,8 @@ function buildCanopy(courseId: string, sources: { book: NotebookRead; index: num
     const banks = Math.max(1, Math.ceil(originals.length / 6))
     for (let bank = 0; bank < banks; bank++) {
       const batch = originals.slice(bank * 6, bank * 6 + 6)
-      const branch = naturalNotebook({ id: book.id, title: book.title, treeSlot: lane, notes: batch.map((leaf, slot) => ({ id: leaf.section.id, title: leaf.section.title, treeSlot: slot })) }, variant, crownSize)
       const scale = 1 + Math.floor(index / 3) * .65 + bank * .36
+      const branch = naturalNotebook({ id: book.id, title: book.title, treeSlot: lane, notes: batch.map((leaf, slot) => ({ id: leaf.section.id, title: leaf.section.title, treeSlot: slot })) }, variant, crownSize, scale)
       const pivot = branch.primary.curves[0][0].y
       const transform = scale === 1 ? undefined : `translate(0,${pivot * (1 - scale)}) scale(1,${scale})`
       const leaves = branch.leaves.map((leaf, slot) => {
