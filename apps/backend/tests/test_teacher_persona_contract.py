@@ -41,6 +41,26 @@ def test_unknown_persona_is_still_rejected(schema):
         schema.model_validate({"question": "你好", "teacher_persona": "not-a-persona"})
 
 
+def test_persona_ids_come_from_single_source():
+    """人设取值必须是 personas 表的投影，不能再硬编码一份独立列表。"""
+
+    from app.ai.personas import DEFAULT_PERSONA_ID, PERSONA_IDS
+
+    assert DEFAULT_PERSONA_ID in PERSONA_IDS
+    for persona_id in PERSONA_IDS:
+        request = AgentMessageCreate.model_validate({
+            "question": "你好", "teacher_persona": persona_id,
+        })
+        assert request.teacher_persona == persona_id
+
+
+def test_default_persona_constant_matches_persona_table():
+    from app.ai.personas import DEFAULT_PERSONA_ID
+    from app.schemas.assistant import DEFAULT_TEACHER_PERSONA
+
+    assert DEFAULT_TEACHER_PERSONA == DEFAULT_PERSONA_ID
+
+
 @pytest.mark.parametrize("endpoint,status_code", [("messages", 201), ("agent-messages", 200)])
 def test_current_persona_can_send_and_read_back_messages(tmp_path, monkeypatch, endpoint, status_code):
     engine = create_engine(f"sqlite:///{(tmp_path / 'persona.sqlite3').as_posix()}")

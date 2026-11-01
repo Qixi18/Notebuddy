@@ -23,6 +23,8 @@ export type PendingNoteSuggestion = {
   impact: string
   status: string
   note_title?: string
+  /** false = 笔记本建议：review API 按操作序号生效，不支持按块部分采纳，只可整条采纳 */
+  partial_supported?: boolean
 }
 
 export function NoteSuggestionCards({
@@ -43,12 +45,14 @@ export function NoteSuggestionCards({
   onUndo: (suggestion: PendingNoteSuggestion) => void
 }) {
   const [skipped, setSkipped] = useState<Record<string, Set<string>>>({})
+  /* 笔记本建议不支持按块部分采纳：标题与勾选框都随之隐藏，避免 UI 承诺做不到的操作 */
+  const anyPartial = suggestions.some((suggestion) => suggestion.partial_supported !== false)
 
   if (suggestions.length === 0) return null
 
   return (
     <div className="agent-cards" role="list" aria-label="待确认的笔记修改建议">
-      <small className="agent-cards-title">笔记修改建议 · 勾选要应用的变更块，确认后才会写入</small>
+      <small className="agent-cards-title">笔记修改建议{anyPartial ? ' · 勾选要应用的变更块，确认后才会写入' : ' · 确认后才会写入正文'}</small>
       {suggestions.map((suggestion) => {
         const adopted = adoptedContents[suggestion.id] !== undefined
         if (adopted) {
@@ -70,10 +74,11 @@ export function NoteSuggestionCards({
         const currentContent = currentContentByNoteId[suggestion.note_id] ?? ''
         const rows = diffRows(currentContent, suggestion.proposed_markdown)
         const hunks = hunksOf(rows)
+        const partialSupported = suggestion.partial_supported !== false
         const skipSet = skipped[suggestion.id] ?? new Set<string>()
         const selectedKeys = new Set(hunks.filter((hunk) => !skipSet.has(hunk.key)).map((hunk) => hunk.key))
         const finalText = applySelected(rows, selectedKeys)
-        const partial = finalText !== suggestion.proposed_markdown
+        const partial = partialSupported && finalText !== suggestion.proposed_markdown
         const toggle = (key: string) => {
           setSkipped((current) => {
             const next = new Set(current[suggestion.id] ?? [])
@@ -88,13 +93,13 @@ export function NoteSuggestionCards({
               {suggestion.note_title && <small className="agent-card-note">《{suggestion.note_title}》</small>}
               {suggestion.impact || 'AI 提出的修改建议'}
             </p>
-            <DiffView rows={rows} skipped={skipSet} onToggle={toggle} />
+            <DiffView rows={rows} skipped={skipSet} onToggle={partialSupported ? toggle : undefined} />
             <div className="agent-card-actions">
               <button
                 type="button"
                 className="agent-card-confirm"
                 disabled={busyId === suggestion.id}
-                onClick={() => onReview(suggestion, 'confirm', finalText)}
+                onClick={() => onReview(suggestion, 'confirm', partialSupported ? finalText : undefined)}
               >{busyId === suggestion.id ? '写入中…' : partial ? `采纳所选项（${selectedKeys.size}/${hunks.length} 块）` : '采纳'}</button>
               <button
                 type="button"

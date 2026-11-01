@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 from app.ai.agent_read_tools import (
     _explain_term,
     _get_source_coverage,
+    _list_course_materials,
     _list_course_notebooks,
+    _read_material_page,
     _read_notebook,
     _search_course,
     _search_forest,
@@ -101,6 +103,20 @@ def build_tool_specs(
                 "notebook_id": {"type": "string", "description": "笔记 ID；当前打开的笔记可省略"},
             }, [],
         ))
+    if scope != "note":
+        material_property = (
+            {}
+            if fixed_material_id else
+            {"material_id": {"type": "string", "description": "可选：限定某份资料；省略=按整门课程检索定位"}}
+        )
+        specs.append(_spec(
+            "read_material_page",
+            "读取课件某一页的解析原文（标题、段落、公式、表格与图片说明），"
+            "需要核对某页到底讲了什么、或用户问到具体页码时使用。"
+            + ("只针对当前锁定的课件。" if fixed_material_id else ""),
+            {**material_property, "page_number": {"type": "integer", "description": "页码，从 1 开始"}},
+            ["page_number"],
+        ))
     if allow_web:
         specs.append(_spec(
             "web_search",
@@ -110,6 +126,12 @@ def build_tool_specs(
     if scope in ("course", "global") and not fixed_material_id:
         specs.extend([
             _spec("list_course_notebooks", "列出当前课程全部笔记的标题、ID 与节数。", {}, []),
+            _spec(
+                "list_course_materials",
+                "列出当前课程的课件清单（讲次、ID、页数、解析状态）。"
+                "需要把检索或整页阅读定位到某一讲时，先调用它拿到 material_id。",
+                {}, [],
+            ),
             _spec(
                 "get_source_coverage",
                 "查询某份资料的解析内容被当前课程笔记正文引用了多少（覆盖/遗漏）。",
@@ -417,6 +439,8 @@ _EXECUTORS = {
     "search_course": _search_course,
     "read_notebook": _read_notebook,
     "list_course_notebooks": _list_course_notebooks,
+    "list_course_materials": _list_course_materials,
+    "read_material_page": _read_material_page,
     "search_forest": _search_forest,
     "get_source_coverage": _get_source_coverage,
     "explain_term": _explain_term,
@@ -431,6 +455,8 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "search_course": ("course_id", "arguments", "scope", "locked_notebook_id", "fixed_material_id"),
     "read_notebook": ("course_id", "arguments", "scope", "locked_notebook_id"),
     "list_course_notebooks": ("course_id",),
+    "list_course_materials": ("course_id",),
+    "read_material_page": ("course_id", "arguments", "fixed_material_id"),
     "search_forest": ("course_id", "arguments"),
     "get_source_coverage": ("course_id", "arguments"),
     "explain_term": ("course_id", "arguments", "scope", "locked_notebook_id", "fixed_material_id"),

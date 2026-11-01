@@ -1,7 +1,8 @@
-"""Read-only agent tools over Document IR and Notebook body."""
+﻿"""Read-only agent tools over Document IR and Notebook body."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import func, or_, select
@@ -247,11 +248,111 @@ def _explain_term(
     return ToolOutcome(f"定位术语「{term}」的课程原文", truncate("\n".join(lines)))
 
 
+def _course_material(db: Session, course_id: str, material_id: str) -> tuple[Material | None, str]:
+    material = db.get(Material, material_id) if material_id else None
+    if material is None or material.deleted_at is not None:
+        return None, "指定的 material_id 不存在或已移除。"
+    if not material_in_course(db, material, course_id):
+        return None, "指定的 material_id 不属于当前课程。"
+    return material, ""
+
+
+def _list_course_materials(db: Session, *, course_id: str) -> ToolOutcome:
+    """列出课程课件清单：给 agent 一个可定位的 material_id 入口。"""
+
+    rows = db.execute(
+        select(Material, Notebook.title)
+        .join(Notebook, Notebook.id == Material.notebook_id)
+        .where(Notebook.course_id == course_id, Notebook.deleted_at.is_(None),
+               Material.deleted_at.is_(None))
+        .order_by(Material.chapter_order, Material.created_at)
+    ).all()
+    if not rows:
+        return ToolOutcome("课程暂无课件", "这门课还没有已上传的课件，无法列出讲次清单。")
+    lines = [
+        f"- 《{material.lecture_title}》（id={material.id}，{material.page_count or '?'} 页，状态 {material.status}）"
+        for material, _notebook_title in rows
+    ]
+    return ToolOutcome(
+        f"本课程共 {len(rows)} 份课件",
+        truncate("\n".join(lines), LIST_RESULT_MAX_CHARS),
+    )
+
+
+def _read_material_page(
+    db: Session, *, course_id: str, arguments: dict[str, Any],
+    fixed_material_id: str | None = None,
+) -> ToolOutcome:
+    """读取课件某一页的 DocumentIR 原文（标题/公式/表格/图注）。"""
+
+    try:
+        page_number = int(arguments.get("page_number"))
+    except (TypeError, ValueError):
+        return ToolOutcome("页码无效", "page_number 必须是整数页码（从 1 开始）。")
+    if page_number < 1:
+        return ToolOutcome("页码无效", "page_number 从 1 开始。")
+    material_id = fixed_material_id or str(arguments.get("material_id") or "").strip()
+    material, error = _course_material(db, course_id, material_id)
+    if material is None:
+        return ToolOutcome("资料不可用", error)
+    asset = db.get(Asset, material.asset_id) if material.asset_id else None
+    run = current_run(db, asset.id) if asset is not None else None
+    if run is None:
+        return ToolOutcome("尚无解析版本", "这份资料还没有完成的解析版本，无法读取页面原文。")
+    page = db.scalar(select(DocumentPage).where(
+        DocumentPage.parse_run_id == run.id, DocumentPage.page_number == page_number,
+    ))
+    if page is None:
+        total = db.scalar(select(func.count()).select_from(DocumentPage).where(
+            DocumentPage.parse_run_id == run.id,
+        )) or 0
+        return ToolOutcome(
+            "页码越界",
+            f"《{material.lecture_title}》共 {total} 页，page_number={page_number} 不存在。",
+        )
+    blocks = db.scalars(select(DocumentBlock).where(
+        DocumentBlock.page_id == page.id,
+    ).order_by(DocumentBlock.order)).all()
+    parts: list[str] = []
+    for block in blocks:
+        text = (block.text or "").strip()
+        if block.block_type == "heading":
+            if text:
+                parts.append(f"【{text}】")
+            continue
+        latex = (block.latex or "").strip()
+        if latex:
+            parts.append(f"$ {latex} $")
+            continue
+        if block.table_json:
+            parts.append(text or "（表格块）")
+            continue
+        if block.figure_json:
+            try:
+                figure = json.loads(block.figure_json)
+            except (TypeError, ValueError):
+                figure = {}
+            description = str(figure.get("description") or "").strip() if isinstance(figure, dict) else ""
+            parts.append(f"[图] {description or '图像内容未解读'}")
+            continue
+        if text:
+            parts.append(text)
+    body = (
+        f"《{material.lecture_title}》第 {page_number} 页原文：\n\n" + "\n\n".join(parts)
+        if parts else
+        f"《{material.lecture_title}》第 {page_number} 页没有可读文本（可能是扫描页，需 OCR）。"
+    )
+    return ToolOutcome(f"读取《{material.lecture_title}》第 {page_number} 页", truncate(body, 8000))
+
+
 __all__ = [
     "RetrievedChunk",
+    "_course_material",
     "_explain_term",
     "_get_source_coverage",
+    "_list_course_materials",
     "_list_course_notebooks",
+    "_read_material_page",
     "_read_notebook",
     "_search_course",
     "_search_forest",

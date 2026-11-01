@@ -5,15 +5,22 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from app.ai.personas import DEFAULT_PERSONA_ID, PERSONA_IDS
+
 
 def _normalize_teacher_persona(value: object) -> object:
     # Historical clients may still send the retired persona IDs.
     if value in ("elf", "doubao", "feiyu"):
-        return "vodyanitsa"
+        return DEFAULT_PERSONA_ID
     return value
 
 
-TeacherPersonaId = Annotated[Literal["vodyanitsa"], BeforeValidator(_normalize_teacher_persona)]
+# 人设取值与 app.ai.personas 同源（人设表是唯一事实源），叠加历史角色 ID 的兼容归一化：
+# 之前 Literal 硬编码旧三元组而 personas 已只剩 vodyanitsa，导致所有提问 422。
+TeacherPersonaId = Annotated[
+    Literal[tuple(PERSONA_IDS)], BeforeValidator(_normalize_teacher_persona)
+]
+DEFAULT_TEACHER_PERSONA = DEFAULT_PERSONA_ID
 
 
 class AssistantRequest(BaseModel):

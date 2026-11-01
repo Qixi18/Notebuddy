@@ -1,11 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.assistant import AssistantSource, TeacherPersonaId
+from app.schemas.assistant import (
+    DEFAULT_TEACHER_PERSONA,
+    AssistantSource,
+    TeacherPersonaId,
+)
 
 
 class ConversationCreate(BaseModel):
@@ -99,7 +103,7 @@ class ConversationMessageCreate(BaseModel):
     allow_web: bool = True
     idempotency_key: str | None = Field(default=None, max_length=120)
     # 与普通答疑共用唯一人设及历史角色 ID 的兼容归一化。
-    teacher_persona: TeacherPersonaId = "vodyanitsa"
+    teacher_persona: TeacherPersonaId = DEFAULT_TEACHER_PERSONA
     # 会话归属：仅在会话尚无任何用户消息（首轮）时落库，之后忽略——范围是会话级属性。
     # 用于把答疑页自动建的「整门课程」空会话，在首轮改写成用户实际选择的范围。
     scope: Literal["course", "global", "note", "notebook"] | None = None
@@ -141,6 +145,6 @@ class AgentMessageCreate(BaseModel):
     allow_quiz: bool = True
     learning_mode: Literal["direct", "guided"] = "direct"
     idempotency_key: str | None = Field(default=None, max_length=120)
-    teacher_persona: TeacherPersonaId = "vodyanitsa"
+    teacher_persona: TeacherPersonaId = DEFAULT_TEACHER_PERSONA
     reading_context: ReadingContext | None = None
     notebook_context: NotebookDocumentContext | None = None
