@@ -95,7 +95,8 @@
 - **已确认相关测试**：
   - 后端：`test_agent_notebook.py`、`test_agent_reasoning_visibility.py`、`test_agent_tool_scope_gates.py`、`test_conversation_scope.py`、`test_evidence_notebook.py`、`test_web_search_service.py`、`test_processing_routes.py`、`test_llm_document_processing.py`、`test_generation_pipeline.py`、`test_generation_limits_db.py`、`test_notebook_workspace.py`、`test_notebook_api_v2.py`。
   - 前端：`assistant-notebook-scope.test.tsx`、`agent-sse.test.ts`、`agent-dock.test.tsx`、`use-conversation.test.tsx`、`notebook-save.test.tsx`、`notebook-async-boundaries.test.tsx`、`notebook-navigation.test.ts`。
-- **本阶段未运行**：测试基线命令、前端构建、完整 Vitest/Pytest、迁移升级、浏览器人工验收。原因：本批次是只读盘点，且新 worktree 没有自己的安装依赖；主工作区存在独立运行环境，但使用它前需设置隔离测试配置并确认不会连接真实数据库。后续代码批次应先建立/验证隔离配置，再记录命令、退出码、通过/失败/跳过数。
+- **已运行的只读基线**：在此隔离 worktree 的源码目录中，使用已有 `.venv-document` 执行 `python -m pytest tests/test_agent_notebook.py tests/test_agent_reasoning_visibility.py tests/test_web_search_service.py tests/test_processing_routes.py -q`；退出码 `0`，**25 passed, 2 warnings**（pytest 插件重写警告、Starlette/httpx 弃用提示），无失败/跳过。测试 `conftest.py` 在导入应用前将 `NOTEBOOK_DATA_DIR` 指向按进程创建的临时目录，并清空付费供应商密钥，未使用主项目 `data/notebook.sqlite3`。
+- **本阶段未运行**：完整 Vitest/Pytest、前端构建、迁移升级、浏览器人工验收。新 worktree 没有自己的 `node_modules`；后续前端验证需在隔离 worktree 安装锁文件依赖，或采用经确认的隔离依赖路径。后端 25 项是选定范围基线，不是完整回归。
 - **不得声称**：仅凭测试文件存在不能声称验收通过；未做真实材料、真实模型或浏览器验证。
 
 ## 8. 风险与执行顺序
