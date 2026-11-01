@@ -5,6 +5,7 @@
 ## 当前记录
 
 - [ADR-0001：Notebook 正文权威源与资料处理边界](ADR-0001-notebook-document-source-of-truth.md) — Proposed，尚未审核。
+- [ADR-0002：Notebook 核心架构整改路线](ADR-0002-verified-notebook-assistant-and-file-budget.md) — Proposed，待协作者审核；来自用户指定开发规划，未表示实现已完成。
 
 ## 状态含义
 

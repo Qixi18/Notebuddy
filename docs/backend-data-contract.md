@@ -1,6 +1,16 @@
 # 后端调用与业务数据契约
 
-本文描述本地 `feat/debug-integration` 当前实现，核对基线为 2026-10-30 本地 `0777d0e`（Fetch 时 origin 为 `4759ff5`）。云端多用户安全不在当前本地实现保证范围内。字段和错误以 `apps/backend/app/schemas/`、路由及服务源码为准。
+本文的既有契约段落记录本地 `feat/debug-integration` 历史快照（2026-10-30）；2026-11-01 的整改审查基线为 `origin/feat/overall-inspection` @ `67677dd8771f2fe756d2f29a986102a64655a730`。云端多用户安全不在当前本地实现保证范围内。字段和错误以对应基线的 `apps/backend/app/schemas/`、路由及服务源码为准。下列整改目标为 Proposed，不应误读为已实现契约。
+
+## Notebook 答疑整改提案（Proposed）
+
+- 目标范围固定为一个明确的 Notebook 或用户明确选择的课程；不得静默退化为全局跨课程检索。
+- Notebook 第一来源是所选 Notebook 当前已保存 `document_json` 与 revision。核验材料限于该 Notebook 有效 `NotebookAsset` 关联的当前完成 ParseRun；来源不完整时不得扩大到其他 Notebook 或课程文件。
+- 核验前的草稿不向客户端发送正文 delta，也不向用户暴露内部推理。只有完成主张核验和证据 ID 校验后才允许流式发送最终回答。
+- 新会话目标计划使用 `notebook_id`；`course_id` 可空仅表示 Notebook 级范围。历史 `scope='note'` 的读取映射需要显式兼容，不得依据最近访问课程猜测归属。
+- 本轮 Agent 不创建 Notebook 编辑建议；既有 `NotebookEditSuggestion` 和 Note 历史数据/迁移留存，旧写回入口在兼容风险核查后关闭。
+
+该提案的迁移和端点 JSON 变化仍需 A1 逐项设计并验证；审查接受前保留为待议目标。
 ## 双路线处理补充（2026-10-30）
 
 `assets.processing_route` / `processing_config_json` 固定上传所选路线和非敏感模型连接身份，`materials.processing_route` 与其保持一致。批次保存初始路线；失败输入切换后可在同一批次中按实际路线分组生成。历史数据默认 `standard`，新上传的默认值由设置控制。
