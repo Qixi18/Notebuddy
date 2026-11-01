@@ -61,16 +61,29 @@ export type CurriculumRow = {
   source_label: string
   source_excerpt: string
   existing_course_id: string | null
+  expected_profile_revision?: number | null
+  course_code?: string | null
+  credits?: number | null
+  hours?: number | null
+  requirement?: 'required' | 'elective' | 'unspecified'
 }
 export type CurriculumImport = {
   id: string
-  status: 'pending' | 'processing' | 'preview' | 'confirmed' | 'failed'
+  status: 'pending' | 'processing' | 'preview' | 'confirmed' | 'failed' | 'reverted'
   filename: string | null
   mode: string | null
   warnings: string[]
   rows: CurriculumRow[]
   error_message: string | null
   job_id: string | null
+  progress?: number
+  processing_route?: 'standard' | 'llm'
+  phase?: string | null
+  can_revert?: boolean
+}
+export type CurriculumRevertImpact = {
+  restore_courses: { course_id: string; name: string; semester: number | null; level: ForestLevel; prerequisites: string[] }[]
+  recycle_courses: { course_id: string; name: string }[]
 }
 export type ForestJob = {
   id: string

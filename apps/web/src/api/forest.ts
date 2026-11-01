@@ -47,10 +47,12 @@ export const forestApi = {
   retryCurriculumImport: (id: string) =>
     request<CurriculumImport>(`${base}/curriculum-imports/${id}/retry`, { method: 'POST' }),
   confirmCurriculumImport: (id: string, rows: CurriculumRow[]) =>
-    request<{ courses: ForestCourse[] }>(`${base}/curriculum-imports/${id}/confirm`, {
+    request<{ courses: ForestCourse[]; import?: CurriculumImport }>(`${base}/curriculum-imports/${id}/confirm`, {
       method: 'POST',
       ...json({ rows }),
     }),
+  previewCurriculumRevert: (id: string) => request<import('../features/forest/types').CurriculumRevertImpact>(`${base}/curriculum-imports/${id}/revert-preview`),
+  revertCurriculumImport: (id: string) => request<CurriculumImport>(`${base}/curriculum-imports/${id}/revert`, { method: 'POST' }),
   suggestForestRelations: (id: string) =>
     request<ForestJob>(`${base}/courses/${id}/suggest-relations`, { method: 'POST' }),
   getForestJob: (id: string) => request<ForestJob>(`${base}/jobs/${id}`),

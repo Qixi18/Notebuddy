@@ -19,8 +19,9 @@ export function useProcessingRoute() {
   return { route, setRoute, capabilities }
 }
 
-export function ProcessingRouteControl({ value, onChange, disabled = false }: {
+export function ProcessingRouteControl({ value, onChange, disabled = false, purpose = 'notebook' }: {
   value?: ProcessingRoute; onChange: (value: ProcessingRoute) => void; disabled?: boolean
+  purpose?: 'notebook' | 'curriculum'
 }) {
   return <label className="processing-route-control">本次处理路线
     <select aria-label="本次文档处理路线" value={value ?? ''} disabled={disabled}
@@ -28,6 +29,6 @@ export function ProcessingRouteControl({ value, onChange, disabled = false }: {
       {!value && <option value="">使用设置中的默认路线</option>}
       <option value="standard">标准处理</option><option value="llm">全程 AI</option>
     </select>
-    <small>{value === 'llm' ? '通过模型读取页面并整理笔记，按页使用 API。' : '可在设置中更改新上传的默认路线。'}</small>
+    <small>{value === 'llm' ? (purpose === 'curriculum' ? '通过模型逐页读取课程表，分批提取课程；按页使用 API。' : '通过模型读取页面并整理笔记，按页使用 API。') : '可在设置中更改新上传的默认路线。'}</small>
   </label>
 }

@@ -82,6 +82,12 @@ Notebook 页面从 document API 读 JSON 与 revision，编辑器提交预期版
 
 ## 备份、迁移与安全
 
+培养方案保持独立的 `CurriculumImport` → `ForestJob` → 预览确认流程，不生成 Notebook/DocumentIR。课程代码、学分（0–100）、学时（0–10000）与必选修保存在导入 `rows_json`；仅学期、层级、先修写入森林 profile。已关联课程必须提交 `expected_profile_revision`，旧预览 GET 会补充当前版本；缺失或过期确认返回409，任何错误回滚整批。
+
+任务 `source_snapshot_json` 冻结处理路线、非敏感模型身份和原文件/文本哈希；成功读页与最多40行/约12000字符的提取批次复用 `ProcessingStep`。每次 Worker 最多新增3步后让出，失败重试保留进度，旧任务默认标准路线。模型必须引用该批来源，学分/学时/必选修须有对应表头证据；不推测培养要求。
+
+确认快照保存新建/已有映射及 profile 修改前后属性与 revision。撤销先备份，再在写事务内重查版本；恢复属性会继续递增 revision。新建课程仅在未改名、描述、无 Notebook/历史内容/会话等引用且未使用时软删除。确认后有后续修改则整批拒绝；旧已确认记录无快照时不提供撤销。该功能无数据库结构迁移，课程附加信息暂不作为跨方案的全局课程字段。
+
 本地默认 SQLite 位于 `<NOTEBOOK_DATA_DIR>/notebook.sqlite3`，原始资源位于数据根目录管理的存储路径。备份应保留 Notebook 正文、revision、来源映射、资产和历史可读性；恢复先预览并恢复到隔离目录。迁移只在隔离库验证升级、重复执行和恢复，不得触碰用户真实库。运行时数据库、原始文件、`.env`、密钥和真实会话不得提交。
 
 详见 [架构说明](architecture.md)、[API](api.md)、[解析说明](parsing.md)、[迁移与恢复](migrations.md) 和 [验收矩阵](acceptance.md)。

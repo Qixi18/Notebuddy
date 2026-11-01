@@ -61,6 +61,22 @@ READ_PROMPT = '''你是课程资料阅读器。读取页面中实际可见的全
 确为空白才用 blank 且 blocks=[]；无法辨认用 unreadable；局部不清楚须标记 uncertain，不可猜测。'''
 
 
+def read_page_image(client, png: bytes, number: int) -> ReadPage:
+    result = structured_call(client, [
+        {'role': 'system', 'content': READ_PROMPT},
+        {'role': 'user', 'content': [
+            {'type': 'text', 'text': f'读取资料第 {number} 页，返回完整 JSON。'},
+            {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' +
+                                              base64.b64encode(png).decode('ascii')}},
+        ]},
+    ], max_tokens=12000)
+    return _validate_page(result, number)
+
+
+def validate_read_page(result, number: int) -> ReadPage:
+    return _validate_page(result, number)
+
+
 def read_document(db, run, asset, path, *, progress=None, max_new_pages=None):
     config = asset_config(asset)
     client = provider_client(config)
@@ -80,15 +96,7 @@ def read_document(db, run, asset, path, *, progress=None, max_new_pages=None):
         for number in selected:
             png = render(number)
             db.commit()
-            result = structured_call(client, [
-                {'role': 'system', 'content': READ_PROMPT},
-                {'role': 'user', 'content': [
-                    {'type': 'text', 'text': f'读取资料第 {number} 页，返回完整 JSON。'},
-                    {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' +
-                                                      base64.b64encode(png).decode('ascii')}},
-                ]},
-            ], max_tokens=12000)
-            parsed = _validate_page(result, number)
+            parsed = read_page_image(client, png, number)
             if progress:
                 progress(len(cached), count)
             put_step(db, asset.id, 'read', str(number), identities[number], parsed.model_dump(), client.last_usage)

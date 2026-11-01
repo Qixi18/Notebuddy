@@ -143,9 +143,10 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 | 修改课程树信息 | `PATCH /forest/courses/{course_id}` | 提交 `expected_revision`，旧版本返回 409；不复用笔记本排序版本 |
 | 藤蔓与候选 | `GET/POST /forest/relations` | 查询状态；显式手动连接两个不同课程的真实笔记 |
 | 审核/移除关系 | `POST /forest/relations/{id}/review`、`DELETE /forest/relations/{id}` | 确认或拒绝 AI 候选；版本或来源变化时需复核；移除不改笔记正文 |
-| 培养方案导入 | `POST /forest/curriculum-imports` | multipart `file`（PDF/DOCX）或 `text`，登记独立待处理任务，201 返回导入记录 |
-| 导入列表/预览 | `GET /forest/curriculum-imports`、`GET /forest/curriculum-imports/{id}` | 显示解析模式、告警、可修改课程行、来源位置与错误 |
+| 培养方案导入 | `POST /forest/curriculum-imports` | multipart `file`（PDF/DOCX）或 `text`，可传 `processing_route=standard/llm`；省略时使用设置默认值，路线和非敏感模型身份随任务冻结 |
+| 导入列表/预览 | `GET /forest/curriculum-imports`、`GET /forest/curriculum-imports/{id}` | 最近20条；返回路线、phase、progress、解析模式、告警、课程元数据、不可改来源及 can_revert |
 | 导入确认/重试 | `POST /forest/curriculum-imports/{id}/confirm`、`POST /forest/curriculum-imports/{id}/retry` | 确认 `{rows:[...]}` 才关联或建课；失败可重试，已有课程和笔记不删除 |
+| 撤销影响/执行 | `GET /forest/curriculum-imports/{id}/revert-preview`、`POST /forest/curriculum-imports/{id}/revert` | 展示恢复属性与回收空课程清单；创建检查点后重新检查版本/使用痕迹；冲突整批409，备份失败503；成功为 reverted |
 | 关系分析任务 | `POST /forest/courses/{course_id}/suggest-relations` | 手动重跑分析；资料生成笔记后也自动登记任务 |
 | 最近课程关联任务 | `GET /forest/courses/{course_id}/latest-job` | 返回最近持久任务或 null；聚焦课程时显示自动任务错误和原任务重试入口 |
 | 森林任务查询/重试 | `GET /forest/jobs/{id}`、`POST /forest/jobs/{id}/retry` | 持久任务状态和可读错误，失败重试由独立执行器领取 |
