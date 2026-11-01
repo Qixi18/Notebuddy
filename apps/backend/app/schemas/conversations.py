@@ -90,6 +90,8 @@ class ConversationMessageRead(BaseModel):
     mode: str = ""
     sources: list[AssistantSource] = Field(default_factory=list)
     process: dict | None = None
+    # 核验结论是面向用户的历史状态；与内部过程字段分开返回。
+    verification: dict | None = None
     suggestions: list[dict] | None = None
     # 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表，避免仍显示「新对话」。
     conversation_title: str = "新对话"

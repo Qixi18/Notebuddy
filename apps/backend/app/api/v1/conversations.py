@@ -103,6 +103,7 @@ def _message_read(db: Session, message: ConversationMessage, conversation_title:
         mode=_mode_from_evidence(message),
         sources=sources_from_evidence(db, message),
         process={key: value for key, value in (message.process or {}).items() if key != "verification"} or None,
+        verification=(message.process or {}).get("verification"),
         suggestions=message.suggestions,
         conversation_title=conversation_title or DEFAULT_CONVERSATION_TITLE,
     )

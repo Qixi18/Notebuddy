@@ -40,7 +40,7 @@ pwsh -NoProfile -File .\scripts\setup.ps1
 pwsh -NoProfile -File .\scripts\dev.ps1
 ```
 
-`setup.ps1` 可重复执行：优先使用项目内运行时，缺少时复制本机已有的 UV/Node；使用锁文件安装后端、Web 和 Desktop 依赖。后端标准环境是 `apps/backend/.venv-document`，包含 PyMuPDF、fonttools 及 CPU RapidOCR；RapidOCR 的 ONNX 模型随包留在该环境内。Python 安装使用 `--no-bin --no-registry`，不改系统 PATH、Python 注册表或已有 `.env`。首次安装需要联网下载依赖。
+`setup.ps1` 可重复执行：优先使用项目内运行时，缺少时复制本机已有的 UV/Node；使用锁文件安装后端、Web 和 Desktop 依赖。后端标准环境是 `apps/backend/.venv-document`，包含 PyMuPDF、fonttools 及 CPU RapidOCR；RapidOCR 的 ONNX 模型随包留在该环境内。PaddleOCR 与 MinerU 是可选本地组件；启用 `NOTEBOOK_OCR_ENGINE=auto` 时优先使用 PaddleOCR，未安装时回退到 RapidOCR。Python 安装使用 `--no-bin --no-registry`，不改系统 PATH、Python 注册表或已有 `.env`。首次安装需要联网下载依赖。
 
 可用 `-UvPath <uv.exe>`、`-NodeDirectory <Node安装目录>` 指定已有运行时，`-PythonVersion 3.12` 选择 Python；已有前端依赖时可加 `-SkipWeb -SkipDesktop`。运行时、UV/npm/Electron 下载缓存及安装日志都在 `.runtime`，不提交到 Git。安装失败会返回非零退出码并给出日志路径。
 
@@ -65,7 +65,7 @@ $env:NOTEBOOK_DESKTOP_DEV_URL = 'http://127.0.0.1:5173'
 
 ## 可选配置
 
-尚无 `.env` 时，复制根目录 `.env.example` 为 `.env`，按需填写 `DEEPSEEK_API_KEY`、`EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` 和 `TAVILY_API_KEY`。已有 `.env` 请直接编辑，避免覆盖密钥。没有外部服务配置时仍可运行本地降级功能。示例配置启用 `NOTEBOOK_OCR_ENABLED=true`、`NOTEBOOK_OCR_ENGINE=rapidocr`；已有配置由用户决定是否开启，setup 不会更改它。OCR 页数和超时限制也在示例中。
+尚无 `.env` 时，复制根目录 `.env.example` 为 `.env`，填写要使用的模型服务 API Key；如启用文档付费处理，还要按供应商当前费率补齐模型价格和有效汇率。Embedding 与 Tavily 是可选服务，只有启用对应能力时才需要配置。已有 `.env` 请直接编辑，避免覆盖密钥。未设置的本地地址、端口、OCR 和解析器参数使用程序默认值；没有外部服务配置时仍可运行本地降级功能。示例中的空价格来源或零价格会让付费调用按设计停止，避免未定价调用。
 
 本地单用户设置面板可写入部分密钥；共享或远程部署前应关闭此能力或启用口令，并单独完成身份、数据隔离和密钥管理设计。不要提交 `.env`、`data/` 或真实课件。配置和安全边界见 [安全说明](docs/security.md)。
 

@@ -285,7 +285,10 @@ def test_notebook_sse_sends_status_before_persisted_final_answer(session, monkey
         conversation_id=conversation.id, role="assistant",
     ).one()
     assert "verification" in saved.process
-    assert all("verification" not in (message.process or {}) for message in list_messages(conversation.id, session))
+    history = list_messages(conversation.id, session)
+    assistant_history = next(message for message in history if message.role == "assistant")
+    assert assistant_history.verification == {"notebook_revision": 0}
+    assert "verification" not in (assistant_history.process or {})
 
 
 def test_json_conversation_endpoint_uses_same_verified_notebook_service(session, monkeypatch):
@@ -316,3 +319,4 @@ def test_json_conversation_endpoint_uses_same_verified_notebook_service(session,
     assert message.status == "completed"
     assert message.content == "共享服务的已核验答案"
     assert "verification" not in (message.process or {})
+    assert message.verification == {"notebook_revision": 0}
