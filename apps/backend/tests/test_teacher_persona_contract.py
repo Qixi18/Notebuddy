@@ -10,7 +10,6 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1 import conversations
 from app.db.database import Base, get_db
 from app.db.models import Conversation, Course
 from app.main import app
@@ -80,7 +79,7 @@ def test_current_persona_can_send_and_read_back_messages(tmp_path, monkeypatch, 
         yield {"type": "delta", "text": "你好，我是沃雅妮莎。"}
         yield {"type": "final", **answer(*args, **kwargs), "suggestions": []}
 
-    monkeypatch.setattr(conversations, "run_answer", answer)
+    monkeypatch.setattr("app.services.assistant_execution.run_answer", answer)
     monkeypatch.setattr(agent_execution, "run_agent", stream)
     app.dependency_overrides[get_db] = test_db
     try:

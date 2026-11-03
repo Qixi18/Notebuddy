@@ -69,13 +69,13 @@ Notebook
 | `DocumentIR` / `DocumentParseRun` | 来源文件的解析版本、结构、位置、质量结果 | 否 |
 | `NotebookSection` | 从正文重建的目录和文本投影 | 否，可重建 |
 | `retrieval_chunks`、森林树/搜索数据 | 检索或导航派生索引 | 否，可重建/同步 |
-| 旧 `Note.content_markdown` / `NoteRevision` | 迁移、兼容、审计和历史引用；新旧读写边界依路由而异。前端仍调用的旧 NoteSuggestion API 在本轮路由审计中未找到后端注册，须单独核实 | 否，不得作为新正文源 |
+| 旧 `Note.content_markdown` / `NoteRevision` | 历史迁移、审计和兼容数据；当前未注册独立旧 Note API Router。Web 的旧 `api/notes.ts` 与 `useNoteEditor` 没有运行时导入方，保留为已退役代码；迁移及历史模型仍不得因该客户端退役而删除 | 否，不得作为新正文源 |
 | `NotebookGenerationCandidate` | 非当前主要生成写入链；`notes/assets.py` 仍检查 pending 候选的附件引用，避免资源过早清理 | 否；清理前须审计历史行与资源保护 |
 | `NotebookEditSuggestion` | 对现有正文的待审修改及基准 revision | 否；必须通过审查/受控应用 |
 
 单一正文源不意味着删除来源、资产、历史版本或派生表。不要删表或改已发布 Alembic migration。
 
-## 实现核对记录（2026-11-03；非全量验收）
+## 实现核对记录（2026-11-03；源码审查与自动验收分开记录）
 
 | 主题 | 代码核对 | 自动/真实证据 |
 |---|---|---|
@@ -84,8 +84,9 @@ Notebook
 | 资料解析 | `app/api/v1/materials.py`、`app/document_processing/`、Asset/ParseRun 模型 | 结构经代码核对；真实材料质量未在本次核实 |
 | 生成 | `app/api/v1/generation.py`、`app/generation/context.py`、`app/workers/notebook_generation_worker.py` | 任务快照、质量检查、revision 合并由代码核对；真实模型质量待验证 |
 | Agent 与森林 | `app/api/v1/agent.py`、`app/ai/agent_read_tools.py`、`app/forest/`、`app/notes/index.py` | 范围与读取路径代码核对；真实模型与完整浏览器体验待验证 |
-| 路由与应用服务分层（ADR-0003 Proposed） | Notebook 文档/历史/生命周期/资源和 Material 兼容聚合、DocumentIR 页面/证据、Asset 任务与预算、上传批次查询已下沉到服务；Service 预期错误由 `app/main.py` 统一映射，Quiz 不再依赖 FastAPI | `scripts/test.ps1` 后端阶段：Ruff 通过，pytest 572 passed/4 skipped；路由契约快照与边界断言通过。Web Vitest 有5个文件/22项失败，完整记录见验收快照。API 路径与 schema 未改 |
-| 旧 API/迁移兼容 | `app/api/v1/materials.py`、`notes`、迁移模块及旧模型仍存在 | 具体调用面见 [API](api.md)；外部调用方覆盖待验证 |
+| 路由与应用服务分层（ADR-0003/0004 Proposed） | 除 Notebook/Material 用例外，会话持久化与答疑编排、Forest 导入/读取、Knowledge 结构读取/提案审核、复杂课程概览与生命周期事务均由应用服务承接；课程简单列表查询保留路由内 ORM。复杂边界和例外均有架构测试 | 当前提交前自动回归见 [验收快照](acceptance.md)；API 路径及 schema 未改。ADR 仍待技术审查 |
+| 旧 API/迁移兼容 | `routes.py` 不注册 Note Router；Web `api/notes.ts`、`useNoteEditor` 未发现运行时调用方；旧 Note 类型中仅 `Note` 仍用于 Notebook 响应类型。旧迁移、模型与历史数据仍保留 | 运行时引用由仓库搜索核对；前端旧 URL `/courses/:courseId/notes/:noteId` 仅重定向到 `/courses`。旧 API 清单见 [API](api.md) 的历史契约说明 |
+| 正文写入和旧解析器路径 | 运行时正文写入经 `notes/store.py::write_document`，由文档服务、建议服务和生成 Worker 调用；旧 Note 数据迁移/合并也经该函数写当前正文。迁移中直接构造的 `NotebookDocumentRevision.document_json` 是历史快照，不是第二个当前正文写入口。旧 `app.parsers` 仍由 Forest 培养方案导入及 Office→DocumentIR 兼容适配器调用 | 静态引用与存储调用点核对；后端正文/CAS/解析适配自动用例纳入全量测试。旧 parser 不是无引用代码，不应在本轮移除 |
 
 ## 路由与写入边界
 

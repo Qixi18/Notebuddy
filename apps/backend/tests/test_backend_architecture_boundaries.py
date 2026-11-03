@@ -125,6 +125,76 @@ def test_business_route_queries_are_delegated_to_services():
         assert calls == [], f"{path.relative_to(APP)} still accesses the database: {calls}"
 
 
+def test_conversation_router_delegates_answer_pipeline_and_persistence():
+    path = APP / "api/v1/conversations.py"
+    imports = _imports(path)
+    assert not any(module.startswith("app.ai") for module in imports)
+    assert "app.api.v1.shared" not in imports
+    for function in ("list_messages", "send_message"):
+        calls = _function_calls(path, function)
+        assert "commit" not in calls and "rollback" not in calls
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    send_message = next(node for node in tree.body
+                        if isinstance(node, ast.FunctionDef) and node.name == "send_message")
+    called_names = {node.func.id for node in ast.walk(send_message)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "send_conversation_message" in called_names
+    assert "record_user_turn" not in called_names
+    assert "idempotent_assistant_message" not in called_names
+
+
+def test_forest_and_knowledge_business_routes_delegate_queries_and_transactions():
+    strict_paths = (
+        APP / "api/v1/forest.py",
+        APP / "api/v1/forest_imports.py",
+        APP / "api/v1/knowledge.py",
+    )
+    forbidden = {"query", "scalar", "scalars", "execute", "get", "add", "delete",
+                 "commit", "rollback", "flush", "refresh"}
+    for path in strict_paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        calls = [node.func.attr for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and node.func.attr in forbidden and isinstance(node.func.value, ast.Name)
+                 and node.func.value.id == "db"]
+        assert calls == [], f"{path.relative_to(APP)} still owns ORM/transaction calls: {calls}"
+
+    imports = _imports(APP / "api/v1/knowledge.py")
+    assert "app.knowledge.proposals" not in imports
+
+
+def test_courses_keep_simple_list_reads_but_delegate_aggregates_and_transactions():
+    path = APP / "api/v1/courses.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for function in (
+        "visit_course", "create_course", "rename_course", "course_overview",
+        "preview_course_deletion", "delete_course", "restore_course", "purge_deleted_course",
+    ):
+        definition = next(node for node in tree.body
+                          if isinstance(node, ast.FunctionDef) and node.name == function)
+        calls = {node.func.attr for node in ast.walk(definition)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and isinstance(node.func.value, ast.Name) and node.func.value.id == "db"}
+        assert not calls & {"commit", "rollback", "add", "delete", "flush", "refresh"}, function
+    overview = next(node for node in tree.body
+                    if isinstance(node, ast.FunctionDef) and node.name == "course_overview")
+    overview_db_calls = {node.func.attr for node in ast.walk(overview)
+                         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                         and isinstance(node.func.value, ast.Name) and node.func.value.id == "db"}
+    assert not overview_db_calls & {"query", "scalar", "scalars", "execute", "get"}
+
+
+def test_forest_domain_and_workers_do_not_depend_on_http_or_api_routers():
+    paths = [*(APP / "forest").rglob("*.py"), *(APP / "knowledge").rglob("*.py"),
+             *(APP / "workers").rglob("*.py")]
+    for path in paths:
+        imported = _imports(path)
+        assert not any(module == "fastapi" or module.startswith("fastapi.")
+                       for module in imported), path.relative_to(APP)
+        assert not any(module == "app.api" or module.startswith("app.api.")
+                       for module in imported), path.relative_to(APP)
+
+
 def test_http_routes_do_not_remap_application_errors_individually():
     paths = [*(APP / "api/v1/notebook_routes").glob("*.py"),
              *(APP / "api/v1/material_routes").glob("*.py"),

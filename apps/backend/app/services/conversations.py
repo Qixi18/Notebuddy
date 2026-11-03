@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
@@ -21,8 +22,189 @@ from app.db.models import (
     SourceRef,
     WebSource,
 )
+from app.services.errors import ApplicationError
+from app.services.resource_scopes import require_conversation, require_course
 
 DEFAULT_CONVERSATION_TITLE = "新对话"
+
+
+def normalize_conversation_scope(value: str | None) -> str:
+    """Normalize current and legacy scope names at the application boundary."""
+    if value in {"course", "global", "note"}:
+        return value
+    return "course"
+
+
+def create_course_conversation(db: Session, *, course_id: str, title: str, scope: str,
+                               note_id: str | None, note_title: str | None) -> Conversation:
+    course = db.get(Course, course_id)
+    if course is None or course.deleted_at is not None:
+        raise ApplicationError(404, "课程不存在")
+    if scope == "note":
+        notebook, error = resolve_legacy_note_target(db, note_id or "", course_id)
+        if notebook is None:
+            raise ApplicationError(409 if "同时指向" in (error or "") else 404,
+                                   error or "锁定的笔记不存在或不属于当前课程")
+        note_id, note_title = notebook.id, (note_title or notebook.title)[:300]
+    conversation = Conversation(course_id=course_id, title=title, default_scope=scope,
+        scope=scope, note_id=note_id if scope == "note" else None,
+        note_title=note_title if scope == "note" else None)
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def create_notebook_conversation(db: Session, notebook_id: str, title: str) -> Conversation:
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise ApplicationError(404, "笔记不存在")
+    conversation = Conversation(course_id=None, notebook_id=notebook.id, title=title,
+        default_scope="notebook", scope="notebook", note_title=notebook.title[:300])
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def list_notebook_conversations(db: Session, notebook_id: str) -> list[Conversation]:
+    if db.get(Notebook, notebook_id) is None:
+        raise ApplicationError(404, "笔记不存在")
+    return list(db.scalars(select(Conversation).where(
+        Conversation.notebook_id == notebook_id, Conversation.scope == "notebook"
+    ).order_by(Conversation.updated_at.desc())).all())
+
+
+def rename_conversation(db: Session, conversation_id: str, title: str) -> Conversation:
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise ApplicationError(404, "会话不存在")
+    conversation.title = title
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def delete_conversation(db: Session, conversation_id: str) -> None:
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise ApplicationError(404, "会话不存在")
+    db.delete(conversation)
+    db.commit()
+
+
+def list_course_conversations(db: Session, course_id: str) -> list[Conversation]:
+    course = db.get(Course, course_id)
+    if course is None or course.deleted_at is not None:
+        raise ApplicationError(404, "课程不存在")
+    conversations = list(db.scalars(select(Conversation).where(
+        Conversation.course_id == course_id
+    ).order_by(Conversation.updated_at.desc())).all())
+    for conversation in conversations:
+        if conversation.scope != "note" or not conversation.note_id:
+            continue
+        notebook, _ = resolve_legacy_note_target(db, conversation.note_id, course_id)
+        if notebook is not None:
+            conversation.note_id = notebook.id
+            conversation.note_title = conversation.note_title or notebook.title
+    return conversations
+
+
+def list_conversation_messages(db: Session, conversation_id: str) -> tuple[Conversation, list[ConversationMessage]]:
+    try:
+        conversation = load_conversation(db, conversation_id)
+    except ConversationUnavailable as exc:
+        raise ApplicationError(404, exc.detail) from exc
+    messages = list(db.scalars(select(ConversationMessage).where(
+        ConversationMessage.conversation_id == conversation_id
+    ).options(
+        selectinload(ConversationMessage.evidence).selectinload(MessageEvidence.source_ref)
+        .selectinload(SourceRef.page_block).selectinload(PageBlock.page),
+        selectinload(ConversationMessage.evidence).selectinload(MessageEvidence.web_source),
+    ).order_by(ConversationMessage.created_at)).all())
+    return conversation, messages
+
+
+def conversation_for_message(db: Session, conversation_id: str) -> Conversation:
+    """Load and validate a conversation before an answer use case starts."""
+    return require_conversation(db, conversation_id)
+
+
+def idempotent_assistant_message(db: Session, conversation_id: str, key: str | None):
+    if not key:
+        return None
+    existing = db.scalar(select(ConversationMessage).where(
+        ConversationMessage.conversation_id == conversation_id,
+        ConversationMessage.role == "user", ConversationMessage.idempotency_key == key,
+    ))
+    if existing is None:
+        return None
+    return db.scalar(select(ConversationMessage).where(
+        ConversationMessage.conversation_id == conversation_id,
+        ConversationMessage.role == "assistant",
+        ConversationMessage.created_at >= existing.created_at,
+    ).order_by(ConversationMessage.created_at).limit(1))
+
+
+def notebook_for_conversation(db: Session, conversation: Conversation, context: dict):
+    book = db.get(Notebook, conversation.notebook_id) if conversation.notebook_id else None
+    if (book is None or book.deleted_at is not None or context.get("notebook_id") != book.id
+            or context.get("course_id") != book.course_id
+            or not isinstance(context.get("revision"), int)
+            or context["revision"] != book.document_revision):
+        raise ApplicationError(409, "请刷新并提供当前会话 Notebook 的最新正文版本")
+    return book
+
+
+def material_for_conversation(db: Session, conversation: Conversation, material_id: str | None):
+    if not material_id:
+        return None
+    material = db.get(Material, material_id)
+    from app.services.course_scope import material_in_course
+    if material is None or material.deleted_at is not None or not material_in_course(
+        db, material, conversation.course_id
+    ):
+        raise ApplicationError(404, "所选资料不属于当前课程")
+    return material
+
+
+def record_user_turn(db: Session, conversation: Conversation, *, question: str,
+                     learning_goal: str | None, idempotency_key: str | None,
+                     scope: str | None, note_id: str | None, note_title: str | None):
+    history = [(item.role, item.content) for item in conversation.messages]
+    is_first_turn = not any(item.role == "user" for item in conversation.messages)
+    db.add(ConversationMessage(conversation_id=conversation.id, role="user",
+        content=question.strip(), learning_goal=learning_goal, status="completed",
+        idempotency_key=idempotency_key))
+    if is_first_turn:
+        new_scope = scope if scope in {"course", "global", "note"} else conversation.scope or "course"
+        if new_scope in {"material", "page"}:
+            new_scope = "course"
+        conversation.default_scope = conversation.scope = new_scope
+        conversation.note_id = note_id if new_scope == "note" else None
+        conversation.note_title = note_title if new_scope == "note" else None
+    if conversation.title.strip() == DEFAULT_CONVERSATION_TITLE:
+        conversation.title = derive_conversation_title(question, conversation.scope, conversation.note_title)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise ApplicationError(409, "该问题已提交过，请勿重复发送") from exc
+    return history
+
+
+def record_failed_assistant_message(db: Session, conversation: Conversation, *, learning_goal: str | None,
+                                    failure_type: str, notebook_scope: bool):
+    db.rollback()
+    fallback = ("本次 Notebook 答疑未完成，未发布未经核验的初稿。请稍后重试。" if notebook_scope
+                else "本次回答未完成，已保留失败状态；请稍后重试或查看课程检索片段。")
+    failed = ConversationMessage(conversation_id=conversation.id, role="assistant", content=fallback,
+        learning_goal=learning_goal, status="failed", failure_type=failure_type)
+    db.add(failed)
+    conversation.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(failed)
+    return failed
 
 
 def derive_conversation_title(question: str, scope: str | None, note_title: str | None) -> str:
@@ -85,6 +267,7 @@ def _hit_snippet(content: str, keyword: str, *, window: int = 60) -> str:
 
 
 def search_course_messages(db: Session, course_id: str, query: str, *, limit: int = 20) -> list[dict]:
+    require_course(db, course_id)
     keyword = query.strip()
     if not keyword:
         return []

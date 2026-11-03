@@ -4,11 +4,11 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi import HTTPException
 
 from app.db.models import Course, ForestCourseProfile
 from app.forest import curriculum_revert
 from app.forest.curriculum import confirm_import
+from app.forest.errors import CurriculumOperationError
 from tests.notebook_fixtures import make_notebook
 from tests.test_curriculum_import import preview
 
@@ -44,7 +44,7 @@ def test_revert_restores_existing_profile_and_recycles_only_empty_new_course(ses
     assert course.deleted_at is None
     assert record.status == 'reverted'
     assert checkpoints == [True]
-    with pytest.raises(HTTPException):
+    with pytest.raises(CurriculumOperationError):
         curriculum_revert.revert_import(session, record)
     assert checkpoints == [True]
 
@@ -64,7 +64,7 @@ def test_revert_refuses_any_later_use_without_partial_changes(session, checkpoin
     else:
         make_notebook(session, course)
     session.commit()
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(CurriculumOperationError) as caught:
         curriculum_revert.revert_import(session, record)
     assert caught.value.status_code == 409
     assert all(session.get(Course, course_id).deleted_at is None for course_id in ids)
@@ -77,7 +77,7 @@ def test_legacy_confirmed_import_has_no_fabricated_undo_receipt(session, checkpo
     record = CurriculumImport(status='confirmed')
     session.add(record)
     session.commit()
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(CurriculumOperationError) as caught:
         curriculum_revert.revert_import(session, record)
     assert caught.value.status_code == 409
     assert checkpoints == []
@@ -89,7 +89,7 @@ def test_checkpoint_failure_keeps_entire_plan_confirmed(session, monkeypatch):
     def fail():
         raise OSError('synthetic disk error')
     monkeypatch.setattr(curriculum_revert, 'checkpoint_before_revert', fail)
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(CurriculumOperationError) as caught:
         curriculum_revert.revert_import(session, record)
     assert caught.value.status_code == 503
     assert record.status == 'confirmed'
@@ -104,7 +104,7 @@ def test_changes_during_backup_are_revalidated_before_any_recycle(session, monke
         session.get(Course, course_id).description = '后续内容'
         session.commit()
     monkeypatch.setattr(curriculum_revert, 'checkpoint_before_revert', changed_during_backup)
-    with pytest.raises(HTTPException):
+    with pytest.raises(CurriculumOperationError):
         curriculum_revert.revert_import(session, record)
     assert record.status == 'confirmed'
     assert session.get(Course, course_id).deleted_at is None

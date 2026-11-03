@@ -146,9 +146,9 @@ def test_note_conversation_creation_checks_notebook_course(session):
     other_course = make_course(session, "另一个课程")
     foreign_book = make_notebook(session, other_course)
 
-    from fastapi import HTTPException
+    from app.services.errors import ApplicationError
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         create_conversation(
             course.id,
             ConversationCreate(scope="note", default_scope="note", note_id=foreign_book.id),

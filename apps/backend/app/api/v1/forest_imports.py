@@ -1,68 +1,34 @@
 from __future__ import annotations
 
-import json
-
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.v1.shared import ensure_course
 from app.db.database import get_db
-from app.db.models import CurriculumImport, ForestCourseProfile, ForestJob
-from app.forest.curriculum import CurriculumError, confirm_import, create_import
-from app.forest.curriculum_processing import job_snapshot
-from app.forest.curriculum_revert import revert_import, revert_preview
-from app.forest.jobs import retry_job
 from app.schemas.forest_imports import CurriculumConfirm, CurriculumImportRead, ForestJobRead
-from app.services.uploads import UploadRejected
+from app.services.forest_imports import (
+    confirm_curriculum_import,
+    create_curriculum_import,
+    get_curriculum_import,
+    get_forest_job,
+    latest_forest_job,
+    list_curriculum_imports,
+    preview_curriculum_revert,
+    retry_curriculum_import,
+    suggest_forest_relations,
+)
+from app.services.forest_imports import (
+    retry_forest_job as retry_forest_job_use_case,
+)
+from app.services.forest_imports import (
+    revert_curriculum_import as revert_curriculum_import_use_case,
+)
 
 router = APIRouter()
 
 
-def _record(db: Session, import_id: str) -> CurriculumImport:
-    record = db.get(CurriculumImport, import_id)
-    if record is None:
-        raise HTTPException(404, "培养方案导入不存在")
-    return record
-
-
-def _read(db: Session, record: CurriculumImport) -> CurriculumImportRead:
-    job = db.scalar(
-        select(ForestJob)
-        .where(ForestJob.curriculum_import_id == record.id)
-        .order_by(ForestJob.created_at.desc())
-        .limit(1)
-    )
-    snapshot = job_snapshot(job)
-    rows = json.loads(record.rows_json)
-    for row in rows:
-        if row.get('existing_course_id') and row.get('expected_profile_revision') is None:
-            profile = db.get(ForestCourseProfile, row['existing_course_id'])
-            row['expected_profile_revision'] = profile.revision if profile else 0
-    return CurriculumImportRead(
-        id=record.id,
-        status=record.status,
-        filename=record.filename,
-        mode=record.mode,
-        warnings=json.loads(record.warnings_json),
-        rows=rows,
-        error_message=record.error_message,
-        job_id=job.id if job else None,
-        progress=job.progress if job else 0,
-        processing_route=snapshot.get('processing_route', 'standard'),
-        phase=snapshot.get('phase'),
-        can_revert=record.status == 'confirmed' and bool(snapshot.get('confirmation', {}).get('courses')),
-    )
-
-
 @router.get("/forest/curriculum-imports", response_model=list[CurriculumImportRead])
 def list_imports(db: Session = Depends(get_db)):
-    records = db.scalars(
-        select(CurriculumImport)
-        .order_by(CurriculumImport.created_at.desc(), CurriculumImport.id)
-        .limit(20)
-    ).all()
-    return [_read(db, record) for record in records]
+    return list_curriculum_imports(db)
 
 
 @router.post("/forest/curriculum-imports", response_model=CurriculumImportRead, status_code=201)
@@ -72,110 +38,52 @@ def import_curriculum(
     processing_route: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ):
-    try:
-        record = create_import(
-            db,
-            text=text,
-            source=file.file if file else None,
-            filename=file.filename if file else None,
-            processing_route=processing_route,
-        )
-    except UploadRejected as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
-    return _read(db, record)
+    return create_curriculum_import(
+        db, text=text, source=file.file if file else None,
+        filename=file.filename if file else None, processing_route=processing_route,
+    )
 
 
 @router.get("/forest/curriculum-imports/{import_id}", response_model=CurriculumImportRead)
 def get_import(import_id: str, db: Session = Depends(get_db)):
-    return _read(db, _record(db, import_id))
+    return get_curriculum_import(db, import_id)
 
 
 @router.post("/forest/curriculum-imports/{import_id}/retry", response_model=CurriculumImportRead)
 def retry_import(import_id: str, db: Session = Depends(get_db)):
-    record = _record(db, import_id)
-    job = db.scalar(
-        select(ForestJob)
-        .where(ForestJob.curriculum_import_id == record.id)
-        .order_by(ForestJob.created_at.desc())
-        .limit(1)
-    )
-    if job is None:
-        raise HTTPException(404, "培养方案任务不存在")
-    try:
-        retry_job(db, job)
-    except CurriculumError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    db.commit()
-    db.refresh(record)
-    return _read(db, record)
+    return retry_curriculum_import(db, import_id)
 
 
 @router.post("/forest/curriculum-imports/{import_id}/confirm")
 def confirm_curriculum(import_id: str, payload: CurriculumConfirm, db: Session = Depends(get_db)):
-    from app.forest.service import list_forest_courses
-
-    confirm_import(db, _record(db, import_id), payload.rows)
-    courses = list_forest_courses(db)
-    db.commit()
-    return {"courses": courses, "import": _read(db, _record(db, import_id))}
+    return confirm_curriculum_import(db, import_id, payload.rows)
 
 
-@router.get('/forest/curriculum-imports/{import_id}/revert-preview')
+@router.get("/forest/curriculum-imports/{import_id}/revert-preview")
 def preview_revert(import_id: str, db: Session = Depends(get_db)):
-    return revert_preview(db, _record(db, import_id))
+    return preview_curriculum_revert(db, import_id)
 
 
-@router.post('/forest/curriculum-imports/{import_id}/revert', response_model=CurriculumImportRead)
+@router.post("/forest/curriculum-imports/{import_id}/revert", response_model=CurriculumImportRead)
 def revert_curriculum(import_id: str, db: Session = Depends(get_db)):
-    record = _record(db, import_id)
-    revert_import(db, record)
-    db.refresh(record)
-    return _read(db, record)
+    return revert_curriculum_import_use_case(db, import_id)
 
 
 @router.post("/forest/courses/{course_id}/suggest-relations", response_model=ForestJobRead)
 def suggest_relations(course_id: str, db: Session = Depends(get_db)):
-    ensure_course(db, course_id)
-    from app.forest.notebook_relations import enqueue_notebook_relations
-
-    job = enqueue_notebook_relations(db, course_id)
-    if job is None:
-        raise HTTPException(409, "至少需要两门课程有可用笔记正文，才能生成跨课关联")
-    if job.status == "failed":
-        retry_job(db, job)
-    db.commit()
-    db.refresh(job)
-    return job
+    return suggest_forest_relations(db, course_id)
 
 
 @router.get("/forest/jobs/{job_id}", response_model=ForestJobRead)
 def get_job(job_id: str, db: Session = Depends(get_db)):
-    job = db.get(ForestJob, job_id)
-    if job is None:
-        raise HTTPException(404, "森林任务不存在")
-    if job.course_id:
-        ensure_course(db, job.course_id)
-    return job
+    return get_forest_job(db, job_id)
 
 
 @router.get("/forest/courses/{course_id}/latest-job", response_model=ForestJobRead | None)
 def get_latest_course_forest_job(course_id: str, db: Session = Depends(get_db)):
-    ensure_course(db, course_id)
-    return db.scalar(
-        select(ForestJob)
-        .where(ForestJob.course_id == course_id, ForestJob.kind == "notebook_relations")
-        .order_by(ForestJob.created_at.desc(), ForestJob.id.desc())
-        .limit(1)
-    )
+    return latest_forest_job(db, course_id)
 
 
 @router.post("/forest/jobs/{job_id}/retry", response_model=ForestJobRead)
 def retry_forest_job(job_id: str, db: Session = Depends(get_db)):
-    try:
-        job = retry_job(db, get_job(job_id, db))
-    except CurriculumError as exc:
-        db.rollback()
-        raise HTTPException(409, str(exc)) from exc
-    db.commit()
-    db.refresh(job)
-    return job
+    return retry_forest_job_use_case(db, job_id)

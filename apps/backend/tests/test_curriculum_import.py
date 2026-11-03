@@ -4,12 +4,13 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi import HTTPException
 
-from app.api.v1.forest_imports import get_import, retry_import
 from app.db.models import Course, CurriculumImport, ForestCourseProfile, ForestJob
 from app.forest.curriculum import confirm_import, create_import, extract_curriculum
+from app.forest.errors import CurriculumOperationError
 from app.schemas.forest_imports import CurriculumRow
+from app.services.errors import ApplicationError
+from app.services.forest_imports import get_curriculum_import, retry_curriculum_import
 
 pytest_plugins = ["tests.notebook_fixtures"]
 
@@ -28,19 +29,19 @@ def failed_import(session):
 
 def test_retry_returns_pending_and_preserves_completed_progress(session):
     record, job = failed_import(session)
-    response = retry_import(record.id, session)
-    assert response.status == "pending"
-    assert response.error_message is None
-    assert response.progress == 45
+    response = retry_curriculum_import(session, record.id)
+    assert response["status"] == "pending"
+    assert response["error_message"] is None
+    assert response["progress"] == 45
     assert job.status == "pending"
     assert job.error_message is None
 
 
 def test_repeated_retry_is_rejected_without_restarting_the_queued_job(session):
     record, job = failed_import(session)
-    retry_import(record.id, session)
-    with pytest.raises(HTTPException) as caught:
-        retry_import(record.id, session)
+    retry_curriculum_import(session, record.id)
+    with pytest.raises(ApplicationError) as caught:
+        retry_curriculum_import(session, record.id)
     assert caught.value.status_code == 409
     assert job.status == "pending"
 
@@ -49,10 +50,10 @@ def test_confirmed_record_cannot_be_requeued_by_a_stale_failed_job(session):
     record, job = failed_import(session)
     record.status = "confirmed"
     session.commit()
-    with pytest.raises(HTTPException) as caught:
-        retry_import(record.id, session)
+    with pytest.raises(ApplicationError) as caught:
+        retry_curriculum_import(session, record.id)
     assert caught.value.status_code == 409
-    assert get_import(record.id, session).status == "confirmed"
+    assert get_curriculum_import(session, record.id)["status"] == "confirmed"
     assert job.status == "failed"
 
 
@@ -72,7 +73,9 @@ def test_local_metadata_is_extracted_and_confirmed_mapping_is_retained(session):
     assert saved["existing_course_id"] is not None
     assert saved["credits"] == 4.5
     assert session.get(Course, saved["existing_course_id"]).name == "高等数学"
-    snapshot = json.loads(session.get(ForestJob, get_import(record.id, session).job_id).source_snapshot_json)
+    snapshot = json.loads(session.get(
+        ForestJob, get_curriculum_import(session, record.id)["job_id"],
+    ).source_snapshot_json)
     assert snapshot["confirmation"]["courses"][0]["created"] is True
 
 
@@ -88,7 +91,7 @@ def test_confirmation_refuses_stale_profile_and_writes_nothing(session):
     profile.revision = 4
     profile.semester = 5
     session.commit()
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(CurriculumOperationError) as caught:
         confirm_import(session, record, rows)
     assert caught.value.status_code == 409
     assert profile.semester == 5
@@ -98,7 +101,7 @@ def test_confirmation_refuses_stale_profile_and_writes_nothing(session):
 def test_confirmation_rejects_duplicate_course_codes(session):
     record, rows = preview(session, "课程名称 | 学期\n数学 | 1\n英语 | 1")
     rows = [row.model_copy(update={"course_code": "A01"}) for row in rows]
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(CurriculumOperationError) as caught:
         confirm_import(session, record, rows)
     assert caught.value.status_code == 422
 
@@ -113,7 +116,7 @@ def test_late_confirmation_conflict_rolls_back_earlier_new_course(session):
     record, rows = preview(session, '课程名称 | 学期\n新课程 | 1\n已有课程 | 2')
     session.get(ForestCourseProfile, course.id).revision += 1
     session.commit()
-    with pytest.raises(HTTPException):
+    with pytest.raises(CurriculumOperationError):
         confirm_import(session, record, rows)
     assert session.scalar(select(Course).where(Course.name == '新课程')) is None
     assert record.status == 'preview'

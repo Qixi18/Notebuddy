@@ -299,7 +299,7 @@ def test_json_conversation_endpoint_uses_same_verified_notebook_service(session,
     )
     session.add(conversation)
     session.commit()
-    monkeypatch.setattr("app.api.v1.conversations.run_notebook_answer", lambda *_a, **_kw: iter([
+    monkeypatch.setattr("app.services.assistant_execution.run_notebook_answer", lambda *_a, **_kw: iter([
         {"type": "verified_result", "result": NotebookAnswer(
             answer="共享服务的已核验答案", chunks=[], web_results=[], reviews=[],
             model_version="notebook-verified:test", process={"thinking": "", "steps": [],
