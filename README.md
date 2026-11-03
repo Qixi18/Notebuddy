@@ -1,18 +1,12 @@
 # NoteBuddy
 
-NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、整理和编辑笔记，在知识树中定位内容，并基于课程资料进行检索答疑。当前仓库以本地 Web 应用为主要运行形态；Electron 包装仍需完整联调。Agent 入口见 [AGENTS.md](AGENTS.md)，详细规则见 [agent.md](agent.md)。
+NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、整理和编辑笔记，在知识树中定位内容，并基于课程资料进行检索答疑。当前仓库以本地 Web 应用为主要运行形态；Electron 包装仍需完整联调。Agent 规则见 [AGENTS.md](AGENTS.md)，三人协作流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，目录职责见 [模块职责地图](docs/module-map.md)。
 
 ## 当前架构基线 / 重大变更
 
 当前正式可编辑 Notebook 正文以 `Notebook.document_json` 为唯一权威源，并通过 revision/CAS 保存。原始资料解析结果、目录、检索块和森林视图属于来源或派生数据，不是第二套正文。架构决策入口见 [ADR 索引](docs/architecture-decisions/README.md)；基线记录 ADR-0001 当前为 Proposed，尚未获协作者审核。任何全局架构变更必须按根目录 [AGENTS.md](AGENTS.md) 公示并同步契约、测试和跨 Agent 影响。
 
-**整改提案（Proposed，待审）**：按 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md) 与 [实施盘点](implementation-inventory.md) 分批收敛 Notebook 答疑证据门禁、只读正文、未分类会话契约、视觉模型能力预检、单文件 CNY 预算及共享 Workspace。上述内容是开发目标，不代表已实现或验收；实施基线为 `feat/overall-inspection`。2026-11-03 复核新增运行时路由与业务边界整改提案：Web 页面现已迁入 `createBrowserRouter` 的嵌套路由对象，Notebook 桥接与侧栏跳转有组件级回归覆盖；Notebook API 文件虽已按功能拆分，handler 中仍有直接数据库事务。后续继续补充路由错误边界，并按垂直用例推进 API/service 分层。ADR 继续保持 Proposed，需协作者审核后才能视为已接受架构。
-
-**实施进度（2026-11-03 复核）**：此前 A1/A2、B1/B2、C1/C2 与 D 第一阶段完成情况见 ADR-0002 的实施记录。后续 S1–S7 在工作树记录了 QA 隔离、预算验收、Notebook hook 拆分及 `notebook_routes/*` 路由文件拆分；当前代码已有 Notebook OpenAPI 契约快照与路由重复/反向依赖检查。该拆分不代表 handler 已与数据库事务/业务编排分层。Notebook 正文保存、历史恢复及图片所有权规则现统一由 `app/services/notebook_document.py` 编排，并继续通过 `notes/store.py` 的唯一 CAS 写入路径落库；章节重排与阅读位置 CAS 也有独立 application service。Web `appRoutes` 现由 `main.tsx` 直接交给 `createBrowserRouter`，嵌套 `<Routes>` 通配包装已移除，旧路径与重定向保留并有路由匹配回归。当前分支含未提交改动；本轮按要求未启动服务或运行测试。ADR-0002 保持 Proposed。
-
-**本轮 S8 实施（2026-11-03，待评估）**：Document Processing 配置实现位于 `app/document_processing/config.py`，解析 Service 和调用端依赖配置模块，旧 `routes.py` 仅保留兼容重导出；Notebook 生命周期变更、建议审核、附件/封面资源写入和删除保护规则下沉至 application services。Notebook 删除统一检查资料、图片和生成任务；图片 Worker 只在终态记录 `finished_at`。前端修复旧 Notebook 路径映射，补充全局及关键页面错误边界，拆分侧栏/导航保护/助手坞控制器，并延迟加载 Notebook、森林、答疑和助手坞及重型编辑器。PPTX/DOCX 标为受限兼容格式，PDF 与独立图片资源按现有质量契约处理。整体改动待用户评估，ADR-0002 仍为 Proposed。
-
-**S8 分层续改（2026-11-03，Proposed，未提交）**：统一 Notebook 与 Forest 关系用例至 `app/services/notebook_relations.py`；关系记录按课程归属过滤展示，锚点指纹仍由正文决定，绑定/移动/解绑时在同一事务内登记受影响课程的重算任务。Generation 重试/取消移入 `generation_jobs.py`，生命周期、资源、建议、上传与 Generation Input 用例改用框架无关异常；建议审核 Service 接收普通命令对象。Materials 路由拆分至 assets/documents/materials/processing/uploads 子模块，兼容聚合入口保持不变；上传和批次登记由 `asset_uploads.py` 编排，解析重试、OCR、图片重试、路线切换和取消由 `asset_processing.py` 编排。Agent 执行、验证、持久化和中断处理移入 `agent_execution.py`，`agent.py` 仅保留 HTTP 命令映射及 SSE 适配。前端路由错误页固定显示安全文案，旧 Notebook 路由独立组件按课程校验目标、优先选择默认本并保留章节定位参数。全量回归和人工验收仍未完成；ADR-0002 保持 Proposed。
+**当前架构公告**：`feat/overall-inspection` 是本轮工程治理和架构规范化分支；`feat/debug-integration` 是日常共享集成基线；`main` 是稳定版本分支。正文、来源解析和派生索引的权威边界见上文及 [架构说明](docs/architecture.md)。整改提案和分批实现记录统一见 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md)，状态仍为 Proposed，提案不等于整体验收。当前主要目录职责见 [模块职责地图](docs/module-map.md)。
 
 ## 当前能力与边界
 
@@ -22,7 +16,7 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 - 课程答疑支持持久会话、资料检索、来源展示与可选的网络搜索。未配置外部模型时存在本地降级路径；降级结果不代表真实模型质量。
 - 首页展示近期课程知识树，森林页浏览全部课程。培养方案先预览再确认导入。
 
-产品和验证状态会随开发变化。功能细节见 [架构说明](docs/architecture.md)、[API](docs/api.md) 和 [范围变化](docs/scope-changes.md)；已执行的检查及尚待验收项见 [验收矩阵](docs/acceptance.md)。已删除的历史设计与交接材料可从 Git 历史查看；当前权威文档入口见 [文档导航](docs/index.md)。
+产品和验证状态会随开发变化。功能细节见 [架构说明](docs/architecture.md)、[API](docs/api.md)；已执行的检查及尚待验收项见 [验收矩阵](docs/acceptance.md)。当前权威文档入口见 [文档导航](docs/index.md)。
 
 ## 目录
 
@@ -97,9 +91,12 @@ pwsh -NoProfile -File .\scripts\tests\local-environment.test.ps1 -NodePath .\.ru
 
 也可在 `apps/backend` 用 `& .\.venv-document\Scripts\python.exe -m ruff check app tests`、`& .\.venv-document\Scripts\python.exe -m pytest` 运行单项检查。自动检查不能代替真实课件、浏览器流程、外部模型与部署验收；记录实际验证范围并对照 [验收矩阵](docs/acceptance.md)。
 
+GitHub Pull Request 和共享/稳定分支推送另运行 [CI 工作流](.github/workflows/ci.yml)，包括静态架构边界检查。该配置不会自动开启分支保护；Required status checks 仍需仓库管理员在 GitHub Ruleset/branch protection 中按实际成功的检查名称配置。PR 信息模板见 [.github/pull_request_template.md](.github/pull_request_template.md)。
+
 ## 进一步阅读
 
-- [软件工程文档](docs/软件工程文档/README.md)：需求分析、概要设计、需求说明和教学模板。
-- [文档索引](docs/index.md)、[架构说明](docs/architecture.md)、[API](docs/api.md)
-- [资料解析](docs/parsing.md)、[来源与证据](docs/evidence.md)、[迁移与恢复](docs/migrations.md)
-- [运维说明](docs/operations.md)、[仓库协作指南](agent.md)
+- [文档索引](docs/index.md)、[架构说明](docs/architecture.md)、[模块职责地图](docs/module-map.md)
+- [后端数据契约](docs/backend-data-contract.md)、[API](docs/api.md)、[资料解析](docs/parsing.md)
+- [迁移与恢复](docs/migrations.md)、[运维说明](docs/operations.md)、[安全说明](docs/security.md)
+- [架构决策](docs/architecture-decisions/README.md)、[验收矩阵](docs/acceptance.md)
+- [协作指南](CONTRIBUTING.md)

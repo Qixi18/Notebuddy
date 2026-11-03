@@ -4,12 +4,10 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import Notebook, NotebookRelation
 from app.schemas.notebook import NotebookRelationCreate, NotebookRelationRead
 from app.services.notebook_relations import (
     create_notebook_relation as create_notebook_relation_service,
@@ -17,39 +15,15 @@ from app.services.notebook_relations import (
 from app.services.notebook_relations import (
     delete_notebook_relation as delete_notebook_relation_service,
 )
+from app.services.notebook_relations import (
+    list_notebook_relations as list_notebook_relations_service,
+)
 
 router = APIRouter()
 
 @router.get("/notebooks/{notebook_id}/relations", response_model=list[NotebookRelationRead])
 def list_notebook_relations(notebook_id: str, db: Session = Depends(get_db)):
-    book = db.get(Notebook, notebook_id)
-    if book is None or book.deleted_at is not None:
-        raise HTTPException(404, "笔记不存在")
-    outgoing = db.scalars(select(NotebookRelation).where(
-        NotebookRelation.source_notebook_id == notebook_id,
-    )).all()
-    incoming = db.scalars(select(NotebookRelation).where(
-        NotebookRelation.target_notebook_id == notebook_id,
-    )).all()
-    relations = [
-        {"id": rel.id, "source_notebook_id": rel.source_notebook_id,
-         "target_notebook_id": rel.target_notebook_id,
-         "related_notebook_id": rel.target_notebook_id,
-         "related_notebook_title": db.get(Notebook, rel.target_notebook_id).title,
-         "direction": "outgoing", "relation_type": rel.relation_type,
-         "description": rel.description, "created_at": rel.created_at}
-        for rel in outgoing
-    ]
-    relations.extend(
-        {"id": rel.id, "source_notebook_id": rel.source_notebook_id,
-         "target_notebook_id": rel.target_notebook_id,
-         "related_notebook_id": rel.source_notebook_id,
-         "related_notebook_title": db.get(Notebook, rel.source_notebook_id).title,
-         "direction": "incoming", "relation_type": rel.relation_type,
-         "description": rel.description, "created_at": rel.created_at}
-        for rel in incoming
-    )
-    return sorted(relations, key=lambda rel: (rel["created_at"], rel["id"]), reverse=True)
+    return list_notebook_relations_service(db, notebook_id)
 
 @router.post("/notebooks/{notebook_id}/relations", response_model=NotebookRelationRead,
              status_code=201)

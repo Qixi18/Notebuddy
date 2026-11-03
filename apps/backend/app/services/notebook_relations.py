@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,52 @@ def _anchor_pair(source: Notebook, target: Notebook, source_block_id: str | None
     )):
         raise ApplicationError(422, "关联小节不存在于所选笔记的当前正文，请重新选择")
     return fingerprints
+
+
+def list_notebook_relations(db: Session, notebook_id: str) -> list[dict]:
+    """Return outgoing and incoming explicit relations for an active Notebook."""
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise ApplicationError(404, "笔记不存在")
+    # Resolve the related Notebook and retain the response shape expected by
+    # the existing API clients.
+    relations = []
+    for direction, relation, related in (
+        ("outgoing", relation, db.get(Notebook, relation.target_notebook_id))
+        for relation in db.scalars(select(NotebookRelation).where(
+            NotebookRelation.source_notebook_id == notebook_id,
+        )).all()
+    ):
+        if related is not None:
+            relations.append(_relation_list_item(relation, related, direction))
+    for direction, relation, related in (
+        ("incoming", relation, db.get(Notebook, relation.source_notebook_id))
+        for relation in db.scalars(select(NotebookRelation).where(
+            NotebookRelation.target_notebook_id == notebook_id,
+        )).all()
+    ):
+        if related is not None:
+            relations.append(_relation_list_item(relation, related, direction))
+    return sorted(relations, key=lambda relation: (relation["created_at"], relation["id"]), reverse=True)
+
+
+def _relation_list_item(
+    relation: NotebookRelation, related: Notebook, direction: str,
+) -> dict:
+    return {
+        "id": relation.id,
+        "source_notebook_id": relation.source_notebook_id,
+        "target_notebook_id": relation.target_notebook_id,
+        "related_notebook_id": (
+            relation.target_notebook_id if direction == "outgoing"
+            else relation.source_notebook_id
+        ),
+        "related_notebook_title": related.title,
+        "direction": direction,
+        "relation_type": relation.relation_type,
+        "description": relation.description,
+        "created_at": relation.created_at,
+    }
 
 
 def create_notebook_relation(db: Session, *, source_id: str, target_id: str,

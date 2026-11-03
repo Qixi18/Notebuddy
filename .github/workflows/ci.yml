@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - feat/debug-integration
+      - feat/overall-inspection
+  push:
+    branches:
+      - main
+      - feat/debug-integration
+      - feat/overall-inspection
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: quality
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout with base history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: "22.12.x"
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/desktop/package-lock.json
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.7"
+
+      - name: Install backend dependencies
+        working-directory: apps/backend
+        run: uv sync --locked --all-groups
+
+      - name: Install Web dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Install Desktop dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Check architecture boundaries
+        env:
+          ARCH_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        shell: pwsh
+        run: |
+          python scripts/check_architecture_boundaries.py --base-ref "$env:ARCH_BASE_REF"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:ARCH_BASE_REF -and $env:ARCH_BASE_REF -notmatch '^0+$') {
+            git diff --check "$env:ARCH_BASE_REF...HEAD"
+          } else {
+            git diff --check
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run lint, backend and frontend checks, and builds
+        shell: pwsh
+        run: ./scripts/test.ps1

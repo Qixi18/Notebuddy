@@ -1,8 +1,10 @@
 # 后端调用与业务数据契约
 
-本文的既有契约段落记录本地 `feat/debug-integration` 历史快照（2026-10-30）；2026-11-01 的整改审查基线为 `origin/feat/overall-inspection` @ `67677dd8771f2fe756d2f29a986102a64655a730`。云端多用户安全不在当前本地实现保证范围内。字段和错误以对应基线的 `apps/backend/app/schemas/`、路由及服务源码为准。下列整改目标为 Proposed，不应误读为已实现契约。
+**适用范围与时效：**本文包含 2026-10-30 的 `feat/debug-integration` 历史快照、后续 `feat/overall-inspection` 整改记录和仍为 Proposed 的目标，不能整体视为单一时间点的当前契约。历史段落保留其来源背景；当前字段、路由、服务行为和错误以当前分支 `apps/backend/app/schemas/`、`api/v1/`、`services/` 及数据模型源码为准。`feat/overall-inspection` 是治理整改分支，`feat/debug-integration` 是共享集成基线。云端多用户安全不在当前本地实现保证范围内。涉及架构目标的状态见 [ADR 索引](architecture-decisions/README.md)。
 
-## Notebook 答疑整改提案（Proposed；A1 部分已实现）
+**阅读顺序：**“Notebook 答疑整改提案”记录目标和按批次实施情况；“B1 视觉模型”和“双路线处理补充”是带日期的历史实施快照；从“权威数据流”起描述正文与来源的稳定边界，并汇总实现核对及其他业务契约。快照中的测试结论仅适用于其标注的基线和日期，不能证明当前分支全量回归已通过。凡出现 Proposed 的内容都是待审目标，不是已生效的实现要求。
+
+## Notebook 答疑整改提案（Proposed；目标与历史批次记录）
 
 - 目标范围固定为一个明确的 Notebook 或用户明确选择的课程；不得静默退化为全局跨课程检索。
 - Notebook 第一来源是所选 Notebook 当前已保存 `document_json` 与 revision。核验材料限于该 Notebook 有效 `NotebookAsset` 关联的当前完成 ParseRun；来源不完整时不得扩大到其他 Notebook 或课程文件。
@@ -10,7 +12,9 @@
 - 新会话目标使用 `notebook_id`；`course_id` 可空仅表示 Notebook 级范围。历史 `scope='note'` 的读取映射必须显式兼容，不得依据最近访问课程猜测归属。
 - 本轮 Agent 不创建 Notebook 编辑建议；既有 `NotebookEditSuggestion` 和 Note 历史数据/迁移留存，旧写回入口在兼容风险核查后关闭。
 
-### A1 当前代码契约
+### A1 实施快照（历史记录）
+
+以下记录描述 A1 实施时的代码与兼容行为；若当前行为对任务重要，应重新检查当前 schemas、路由和模型，不以此快照替代核验。
 
 - Alembic `f2b7d9a1406c` 增加 nullable `Conversation.course_id`、nullable `notebook_id` 和 `scope='notebook' => course_id IS NULL` 约束；Notebook 删除后目标 FK 设为空，消息历史保留。降级遇到任何 Notebook-scope 会话会拒绝。
 - `POST/GET /api/v1/notebooks/{notebook_id}/conversations` 创建/列出指定 Notebook 会话。新行使用 `scope=default_scope='notebook'`、`notebook_id=<真实 ID>`、`course_id=null`，不随 Notebook 绑定状态变化。
@@ -20,7 +24,7 @@
 
 Notebook→DocumentIR→WebSearch→核验后 SSE 的实现进度见后续 A2 记录；整体整改 ADR 仍为 Proposed。
 
-## B1 视觉模型配置和预检（本地实现、全量回归与复审已完成）
+## B1 视觉模型配置和预检（2026-11-01 实施快照）
 
 - `NOTEBOOK_VISION_BASE_URL`、`NOTEBOOK_VISION_MODEL`、`NOTEBOOK_VISION_TIMEOUT_SECONDS` 和 `NOTEBOOK_VISION_API_KEY` 独立于文本模型配置。设置面板的预检使用当前草稿值，不要求先保存。
 - `POST /api/v1/config/test-vision-capability` 向配置的 OpenAI-compatible `/chat/completions` 发送小型已知红蓝图像，要求模型识别图片左侧颜色；仅返回能力结果和模型元数据，API Key 不进入审计 metadata。
@@ -28,7 +32,7 @@ Notebook→DocumentIR→WebSearch→核验后 SSE 的实现进度见后续 A2 �
 - 新建 `llm` 上传、图片上传及已存在 Asset 切换到 `llm` 路线前都要求当前配置已验证；未验证返回 409。处理快照固定非敏感视觉模型身份及能力指纹。读页 Worker 再核对快照指纹和能力缓存，实际调用独立的视觉 Provider Client；校验失败在任何页面图片模型请求前终止。
 - `standard` 路线仍可使用本地 OCR/可选视觉增强；B1 不提供文件处理费用上界。按 Asset 原子预留、重试/恢复累计、价格快照以及 10.00 CNY 硬预算属于 B2，当前不可声称付费调用受到统一预算保护。
 - 当前自动化只覆盖 Fake Provider 和临时测试数据；真实模型预检会产生一次外部请求，尚未执行真实供应商/视觉质量或浏览器人工验收。
-## 双路线处理补充（2026-10-30）
+## 双路线处理补充（2026-10-30 历史快照）
 
 `assets.processing_route` / `processing_config_json` 固定上传所选路线和非敏感模型连接身份，`materials.processing_route` 与其保持一致。批次保存初始路线；失败输入切换后可在同一批次中按实际路线分组生成。历史数据默认 `standard`，新上传的默认值由设置控制。
 
@@ -36,9 +40,11 @@ Notebook→DocumentIR→WebSearch→核验后 SSE 的实现进度见后续 A2 �
 
 `notebook_generation_jobs.relation_job_id` 跟踪正文提交后的独立藤蔓任务。用户删除联系时在 `notebook_relation_suppressions` 保留端点决定，自动分析不得恢复该条联系；人工联系也不会被自动关系覆盖。迁移为 `a5e3c8d1f209_dual_processing_routes`，使用 Alembic 升级，不删除现有业务数据。
 
-以上路线补充来自解析分支，本文其余部分以本地 `feat/debug-integration` 的 DocumentIR 与 Notebook 正文契约为准。
+以上路线补充来自解析分支，仅作历史背景；本文其余稳定数据边界应以当前 `feat/overall-inspection` 源码和本文件后续契约核对为准。
 
-## 权威数据流
+## 当前稳定边界：权威数据流
+
+以下数据流用于说明正文、来源解析与派生数据的归属。API 字段、状态、兼容路径等易变化细节仍须对照当前源码；相关核对记录不是全量测试或人工验收报告。
 
 ```text
 Notebook
@@ -69,7 +75,7 @@ Notebook
 
 单一正文源不意味着删除来源、资产、历史版本或派生表。不要删表或改已发布 Alembic migration。
 
-## 代码核对状态
+## 实现核对记录（2026-11-03；非全量验收）
 
 | 主题 | 代码核对 | 自动/真实证据 |
 |---|---|---|
@@ -121,7 +127,7 @@ Notebook 专属答疑走 `app.ai.notebook_qa.run_notebook_answer`：服务端用
 
 详见 [架构说明](architecture.md)、[API](api.md)、[解析说明](parsing.md)、[迁移与恢复](migrations.md) 和 [验收矩阵](acceptance.md)。
 
-## 文件处理预算（B2）
+## B2 文件处理预算（2026-11-01 实施与验证快照）
 
 `FileProcessingBudget` 按原始 `Asset.id` 累计，使用 CNY fen，标准/全程 AI 的付费解析及后续 Notebook 正文生成共用同一额度。账本不设指向 Asset 的 FK，以便保留费用审计；Notebook 归属在预留时校验。`ProviderUsageReservation` 记录 call ID、Asset、阶段、任务/检查点、供应商/模型、价格版本、FX/价格快照和预留/结算金额。
 

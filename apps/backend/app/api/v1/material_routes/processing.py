@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.v1.material_routes.documents import _ensure_asset
 from app.db.database import get_db
 from app.db.models import AssetProcessingJob
 from app.notes.assets import AssetUnavailable, assert_notebook_asset
@@ -19,6 +18,7 @@ from app.services.asset_processing import (
     retry_material_parse,
     switch_asset_processing_route,
 )
+from app.services.document_reads import ensure_asset_access
 from app.services.asset_processing import (
     reparse_material as reparse_material_service,
 )
@@ -97,7 +97,7 @@ def retry_asset_parse_route(asset_id: str, db: Session = Depends(get_db)):
 def get_asset_processing_budget(
     asset_id: str, notebook_id: str | None = None, db: Session = Depends(get_db),
 ):
-    _ensure_asset(db, asset_id, notebook_id)
+    ensure_asset_access(db, asset_id, notebook_id)
     return budget_read(asset_id) or {
         "asset_id": asset_id, "currency": "CNY", "limit_fen": 1000,
         "settled_fen": 0, "reserved_fen": 0, "remaining_fen": 1000,

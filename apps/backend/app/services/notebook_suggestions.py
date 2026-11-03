@@ -26,6 +26,61 @@ class SuggestionReview:
     selected_operation_indices: list[int] | None = None
 
 
+def list_notebook_edit_suggestions(
+    db: Session, notebook_id: str, status: str | None = "pending",
+) -> list[dict]:
+    book = db.get(Notebook, notebook_id)
+    if book is None or book.deleted_at is not None:
+        raise ApplicationError(404, "笔记不存在")
+    query = select(NotebookEditSuggestion).where(
+        NotebookEditSuggestion.notebook_id == notebook_id,
+    )
+    if status:
+        query = query.where(NotebookEditSuggestion.status == status)
+    rows = db.scalars(query.order_by(
+        NotebookEditSuggestion.created_at.desc()).limit(50)).all()
+    return [_suggestion_payload(row) for row in rows]
+
+
+def list_course_edit_suggestions(
+    db: Session, course_id: str, status: str | None = "pending",
+) -> list[dict]:
+    rows = db.execute(
+        select(NotebookEditSuggestion, Notebook.title)
+        .join(Notebook, Notebook.id == NotebookEditSuggestion.notebook_id)
+        .where(Notebook.course_id == course_id, Notebook.deleted_at.is_(None),
+               *([NotebookEditSuggestion.status == status] if status else []))
+        .order_by(NotebookEditSuggestion.created_at.desc())
+        .limit(200)
+    ).all()
+    return [_suggestion_payload(row, notebook_title=title) for row, title in rows]
+
+
+def _suggestion_payload(
+    row: NotebookEditSuggestion, *, notebook_title: str | None = None,
+) -> dict:
+    try:
+        operations = json.loads(row.ops_json)
+        proposed = load_document(row.proposed_document_json)
+        proposed_content = proposed.content if proposed.warning is None else None
+    except (TypeError, ValueError):
+        operations, proposed_content = [], None
+    payload = {
+        "id": row.id,
+        "notebook_id": row.notebook_id,
+        "base_revision": row.base_revision,
+        "rationale": row.rationale,
+        "operations": operations if isinstance(operations, list) else [],
+        "proposed_content": proposed_content,
+        "status": row.status,
+        "created_at": row.created_at,
+        "reviewed_at": row.reviewed_at,
+    }
+    if notebook_title is not None:
+        payload["notebook_title"] = notebook_title
+    return payload
+
+
 def review_edit_suggestion(
     db: Session, notebook_id: str, suggestion_id: str,
     payload: SuggestionReview,

@@ -1,7 +1,6 @@
 """Notebook reading-position use cases."""
 from __future__ import annotations
 
-from fastapi import HTTPException
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -9,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.models import Material, Notebook, NotebookReadingPosition, utc_now
 from app.notes.document import load_document
 from app.schemas.notebook import ReadingPositionUpdate
+from app.services.errors import ApplicationError
 
 
 def get_reading_position(db: Session, notebook_id: str) -> NotebookReadingPosition | None:
@@ -25,7 +25,7 @@ def update_reading_position(
         material = db.get(Material, payload.chapter_id)
         if (material is None or material.notebook_id != notebook.id
                 or material.deleted_at is not None):
-            raise HTTPException(404, "阅读章节不存在或不属于当前笔记本")
+            raise ApplicationError(404, "阅读章节不存在或不属于当前笔记本")
     if payload.block_id is not None:
         stored = load_document(notebook.document_json)
         live = {
@@ -34,7 +34,7 @@ def update_reading_position(
             if isinstance(node, dict)
         }
         if payload.block_id not in live:
-            raise HTTPException(404, "阅读位置对应的正文块不存在")
+            raise ApplicationError(404, "阅读位置对应的正文块不存在")
 
     values = payload.model_dump(exclude={"expected_revision"})
     values.update(revision=payload.expected_revision + 1, updated_at=utc_now())
@@ -44,7 +44,7 @@ def update_reading_position(
             db.commit()
         except IntegrityError as exc:
             db.rollback()
-            raise HTTPException(409, "阅读位置已变化，请刷新后重试") from exc
+            raise ApplicationError(409, "阅读位置已变化，请刷新后重试") from exc
     else:
         result = db.execute(update(NotebookReadingPosition).where(
             NotebookReadingPosition.notebook_id == notebook.id,
@@ -52,7 +52,7 @@ def update_reading_position(
         ).values(**values))
         if result.rowcount != 1:
             db.rollback()
-            raise HTTPException(409, "阅读位置已变化，请刷新后重试")
+            raise ApplicationError(409, "阅读位置已变化，请刷新后重试")
         db.commit()
 
     return db.get(NotebookReadingPosition, notebook.id)
