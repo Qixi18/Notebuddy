@@ -126,7 +126,7 @@ export function useNotebookDocument({
     setEditVersion((value) => value + 1)
     save.reset(normalized, revision, updatedAt)
     return true
-  }, [editVersion, editorRef, save])
+  }, [editVersion, editorRef, save.isDirty, save.reset, save.revision])
 
   async function renameTitle() {
     const nextTitle = title.trim()
@@ -158,7 +158,7 @@ export function useNotebookDocument({
     setEditVersion((value) => value + 1)
     setDocumentWarning(document.warning ?? undefined)
     save.reset(normalized, document.revision, document.updated_at)
-  }, [editorRef, save])
+  }, [editorRef, save.reset])
 
   /**
    * 生成/上传完成后的安全刷新：有未保存修改时绝不覆盖，只返回 protected。
@@ -190,7 +190,7 @@ export function useNotebookDocument({
         message: cause instanceof Error ? `笔记已生成，但正文载入失败：${cause.message}` : '笔记已生成，但正文载入失败。可重试载入。',
       }
     }
-  }, [applyServerDocument, notebookApi, notebookId, save])
+  }, [applyServerDocument, notebookApi, notebookId, save.isDirty, save.revision])
 
   function restoreDraft() {
     if (!draftFound) return
@@ -237,7 +237,7 @@ export function useNotebookDocument({
     } catch {
       return 'failed'
     }
-  }, [applyServerDocument, notebookApi, save])
+  }, [applyServerDocument, notebookApi, save.isDirty, save.revision])
 
   const dirty = save.state !== 'saved' || title !== (outline?.title ?? '')
 

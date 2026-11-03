@@ -76,11 +76,58 @@ def test_reading_position_uses_block_id(client, session):
     })
     assert saved.status_code == 200, saved.text
     assert saved.json()["block_id"] == "h-2"
+    duplicate_initial = client.put(url, json={
+        "mode": "book", "section_offset": 0.3, "expected_revision": 0,
+        "block_id": "h-1",
+    })
+    assert duplicate_initial.status_code == 409
     missing = client.put(url, json={
         "mode": "book", "section_offset": 0.2, "expected_revision": 1,
         "block_id": "missing-block",
     })
     assert missing.status_code == 404
+    updated = client.put(url, json={
+        "mode": "book", "section_offset": 0.4, "expected_revision": 1,
+        "block_id": "h-1",
+    })
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["revision"] == 2
+    stale = client.put(url, json={
+        "mode": "book", "section_offset": 0.5, "expected_revision": 1,
+        "block_id": "h-2",
+    })
+    assert stale.status_code == 409
+
+
+def test_notebook_chapter_order_uses_expected_revision(client, session):
+    course = make_course(session, "排序课程")
+    book = make_notebook(session, course, "排序笔记")
+    materials = []
+    for title in ("第一讲", "第二讲"):
+        asset = make_asset(session, book)
+        materials.append(make_material(session, book, asset, title=title))
+    session.commit()
+    url = f"/api/v1/courses/{course.id}/notebooks/{book.id}/order"
+    initial_revision = book.order_revision
+
+    reordered = client.patch(url, json={
+        "material_ids": [materials[1].id, materials[0].id],
+        "expected_order_revision": initial_revision,
+    })
+    assert reordered.status_code == 200, reordered.text
+    assert reordered.json()["order_revision"] == initial_revision + 1
+
+    stale = client.patch(url, json={
+        "material_ids": [materials[0].id, materials[1].id],
+        "expected_order_revision": initial_revision,
+    })
+    assert stale.status_code == 409
+
+    invalid = client.patch(url, json={
+        "material_ids": [materials[1].id, materials[1].id],
+        "expected_order_revision": initial_revision + 1,
+    })
+    assert invalid.status_code == 422
 
 
 def test_course_tree_and_overview_use_body(client, session):

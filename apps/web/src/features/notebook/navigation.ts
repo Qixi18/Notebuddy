@@ -34,7 +34,15 @@ export function notebookPath(courseId: string, section?: Section, mode?: string,
 }
 
 export function shouldBlockNoteNavigation(dirty: boolean, current: { pathname: string; search: string }, next: { pathname: string; search: string }): boolean {
-    return dirty && (current.pathname !== next.pathname || current.search !== next.search)
+  // Notebook 内部切换目录项只改变 query 参数，编辑器会处理当前笔记内容；
+  // 离开 Notebook 路由时才需要提示用户处理未保存草稿。
+  const isNotebookPath = (pathname: string) => {
+    const normalized = pathname.replace(/\/+$/, '') || '/'
+    return /^\/courses\/[^/]+\/notebook$/i.test(normalized)
+      || /^\/courses\/[^/]+\/notebooks\/[^/]+$/i.test(normalized)
+      || /^\/notebooks\/unbound\/[^/]+$/i.test(normalized)
+  }
+  return dirty && isNotebookPath(current.pathname) && current.pathname !== next.pathname
 }
 
 export function mergeNotebookNotes<T extends { id: string; revision_number: number }>(current: T[], incoming: T[]): T[] {

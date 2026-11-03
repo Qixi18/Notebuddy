@@ -6,9 +6,9 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 当前正式可编辑 Notebook 正文以 `Notebook.document_json` 为唯一权威源，并通过 revision/CAS 保存。原始资料解析结果、目录、检索块和森林视图属于来源或派生数据，不是第二套正文。架构决策入口见 [ADR 索引](docs/architecture-decisions/README.md)；基线记录 ADR-0001 当前为 Proposed，尚未获协作者审核。任何全局架构变更必须按根目录 [AGENTS.md](AGENTS.md) 公示并同步契约、测试和跨 Agent 影响。
 
-**整改提案（Proposed，待审）**：按 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md) 与 [实施盘点](implementation-inventory.md) 分批收敛 Notebook 答疑证据门禁、只读正文、未分类会话契约、视觉模型能力预检、单文件 CNY 预算及共享 Workspace。上述内容是开发目标，不代表已实现或验收；实施基线为 2026-11-01 fetch 后的 `feat/overall-inspection`。
+**整改提案（Proposed，待审）**：按 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md) 与 [实施盘点](implementation-inventory.md) 分批收敛 Notebook 答疑证据门禁、只读正文、未分类会话契约、视觉模型能力预检、单文件 CNY 预算及共享 Workspace。上述内容是开发目标，不代表已实现或验收；实施基线为 `feat/overall-inspection`。2026-11-03 复核新增运行时路由与业务边界整改提案：Web 页面现已迁入 `createBrowserRouter` 的嵌套路由对象，Notebook 桥接与侧栏跳转有组件级回归覆盖；Notebook API 文件虽已按功能拆分，handler 中仍有直接数据库事务。后续继续补充路由错误边界，并按垂直用例推进 API/service 分层。ADR 继续保持 Proposed，需协作者审核后才能视为已接受架构。
 
-**实施进度（2026-11-01）**：A1 会话迁移与旧 Note 答疑入口清理已完成并推送，提交 `0b0c033`；A2 Notebook 第一源、DocumentIR/Web 主张核验、核验后 SSE、B1 视觉模型独立配置与图片能力预检，以及 B2 文件级 10.00 CNY 预算账本，均已在本地实现并通过自动回归。C1/C2 已把课程与未分类 URL 接入同一 `NotebookPage`、统一正文/保存/草稿/历史/附件/AI Bridge，并移除旧未分类页面编排，保留旧 URL。D 已将生成任务创建逻辑下沉到 Application Service，完整 `notebook.py` 拆分仍未完成。当前所有本轮改动仅在本地工作树，未提交、未推送。A2 使用迁移 `a7c4d2e91b60`，B2 使用迁移 `b6e1a9d420fc`。本轮最终完整自动回归：后端 463 passed / 4 skipped，Web navigation 52 passed、Vitest 80 files / 412 passed，Web/Desktop 构建通过；D 服务调整后全量脚本也通过。真实供应商/真实材料和浏览器人工验收未执行；ADR-0002 保持 Proposed，不代表整体规划已全部完成。
+**实施进度（2026-11-03 复核）**：此前 A1/A2、B1/B2、C1/C2 与 D 第一阶段完成情况见 ADR-0002 的实施记录。后续 S1–S7 在工作树记录了 QA 隔离、预算验收、Notebook hook 拆分及 `notebook_routes/*` 路由文件拆分；当前代码已有 Notebook OpenAPI 契约快照与路由重复/反向依赖检查。该拆分不代表 handler 已与数据库事务/业务编排分层。Notebook 正文保存、历史恢复及图片所有权规则现统一由 `app/services/notebook_document.py` 编排，并继续通过 `notes/store.py` 的唯一 CAS 写入路径落库；章节重排与阅读位置 CAS 也有独立 application service。Web `appRoutes` 现由 `main.tsx` 直接交给 `createBrowserRouter`，嵌套 `<Routes>` 通配包装已移除，旧路径与重定向保留并有路由匹配回归。当前分支含未提交改动；本轮按要求未启动服务或运行测试。ADR-0002 保持 Proposed。
 
 ## 当前能力与边界
 

@@ -1,16 +1,18 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { memo, useState } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { WorkspaceProvider } from '../src/components/AppLayout'
 import { AssistantDock } from '../src/features/assistant/AssistantDock'
-import { NotebookBridgeProvider, useRegisterNotebookBridge, type NotebookBridgeValue } from '../src/features/notebook-editor/NotebookBridge'
+import { NotebookBridgeProvider, useNotebookBridge, useRegisterNotebookBridge, type NotebookBridgeValue } from '../src/features/notebook-editor/NotebookBridge'
 
 vi.mock('../src/api', () => ({
   api: { listNotebookEditSuggestions: vi.fn(async () => []) },
 }))
 
 const askAgent = vi.fn(async () => true)
+const bridgeProbeRender = vi.fn()
 const notebook: NotebookBridgeValue = {
   courseId: 'c1', notebookId: 'book-1', title: '真实编辑上下文', revision: 3, editVersion: 1,
   excerpt: '已保存的笔记正文', selection: null,
@@ -20,6 +22,23 @@ const notebook: NotebookBridgeValue = {
 function NotebookEditorContext() {
   useRegisterNotebookBridge(notebook)
   return null
+}
+
+const BridgeProbe = memo(function BridgeProbe() {
+  useNotebookBridge()
+  bridgeProbeRender()
+  return null
+})
+
+function BridgeRerenderHarness() {
+  const [revision, setRevision] = useState(0)
+  return <>
+    <button type="button" onClick={() => setRevision((value) => value + 1)}>重渲染 {revision}</button>
+    <NotebookBridgeProvider>
+      <NotebookEditorContext />
+      <BridgeProbe />
+    </NotebookBridgeProvider>
+  </>
 }
 
 function Harness({ locked = false }: { locked?: boolean }) {
@@ -36,8 +55,19 @@ function Harness({ locked = false }: { locked?: boolean }) {
   </NotebookBridgeProvider></WorkspaceProvider></MemoryRouter>
 }
 
-beforeEach(() => { askAgent.mockClear() })
+beforeEach(() => { askAgent.mockClear(); bridgeProbeRender.mockClear() })
 afterEach(cleanup)
+
+test('Notebook Bridge context stays stable on unrelated parent renders', async () => {
+  render(<BridgeRerenderHarness />)
+  await waitFor(() => expect(bridgeProbeRender).toHaveBeenCalledTimes(2))
+  const rendersAfterRegistration = bridgeProbeRender.mock.calls.length
+
+  fireEvent.click(screen.getByRole('button', { name: '重渲染 0' }))
+
+  expect(screen.getByRole('button', { name: '重渲染 1' })).toBeTruthy()
+  expect(bridgeProbeRender).toHaveBeenCalledTimes(rendersAfterRegistration)
+})
 
 test('真实 Notebook 上下文固定使用 Notebook 范围，答疑不修改正文', async () => {
   render(<Harness />)

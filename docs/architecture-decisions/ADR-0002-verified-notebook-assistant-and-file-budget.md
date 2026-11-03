@@ -131,3 +131,53 @@ Web Vitest 81 files / 416 tests passed；TypeScript `tsc -b` 通过。
 **未执行：** 真实模型/真实材料/真实账单/浏览器人工验收；ADR 仍为 Proposed，
 需协作者审核实现与风险后才能改 Accepted。
 
+### S8：运行时路由与业务边界复核（2026-11-03，Proposed）
+
+当前代码复核发现，S7 完成的是 Notebook 路由文件按职责拆分、兼容聚合和 OpenAPI 契约冻结；
+它没有完成 API 与业务服务/事务边界的分离。`notebook_routes/*` 多个 handler 仍直接依赖
+SQLAlchemy Session、ORM 模型和提交事务；`common.py` 也包含资源归属校验与目录排序写入。
+后续按垂直用例渐进下沉业务编排和事务，不以搬文件或一次性重写为验收标准，并继续守住
+Notebook.document_json、revision/CAS 与 API 兼容契约。
+
+复核时 Web 路由曾由 `App.tsx` 中的 `<Routes>` 声明，`main.tsx` 的 data router 只有通配路由；
+本批已将路由改为 `appRoutes` 嵌套 route objects，由 `createBrowserRouter(appRoutes)` 直接挂载，
+`AppRoot` 提供 Workspace 状态，`AppLayout` 提供共享 shell。课程/未分类 Notebook、森林、
+回收站、助手及旧路径重定向保留；Data Router loader/action 与 route error boundary 尚未
+接入。本轮新增路由匹配覆盖及实际 AppLayout→Outlet 侧栏跳转/dirty confirm 组件回归。
+
+导航故障排查还观察到 Notebook 助手桥接注册值可能随渲染反复变化：
+`useNotebookDocument` 曾将每次渲染新建的 `save` 对象作为 `useCallback` 依赖，
+`useRegisterNotebookBridge` 又把该值写回布局 Context。先稳定暴露给桥接层的回调身份，
+并将 Provider Context value 的身份稳定化，避免同一 bridge value 不变时消费者因父布局
+重渲染而刷新。组件回归用例通过新建/加载 Notebook 桥接、父层无关重渲染、森林/回收站
+切换和离开脏页面确认验证；仍需真实浏览器人工验收。
+
+本次审查的实现范围按小批次进行：导航更新循环与离开拦截属于缺陷修复；后端 service
+提取先选章节重排这一垂直用例：API handler 负责解析课程/Notebook 范围，
+`app.services.notebook_order` 负责 expected revision、章节集合校验和原子提交；
+新增接口回归用例覆盖成功、过期版本和重复章节 ID，保持两个旧路径与响应模型不变。
+阅读位置 GET/PUT 的 scope、block/chapter 校验与 revision/CAS 持久化也移至
+`app.services.notebook_reading_position`；原接口回归用例扩展到更新和过期 revision。
+这两项 service 目前仍直接使用 SQLAlchemy/HTTPException，是渐进的 application-use-case
+抽取，不宣称已建立独立 repository/domain 层。
+新增跨域边界时同步更新 README、
+`docs/architecture.md`、API/数据契约和对应测试。此提案仍需协作者审核；不得据此将本
+ADR 标为 Accepted。真实浏览器人工验收应与自动构建/测试结果分开记录。
+
+**S8 当前批验证（2026-11-03）：** Web `tsc -b && vite build` 通过；`npm run test -- --run
+tests/app-navigation.test.tsx tests/notebook-document-bridge.test.tsx
+tests/assistant-notebook-scope.test.tsx` 通过：Node navigation 52 项、Vitest 3 文件/7 项。
+后端目标用例与 Notebook router contract/module-boundary 测试合计 8 passed / 2 warnings。
+Ruff 与 Python `compileall` 通过。曾从仓库根目录直接运行 Vitest，因未加载 Web JSX 插件
+出现 React 未定义；改为在 `apps/web` 工作目录运行后通过。生产构建仍提示主 chunk >500 KB。
+尚未做真实浏览器人工验收或全套后端回归；不能把该批结果外推为整体接受或完成。
+
+**S8 后续边界实现（2026-11-03）：** 新增 `app/services/notebook_document.py`，统一正文保存、
+历史恢复、图片附件/Asset 所有权校验及事务提交/回滚。`documents.py` 和 `revisions.py` 的
+API handler 保留 Notebook 路由身份解析及响应组装；普通编辑和历史恢复都继续通过
+`notes/store.py::write_document` 写入，保留唯一的 revision/CAS、历史快照和派生索引路径。
+建议审核及批量应用同样调用服务中的图片归属校验，移除 `notebook_routes/common.py` 中的
+资源业务规则。该服务仍依赖 SQLAlchemy 与 FastAPI HTTPException，是 use-case 边界收敛，
+不是独立 domain/repository 架构。按用户本轮要求，本批未运行测试或启动服务；实现尚未
+经过本轮验证，ADR 仍为 Proposed。
+

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { api } from '../src/api'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
+import { clearDraft } from '../src/features/notebook-editor/draftStore'
 import { NotebookPage } from '../src/pages/NotebookPage'
 
 vi.mock('../src/api', () => ({
@@ -63,7 +64,8 @@ function mount() {
   )
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await clearDraft('course', 'book')
   vi.clearAllMocks()
   vi.mocked(api.getNotebookById).mockResolvedValue(outline as never)
   vi.mocked(api.getNotebookDocument).mockResolvedValue({
@@ -76,7 +78,7 @@ beforeEach(() => {
     updated_at: '2026-11-01T10:05:00Z',
   } as never)
 })
-afterEach(() => { cleanup(); vi.useRealTimers() })
+afterEach(async () => { cleanup(); await clearDraft('course', 'book'); vi.useRealTimers() })
 
 test('保存遇到 409 时进入冲突态，弹出冲突面板且不静默覆盖', async () => {
   const { ApiError } = await import('../src/api')

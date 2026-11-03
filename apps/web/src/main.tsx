@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 
-import App from './App'
+import { appRoutes } from './App'
 import '@fontsource-variable/noto-sans-sc/wght.css'
 import 'katex/dist/katex.min.css'
 import './styles.css'
@@ -15,7 +15,7 @@ import './garden-theme.css'
 import './features/forest/botanical-surfaces.css'
 import './dialogs.css'
 
-const router = createBrowserRouter([{ path: '*', element: <App /> }])
+const router = createBrowserRouter(appRoutes)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

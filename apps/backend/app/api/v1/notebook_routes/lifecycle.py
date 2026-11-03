@@ -32,12 +32,12 @@ from app.schemas.notebook import (
     UnboundNotebookSummary,
 )
 from app.services.deletion import DeletionConflict, permanently_delete_notebook
+from app.services.notebook_order import reorder_notebook as reorder_notebook_service
 
 from .common import (
     _summary,
     ensure_notebook,
     legacy_book,
-    reorder,
 )
 
 router = APIRouter()
@@ -363,7 +363,7 @@ def rename_notebook(course_id: str, notebook_id: str, payload: NotebookTitleUpda
 
 @router.patch("/courses/{course_id}/notebooks/{notebook_id}/order", response_model=NotebookRead)
 def reorder_named_notebook(course_id: str, notebook_id: str, payload: NotebookOrderUpdate, db: Session = Depends(get_db)):
-    return reorder(db, course_id, ensure_notebook(db, course_id, notebook_id), payload)
+    return reorder_notebook_service(db, course_id, ensure_notebook(db, course_id, notebook_id), payload)
 
 @router.get("/courses/{course_id}/notebook", response_model=NotebookRead)
 def get_notebook(course_id: str, db: Session = Depends(get_db)):
@@ -373,4 +373,4 @@ def get_notebook(course_id: str, db: Session = Depends(get_db)):
 @router.patch("/courses/{course_id}/notebook/order", response_model=NotebookRead)
 def reorder_notebook(course_id: str, payload: NotebookOrderUpdate, db: Session = Depends(get_db)):
     course = ensure_course(db, course_id)
-    return reorder(db, course_id, legacy_book(db, course), payload)
+    return reorder_notebook_service(db, course_id, legacy_book(db, course), payload)

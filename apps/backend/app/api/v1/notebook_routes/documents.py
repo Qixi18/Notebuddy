@@ -1,7 +1,4 @@
-"""Notebook 路由 · documents。
-
-拆分自 api/v1/notebook.py，仅搬运路由实现，未改路径/状态码/响应模型。
-"""
+"""Notebook document HTTP routes; persistence use cases live in services."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,21 +6,13 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db.models import Notebook
-from app.notes.document import (
-    DocumentValidationError,
-    document_to_blocks,
-    legacy_blocks_to_document,
-    load_document,
-    normalize_document,
-)
+from app.notes.document import document_to_blocks, load_document
 from app.notes.index import sections_for_notebook
-from app.notes.store import DocumentConflict, block_source_payload, write_document
+from app.notes.store import block_source_payload
 from app.schemas.notebook import BlockSourceRead, NotebookDocumentRead, NotebookDocumentUpdate
+from app.services.notebook_document import save_notebook_document
 
-from .common import (
-    _ensure_document_image_ownership,
-    ensure_notebook,
-)
+from .common import ensure_notebook
 
 router = APIRouter()
 
@@ -44,27 +33,9 @@ def put_unbound_document(notebook_id: str, payload: NotebookDocumentUpdate,
     book = db.get(Notebook, notebook_id)
     if book is None or book.course_id is not None or book.deleted_at is not None:
         raise HTTPException(404, "未绑定的笔记不存在")
-    if payload.blocks is not None and not load_document(book.document_json).legacy:
-        raise HTTPException(409, "笔记已使用新版编辑器，请刷新页面后继续编辑")
-    try:
-        if payload.content is not None:
-            content = payload.content
-        else:
-            blocks = [block.model_dump() for block in payload.blocks or []]
-            if len({block["id"] for block in blocks}) != len(blocks):
-                raise HTTPException(422, "正文块编号不能重复")
-            content = legacy_blocks_to_document(blocks)
-        _ensure_document_image_ownership(db, notebook_id, normalize_document(content))
-        next_revision, stored = write_document(
-            db, book, content, expected_revision=payload.expected_revision,
-            origin="autosave", legacy_compatible=payload.blocks is not None,
-        )
-    except DocumentConflict as exc:
-        db.rollback()
-        raise HTTPException(409, str(exc)) from exc
-    except DocumentValidationError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    db.commit()
+    next_revision, stored = save_notebook_document(
+        db, book, payload, refresh_relations=False,
+    )
     return {"schema_version": 2, "content": stored,
             "blocks": document_to_blocks(stored), "revision": next_revision,
             "updated_at": book.updated_at}
@@ -82,28 +53,9 @@ def get_notebook_document(course_id: str, notebook_id: str, db: Session = Depend
 def put_notebook_document(course_id: str, notebook_id: str, payload: NotebookDocumentUpdate,
                           db: Session = Depends(get_db)):
     book = ensure_notebook(db, course_id, notebook_id)
-    if payload.blocks is not None and not load_document(book.document_json).legacy:
-        raise HTTPException(409, "笔记已使用新版编辑器，请刷新页面后继续编辑")
-    try:
-        if payload.content is not None:
-            content = payload.content
-        else:
-            blocks = [block.model_dump() for block in payload.blocks or []]
-            if len({block["id"] for block in blocks}) != len(blocks):
-                raise HTTPException(422, "正文块编号不能重复")
-            content = legacy_blocks_to_document(blocks)
-        _ensure_document_image_ownership(db, notebook_id, normalize_document(content))
-        next_revision, stored = write_document(
-            db, book, content, expected_revision=payload.expected_revision,
-            origin="autosave", legacy_compatible=payload.blocks is not None,
-            refresh_relations=True,
-        )
-    except DocumentConflict as exc:
-        db.rollback()
-        raise HTTPException(409, str(exc)) from exc
-    except DocumentValidationError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    db.commit()
+    next_revision, stored = save_notebook_document(
+        db, book, payload, refresh_relations=True,
+    )
     return {"schema_version": 2, "content": stored,
             "blocks": document_to_blocks(stored),
             "revision": next_revision, "updated_at": book.updated_at}

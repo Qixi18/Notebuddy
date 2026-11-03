@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { SelectionAnchor } from './NotebookEditor'
 import type { DocNode } from './document'
 
@@ -25,7 +25,8 @@ const NotebookBridgeContext = createContext<BridgeContextValue | null>(null)
 
 export function NotebookBridgeProvider({ children }: { children: ReactNode }) {
   const [value, setValue] = useState<NotebookBridgeValue | null>(null)
-  return <NotebookBridgeContext.Provider value={{ value, setValue }}>{children}</NotebookBridgeContext.Provider>
+  const contextValue = useMemo(() => ({ value, setValue }), [value])
+  return <NotebookBridgeContext.Provider value={contextValue}>{children}</NotebookBridgeContext.Provider>
 }
 
 export function useNotebookBridge(): NotebookBridgeValue | null {

@@ -16,15 +16,12 @@ from app.db.models import Notebook, NotebookEditSuggestion, utc_now
 from app.notes.document import DocumentValidationError, document_to_blocks, load_document
 from app.notes.edits import EditRejected, apply_edits
 from app.notes.store import DocumentConflict, write_document
+from app.services.notebook_document import validate_document_image_ownership
 from app.schemas.notebook import (
     NotebookDocumentRead,
     NotebookEditSuggestionBatchReview,
     NotebookEditSuggestionRead,
     NotebookEditSuggestionReview,
-)
-
-from .common import (
-    _ensure_document_image_ownership,
 )
 
 router = APIRouter()
@@ -150,7 +147,7 @@ def review_edit_suggestion(notebook_id: str, suggestion_id: str,
         raise HTTPException(422, f"修改建议内容无效：{exc}") from exc
     if proposed is not None and proposed.warning:
         raise HTTPException(422, proposed.warning)
-    _ensure_document_image_ownership(db, notebook_id, proposed_content)
+    validate_document_image_ownership(db, notebook_id, proposed_content)
     changed = db.execute(update(NotebookEditSuggestion).where(
         NotebookEditSuggestion.id == suggestion_id,
         NotebookEditSuggestion.notebook_id == notebook_id,
@@ -226,7 +223,7 @@ def apply_course_edit_suggestions(course_id: str, payload: NotebookEditSuggestio
                 if not isinstance(operations, list) or not operations:
                     raise ValueError("修改建议缺少有效操作")
                 content = apply_edits(content, operations)
-            _ensure_document_image_ownership(db, book.id, content)
+            validate_document_image_ownership(db, book.id, content)
             expected_revision = book.document_revision
             next_revision, _ = write_document(
                 db, book, content, expected_revision=expected_revision,

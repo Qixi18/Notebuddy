@@ -5,7 +5,7 @@
 ## 当前记录
 
 - [ADR-0001：Notebook 正文权威源与资料处理边界](ADR-0001-notebook-document-source-of-truth.md) — Proposed，尚未审核。
-- [ADR-0002：Notebook 核心架构整改路线](ADR-0002-verified-notebook-assistant-and-file-budget.md) — Proposed，A1 实现评审待完成；来源为用户指定开发规划，后续批次未完成。
+- [ADR-0002：Notebook 核心架构整改路线](ADR-0002-verified-notebook-assistant-and-file-budget.md) — Proposed，A1/A2、B1/B2、C1/C2、S1–S7 有实现记录；S8 持续收敛运行时路由与 API/service 边界。服务抽取未经本轮测试及协作者审核，不能视为整体完成。
 
 ## 状态含义
 
