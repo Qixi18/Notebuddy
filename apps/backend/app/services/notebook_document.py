@@ -20,15 +20,69 @@ from app.notes.assets import AssetUnavailable, assert_notebook_asset, storage_pa
 from app.notes.document import (
     DocumentValidationError,
     attachment_ids,
+    document_to_blocks,
     legacy_blocks_to_document,
     load_document,
     normalize_document,
     validate_document,
 )
-from app.notes.history import get_snapshot
-from app.notes.store import DocumentConflict, write_document
+from app.notes.history import get_snapshot, list_snapshots
+from app.notes.index import sections_for_notebook
+from app.notes.store import DocumentConflict, block_source_payload, write_document
 from app.schemas.notebook import NotebookDocumentUpdate
 from app.services.errors import ApplicationError
+from app.services.resource_scopes import require_notebook
+
+
+def get_notebook_document(
+    db: Session, notebook_id: str, *, course_id: str | None = None,
+) -> dict:
+    notebook = require_notebook(db, notebook_id, course_id=course_id,
+                                unbound=course_id is None)
+    stored = load_document(notebook.document_json)
+    return {
+        "schema_version": 2, "content": stored.content,
+        "blocks": document_to_blocks(stored.content),
+        "revision": notebook.document_revision, "updated_at": notebook.updated_at,
+        "warning": stored.warning,
+    }
+
+
+def get_block_sources(db: Session, notebook_id: str, block_id: str) -> list[dict]:
+    require_notebook(db, notebook_id)
+    return block_source_payload(db, notebook_id, block_id)
+
+
+def get_notebook_sections(
+    db: Session, notebook_id: str, course_id: str,
+) -> list[dict]:
+    require_notebook(db, notebook_id, course_id=course_id)
+    return [{
+        "block_id": row.block_id, "heading": row.heading, "level": row.level,
+        "order": row.order, "revision": row.revision, "excerpt": row.text[:300],
+    } for row in sections_for_notebook(db, notebook_id)]
+
+
+def list_notebook_revisions(
+    db: Session, notebook_id: str, *, course_id: str | None = None,
+) -> list:
+    require_notebook(db, notebook_id, course_id=course_id,
+                     unbound=course_id is None)
+    return list_snapshots(db, notebook_id)
+
+
+def get_notebook_revision(
+    db: Session, notebook_id: str, revision: int, *, course_id: str | None = None,
+) -> dict:
+    require_notebook(db, notebook_id, course_id=course_id,
+                     unbound=course_id is None)
+    snapshot = get_snapshot(db, notebook_id, revision)
+    if snapshot is None:
+        raise ApplicationError(404, "历史版本不存在")
+    stored = load_document(snapshot.document_json)
+    return {"revision": snapshot.revision, "origin": snapshot.origin,
+            "created_at": snapshot.created_at, "schema_version": 2,
+            "content": stored.content}
 
 
 def validate_document_image_ownership(
@@ -139,6 +193,20 @@ def save_notebook_document(
         raise
 
 
+def save_notebook_document_payload(
+    db: Session, notebook_id: str, payload: NotebookDocumentUpdate, *,
+    course_id: str | None = None, refresh_relations: bool,
+) -> dict:
+    notebook = require_notebook(db, notebook_id, course_id=course_id,
+                                unbound=course_id is None)
+    revision, content = save_notebook_document(
+        db, notebook, payload, refresh_relations=refresh_relations,
+    )
+    return {"schema_version": 2, "content": content,
+            "blocks": document_to_blocks(content), "revision": revision,
+            "updated_at": notebook.updated_at}
+
+
 def restore_notebook_document(
     db: Session,
     notebook: Notebook,
@@ -168,3 +236,18 @@ def restore_notebook_document(
     except Exception:
         db.rollback()
         raise
+
+
+def restore_notebook_document_payload(
+    db: Session, notebook_id: str, source_revision: int, expected_revision: int, *,
+    course_id: str | None = None, refresh_relations: bool,
+) -> dict:
+    notebook = require_notebook(db, notebook_id, course_id=course_id,
+                                unbound=course_id is None)
+    revision, content = restore_notebook_document(
+        db, notebook, source_revision, expected_revision,
+        refresh_relations=refresh_relations,
+    )
+    return {"schema_version": 2, "content": content,
+            "blocks": document_to_blocks(content), "revision": revision,
+            "updated_at": notebook.updated_at}

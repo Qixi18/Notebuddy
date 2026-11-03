@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import Notebook, NotebookGenerationJob
 from app.schemas.generation import NotebookGenerationCreate, NotebookGenerationJobRead
-from app.services.errors import ApplicationError
 from app.services.generation_jobs import _job_read
 from app.services.generation_jobs import cancel_generation_job as _cancel_generation_job
 from app.services.generation_jobs import create_generation_job as _create_generation_job
@@ -24,10 +23,7 @@ def create_generation_job(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
 ):
-    try:
-        return _create_generation_job(db, notebook_id, payload.asset_ids, idempotency_key)
-    except ApplicationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return _create_generation_job(db, notebook_id, payload.asset_ids, idempotency_key)
 
 
 @router.get("/notebooks/{notebook_id}/generation-jobs", response_model=list[NotebookGenerationJobRead])
@@ -55,16 +51,10 @@ def get_generation_job(notebook_id: str, job_id: str, db: Session = Depends(get_
 @router.post("/notebooks/{notebook_id}/generation-jobs/{job_id}/retry",
              response_model=NotebookGenerationJobRead, status_code=202)
 def retry_generation_job(notebook_id: str, job_id: str, db: Session = Depends(get_db)):
-    try:
-        return _retry_generation_job(db, notebook_id, job_id)
-    except ApplicationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return _retry_generation_job(db, notebook_id, job_id)
 
 
 @router.post("/notebooks/{notebook_id}/generation-jobs/{job_id}/cancel",
              response_model=NotebookGenerationJobRead)
 def cancel_generation_job(notebook_id: str, job_id: str, db: Session = Depends(get_db)):
-    try:
-        return _cancel_generation_job(db, notebook_id, job_id)
-    except ApplicationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return _cancel_generation_job(db, notebook_id, job_id)

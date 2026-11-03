@@ -10,19 +10,19 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import Material, Notebook
-from app.schemas.notebook import NotebookOrderUpdate
 from app.services.errors import ApplicationError
 
 
 def reorder_notebook(
     db: Session,
     notebook: Notebook,
-    payload: NotebookOrderUpdate,
+    material_ids: list[str],
+    expected_order_revision: int,
 ) -> None:
     """Atomically reorder every active chapter using the expected revision."""
     result = db.execute(update(Notebook).where(
         Notebook.id == notebook.id,
-        Notebook.order_revision == payload.expected_order_revision,
+        Notebook.order_revision == expected_order_revision,
     ).values(order_revision=Notebook.order_revision + 1))
     if result.rowcount != 1:
         db.rollback()
@@ -32,7 +32,7 @@ def reorder_notebook(
         Material.notebook_id == notebook.id,
         Material.deleted_at.is_(None),
     )).all()
-    ids = payload.material_ids
+    ids = material_ids
     if len(set(ids)) != len(ids) or set(ids) != {material.id for material in materials}:
         db.rollback()
         raise ApplicationError(422, "顺序必须包含当前笔记本全部章节，且不得重复")

@@ -22,8 +22,35 @@ from app.db.models import (
 )
 from app.document_processing.adapters import mineru as mineru_adapter
 from app.document_processing.config import provider_snapshot, resolve_route
+from app.notes.assets import AssetUnavailable, assert_notebook_asset
 from app.parsers.ocr import status as ocr_status
+from app.services.document_reads import ensure_asset_access
 from app.services.errors import ApplicationError
+from app.services.processing_budget import budget_read
+
+
+def list_notebook_asset_processing_jobs(
+    db: Session, notebook_id: str, asset_id: str,
+) -> list[AssetProcessingJob]:
+    try:
+        assert_notebook_asset(db, asset_id, notebook_id)
+    except AssetUnavailable as exc:
+        raise ApplicationError(404, str(exc)) from exc
+    return list(db.scalars(select(AssetProcessingJob).where(
+        AssetProcessingJob.asset_id == asset_id,
+        AssetProcessingJob.notebook_id == notebook_id,
+    ).order_by(AssetProcessingJob.created_at.desc())).all())
+
+
+def read_asset_processing_budget(
+    db: Session, asset_id: str, notebook_id: str | None = None,
+) -> dict:
+    ensure_asset_access(db, asset_id, notebook_id)
+    return budget_read(asset_id) or {
+        "asset_id": asset_id, "currency": "CNY", "limit_fen": 1000,
+        "settled_fen": 0, "reserved_fen": 0, "remaining_fen": 1000,
+        "status": "active", "reservations": [],
+    }
 
 
 def _material(db: Session, material_id: str) -> Material:

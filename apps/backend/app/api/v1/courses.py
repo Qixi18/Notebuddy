@@ -23,7 +23,6 @@ from app.schemas.api import (
 )
 from app.services.course_scope import materials_for_course, notebooks_for_course
 from app.services.deletion import (
-    DeletionConflict,
     impact_preview,
     permanently_delete_course,
     soft_delete_course,
@@ -159,10 +158,7 @@ def preview_course_deletion(course_id: str, db: Session = Depends(get_db)) -> di
 @router.delete("/courses/{course_id}", response_model=DeletionPreview)
 def delete_course(course_id: str, db: Session = Depends(get_db)) -> dict:
     course = ensure_course(db, course_id)
-    try:
-        return soft_delete_course(db, course)
-    except DeletionConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return soft_delete_course(db, course)
 
 
 
@@ -183,7 +179,4 @@ def purge_deleted_course(course_id: str, db: Session = Depends(get_db)) -> None:
     course = db.get(Course, course_id)
     if course is None or course.deleted_at is None:
         raise HTTPException(404, "回收站中没有这门课程")
-    try:
-        permanently_delete_course(db, course)
-    except DeletionConflict as exc:
-        raise HTTPException(409, str(exc)) from exc
+    permanently_delete_course(db, course)

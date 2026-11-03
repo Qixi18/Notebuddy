@@ -12,13 +12,13 @@ import json
 import re
 from typing import Any
 
-from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.ai.deepseek import DeepSeekClient, DeepSeekError
 from app.db.models import Course, Material, Quiz, QuizAttempt, QuizItem, ReviewArtifact
+from app.services.errors import ApplicationError
 
 QUIZ_MAX_ITEMS = 5
 QUIZ_GENERATION_RETRIES = 2
@@ -350,11 +350,11 @@ def grade_answers(
     items = {item.id: item for item in quiz.items}
     submitted_ids = [str(entry.get("item_id") or "") for entry in answers]
     if len(submitted_ids) != len(set(submitted_ids)):
-        raise HTTPException(status_code=422, detail="同一道题在一次提交中只能作答一次")
+        raise ApplicationError(422, "同一道题在一次提交中只能作答一次")
     if any(item_id not in items for item_id in submitted_ids):
-        raise HTTPException(status_code=422, detail="题目不属于当前自测卷")
+        raise ApplicationError(422, "题目不属于当前自测卷")
     if any(not str(entry.get("answer") or "").strip() for entry in answers):
-        raise HTTPException(status_code=422, detail="答案不能为空")
+        raise ApplicationError(422, "答案不能为空")
     # 幂等判定读的是「最近一次作答」，所以读与写之间必须串行。这里先对所属自测卷
     # 做一次等价写（SET status = status）拿到写锁：SQLite 会持有 RESERVED 锁直到
     # 本次事务 commit，并发提交因此排队，不会出现两条相同请求都读到「无历史作答」
@@ -490,7 +490,7 @@ def list_course_quizzes(db: Session, course_id: str, status: str) -> list[dict[s
 
 def ensure_course_for_quiz(db: Session, course_id: str) -> None:
     if db.get(Course, course_id) is None:
-        raise HTTPException(status_code=404, detail="课程不存在")
+        raise ApplicationError(404, "课程不存在")
 
 
 def list_course_mistakes(db: Session, course_id: str, limit: int = 200) -> list[dict[str, Any]]:

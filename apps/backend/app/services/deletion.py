@@ -36,8 +36,9 @@ from app.services.course_scope import material_course_id
 from app.services.errors import ApplicationError
 
 
-class DeletionConflict(ValueError):
-    pass
+class DeletionConflict(ApplicationError):
+    def __init__(self, detail: str):
+        super().__init__(409, detail)
 
 
 def restore_material(db: Session, material_id: str) -> Material:

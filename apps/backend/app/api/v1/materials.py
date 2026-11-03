@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from sqlalchemy.orm import Session
 
 from app.api.v1.material_routes.assets import router as assets_router
@@ -36,7 +36,6 @@ from app.services.asset_processing import (
 from app.services.asset_processing import (
     switch_asset_processing_route as switch_asset_processing_route_service,
 )
-from app.services.errors import ApplicationError
 
 __all__ = [
     "ProcessingRouteSelection",
@@ -72,7 +71,4 @@ def switch_asset_processing_route(
     asset_id: str, payload: ProcessingRouteSelection, db: Session,
 ) -> dict[str, str]:
     """Compatibility callable; the registered endpoint lives in material_routes.processing."""
-    try:
-        return switch_asset_processing_route_service(db, asset_id, payload.processing_route)
-    except ApplicationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    return switch_asset_processing_route_service(db, asset_id, payload.processing_route)

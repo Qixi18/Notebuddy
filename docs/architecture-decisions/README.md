@@ -6,6 +6,7 @@
 
 - [ADR-0001：Notebook 正文权威源与资料处理边界](ADR-0001-notebook-document-source-of-truth.md) — Proposed，尚未审核。
 - [ADR-0002：Notebook 核心架构整改路线](ADR-0002-verified-notebook-assistant-and-file-budget.md) — Proposed，A1/A2、B1/B2、C1/C2、S1–S7 有实现记录；S8 分层续改正在进行，Materials 上传、Agent、全量回归与人工验收仍未完成。协作者审核前不能视为整体完成。
+- [ADR-0003：后端路由业务职责下沉](ADR-0003-service-layer-final-extraction.md) — Proposed，本地定向 Service 下沉已实现，等待技术把关者审查及自动化回归。
 
 ## 状态含义
 

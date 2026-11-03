@@ -459,13 +459,14 @@ def test_native_ocr_retry_uses_current_ir_pages(session, monkeypatch, tmp_path):
 
 def test_pdf_preview_is_available_before_render_is_cached(monkeypatch):
     from app.api.v1.material_routes import documents
+    from app.services import document_reads
 
     page = SimpleNamespace(
         page_number=1, status="needs_ocr", extraction="none", width=600,
         height=800, rotation=0, confidence=None, warnings=[], text="", render_key=None,
     )
-    monkeypatch.setattr(documents, "load_ir", lambda *_: SimpleNamespace(pages=[page], sections=[]))
-    monkeypatch.setattr(documents, "_run_payload", lambda _: {})
+    monkeypatch.setattr(document_reads, "load_ir", lambda *_: SimpleNamespace(pages=[page], sections=[]))
+    monkeypatch.setattr(document_reads, "_run_payload", lambda _: {})
     run = SimpleNamespace(asset_id="asset-1", doc_type="pdf")
     payload = documents._document_payload(None, run)
     assert payload["pages"][0]["render_url"] == (

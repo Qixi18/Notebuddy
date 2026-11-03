@@ -15,8 +15,68 @@ from app.db.models import (
     NotebookSection,
     ProcessingJob,
 )
-from app.services.deletion import _checkpoint
+from app.notes.notebook import default_notebook, list_course_notebooks, notebook_outline
+from app.services.deletion import DeletionConflict, _checkpoint, permanently_delete_notebook
 from app.services.errors import ApplicationError
+from app.services.notebook_order import reorder_notebook as reorder_notebook_service
+from app.services.resource_scopes import require_notebook
+
+
+def list_unbound_notebooks(db: Session) -> list[Notebook]:
+    return list(db.scalars(select(Notebook).where(
+        Notebook.course_id.is_(None), Notebook.deleted_at.is_(None),
+    ).order_by(Notebook.created_at.desc(), Notebook.id)).all())
+
+
+def get_course_notebooks(db: Session, course_id: str) -> list[Notebook]:
+    _active_course(db, course_id)
+    return list_course_notebooks(db, course_id)
+
+
+def get_unbound_notebook(db: Session, notebook_id: str) -> Notebook:
+    return require_notebook(db, notebook_id, unbound=True)
+
+
+def list_deleted_notebooks(db: Session) -> list[Notebook]:
+    return list(db.scalars(select(Notebook).where(
+        Notebook.deleted_at.is_not(None),
+    ).order_by(Notebook.deleted_at.desc())).all())
+
+
+def get_notebook_outline(db: Session, course_id: str, notebook_id: str | None = None):
+    course = _active_course(db, course_id)
+    if notebook_id is None:
+        book = default_notebook(db, course, create=False)
+        if book is None:
+            raise ApplicationError(404, "此课程尚无笔记本，请先新建笔记本")
+    else:
+        book = require_notebook(db, notebook_id, course_id=course_id)
+    return notebook_outline(db, course, book)
+
+
+def reorder_notebook_outline(
+    db: Session, course_id: str, notebook_id: str | None,
+    material_ids: list[str], expected_order_revision: int,
+):
+    course = _active_course(db, course_id)
+    if notebook_id is None:
+        book = default_notebook(db, course, create=False)
+        if book is None:
+            raise ApplicationError(404, "此课程尚无笔记本，请先新建笔记本")
+    else:
+        book = require_notebook(db, notebook_id, course_id=course_id)
+    reorder_notebook_service(db, book, material_ids, expected_order_revision)
+    return notebook_outline(db, course, book)
+
+
+def permanently_delete_notebook_service(db: Session, notebook_id: str) -> None:
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is None:
+        raise ApplicationError(404, "回收站中没有这篇笔记")
+    try:
+        permanently_delete_notebook(db, notebook)
+    except DeletionConflict as exc:
+        raise ApplicationError(409, str(exc)) from exc
 
 
 def create_unbound_notebook(db: Session, title: str) -> Notebook:

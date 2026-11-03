@@ -6,7 +6,7 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -19,7 +19,6 @@ from app.services.agent_execution import (
     ReadingContextCommand,
     agent_message_events,
 )
-from app.services.errors import ApplicationError
 
 router = APIRouter()
 
@@ -52,10 +51,7 @@ def send_agent_message(
     payload: AgentMessageCreate,
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    try:
-        events = agent_message_events(conversation_id, _command(payload), db)
-    except ApplicationError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+    events = agent_message_events(conversation_id, _command(payload), db)
 
     def event_stream() -> Iterator[str]:
         for event in events:

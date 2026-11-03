@@ -14,14 +14,20 @@ from app.db.models import (
     DocumentBlock,
     DocumentPage,
     DocumentParseRun,
+    Material,
     Notebook,
     NotebookAsset,
     NotebookBlockSource,
+    NotebookSection,
 )
 from app.document_processing.ir import QualityReport
 from app.document_processing.service import (
     current_run as current_parse_run,
+)
+from app.document_processing.service import (
     latest_run as latest_parse_run,
+)
+from app.document_processing.service import (
     load_ir,
     page_render,
 )
@@ -110,6 +116,96 @@ def get_document_page_evidence(
             )
         payloads.append(payload)
     return payloads
+
+
+def get_legacy_material_pages(db: Session, material_id: str) -> list[dict]:
+    """Preserve the legacy Material page projection over the current DocumentIR."""
+    material = db.get(Material, material_id)
+    if material is None or material.deleted_at is not None:
+        raise ApplicationError(404, "资料不存在")
+    asset = db.get(Asset, material.asset_id) if material.asset_id else db.get(Asset, material.id)
+    run = current_parse_run(db, asset.id) if asset is not None else None
+    if run is None:
+        return []
+    document = load_ir(db, run)
+    return [_legacy_page_payload(page, material_id) for page in document.pages]
+
+
+def get_legacy_material_page_evidence(
+    db: Session, material_id: str, page_number: int,
+) -> dict:
+    material = db.get(Material, material_id)
+    if material is None or material.deleted_at is not None:
+        raise ApplicationError(404, "资料不存在")
+    asset = db.get(Asset, material.asset_id) if material.asset_id else db.get(Asset, material.id)
+    run = current_parse_run(db, asset.id) if asset is not None else None
+    if run is None:
+        raise ApplicationError(404, "资料还没有完成的解析版本")
+    document = load_ir(db, run)
+    page = next((item for item in document.pages if item.page_number == page_number), None)
+    if page is None:
+        raise ApplicationError(404, "资料位置不存在")
+
+    rows = db.scalars(select(DocumentBlock).where(
+        DocumentBlock.parse_run_id == run.id,
+    )).all()
+    db_id_by_block = {row.block_id: row.id for row in rows}
+    citations: dict[str, list[tuple[str, str]]] = {}
+    links = db.execute(
+        select(NotebookBlockSource.document_block_id, NotebookBlockSource.block_id,
+               Notebook.id, Notebook.title, NotebookSection.heading)
+        .join(Notebook, Notebook.id == NotebookBlockSource.notebook_id)
+        .outerjoin(NotebookSection, (NotebookSection.notebook_id == NotebookBlockSource.notebook_id)
+                   & (NotebookSection.block_id == NotebookBlockSource.block_id))
+        .where(NotebookBlockSource.parse_run_id == run.id)
+    ).all()
+    for document_block_id, _body_block_id, notebook_id, title, heading in links:
+        citations.setdefault(document_block_id, []).append((notebook_id, heading or title))
+    blocks: list[dict] = []
+    note_ids: list[str] = []
+    note_titles: list[str] = []
+    for block in sorted(page.blocks, key=lambda item: (item.order, item.global_order)):
+        linked = citations.get(db_id_by_block.get(block.block_id, ""), [])
+        block_note_ids = list(dict.fromkeys(item[0] for item in linked))
+        block_note_titles = list(dict.fromkeys(item[1] for item in linked))
+        for notebook_id in block_note_ids:
+            if notebook_id not in note_ids:
+                note_ids.append(notebook_id)
+        for title in block_note_titles:
+            if title not in note_titles:
+                note_titles.append(title)
+        blocks.append({
+            "id": block.block_id, "page_id": page.page_id,
+            "block_type": block.type, "content": block.text,
+            "position": block.order, "font_size": None, "is_bold": False,
+            "object_id": None,
+            "location_label": block.source.location_label if block.source else None,
+            "extraction_method": block.extraction, "confidence": block.confidence,
+            "warning": "；".join(block.warnings) or None,
+            "note_ids": block_note_ids, "note_titles": block_note_titles,
+        })
+    payload = _legacy_page_payload(page, material_id)
+    payload.update({"blocks": blocks, "note_ids": note_ids, "note_titles": note_titles})
+    return payload
+
+
+def _legacy_page_payload(page, material_id: str) -> dict:
+    heading = next((block.text for block in sorted(page.blocks, key=lambda item: item.order)
+                    if block.type == "heading" and block.text.strip()), None)
+    status = "parsed"
+    if page.status == "needs_ocr":
+        status = "ocr_candidate"
+    elif page.status in {"failed", "empty"}:
+        status = page.status
+    return {
+        "id": page.page_id, "material_id": material_id,
+        "page_number": page.page_number, "title": heading,
+        "raw_text": page.text, "parse_status": status,
+        "warning": "；".join(page.warnings) or None,
+        "location_type": "page", "location_label": f"第 {page.page_number} 页",
+        "stable_location_key": f"page:{page.page_number}",
+        "extraction_method": page.extraction, "confidence": page.confidence,
+    }
 
 
 def resolve_document_page_render(

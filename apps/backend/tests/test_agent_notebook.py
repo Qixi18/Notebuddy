@@ -131,9 +131,9 @@ def test_locked_agent_conversation_rejects_scope_widening(session):
     ))
     session.commit()
 
-    from fastapi import HTTPException
+    from app.services.errors import ApplicationError
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         send_agent_message(
             conversation.id, AgentMessageCreate(question="扩大范围", scope="course"), session,
         )
@@ -167,9 +167,9 @@ def test_agent_rejects_notebook_context_from_foreign_course(session):
         session,
     )
 
-    from fastapi import HTTPException
+    from app.services.errors import ApplicationError
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         send_agent_message(
             conversation.id,
             AgentMessageCreate(
@@ -262,9 +262,9 @@ def test_stale_suggestion_is_rejected_after_user_edit(session):
     write_document(session, book, updated, expected_revision=base_revision, origin="autosave")
     session.commit()
 
-    from fastapi import HTTPException
+    from app.services.errors import ApplicationError
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         review_edit_suggestion(
             book.id, suggestion_id,
             NotebookEditSuggestionReview(decision="accept",

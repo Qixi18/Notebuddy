@@ -94,3 +94,72 @@ def test_inadvertent_zero_byte_web_files_stay_removed():
     for name in ("--run", "build", "run", "test"):
         path = BACKEND.parent / "web" / name
         assert not path.exists(), path
+
+
+def test_services_never_import_fastapi_or_http_exceptions():
+    for path in (APP / "services").rglob("*.py"):
+        imported = _imports(path)
+        assert not any(module == "fastapi" or module.startswith("fastapi.")
+                       for module in imported), path.relative_to(APP)
+
+
+def test_business_route_queries_are_delegated_to_services():
+    paths = (
+        APP / "api/v1/notebook_routes/documents.py",
+        APP / "api/v1/notebook_routes/revisions.py",
+        APP / "api/v1/notebook_routes/lifecycle.py",
+        APP / "api/v1/notebook_routes/resources.py",
+        APP / "api/v1/material_routes/materials.py",
+        APP / "api/v1/material_routes/assets.py",
+        APP / "api/v1/material_routes/processing.py",
+        APP / "api/v1/material_routes/uploads.py",
+    )
+    forbidden = {"query", "scalar", "scalars", "execute", "get", "commit", "rollback"}
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        calls = [node.func.attr for node in ast.walk(tree)
+                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and node.func.attr in forbidden
+                 and isinstance(node.func.value, ast.Name)
+                 and node.func.value.id == "db"]
+        assert calls == [], f"{path.relative_to(APP)} still accesses the database: {calls}"
+
+
+def test_http_routes_do_not_remap_application_errors_individually():
+    paths = [*(APP / "api/v1/notebook_routes").glob("*.py"),
+             *(APP / "api/v1/material_routes").glob("*.py"),
+             APP / "api/v1/shared.py"]
+    for path in paths:
+        imported = _imports(path)
+        assert "app.services.errors" not in imported, path.relative_to(APP)
+        text = path.read_text(encoding="utf-8")
+        assert "except ApplicationError" not in text, path.relative_to(APP)
+
+
+def test_material_compatibility_and_resource_routes_remain_registered():
+    from app.main import app
+
+    spec = app.openapi()["paths"]
+    expected = {
+        ("get", "/api/v1/courses/{course_id}/notebook-files"),
+        ("get", "/api/v1/courses/{course_id}/deleted-materials"),
+        ("get", "/api/v1/materials/{material_id}/deletion-preview"),
+        ("delete", "/api/v1/materials/{material_id}"),
+        ("post", "/api/v1/materials/{material_id}/restore"),
+        ("get", "/api/v1/notebooks/{notebook_id}/files"),
+        ("get", "/api/v1/materials/{material_id}/pages"),
+        ("get", "/api/v1/materials/{material_id}/pages/{page_number}/evidence"),
+        ("get", "/api/v1/materials/{material_id}/latest-job"),
+        ("get", "/api/v1/courses/{course_id}/web-sources"),
+        ("get", "/api/v1/materials/{material_id}/web-sources"),
+        ("get", "/api/v1/notebooks/{notebook_id}/assets"),
+        ("get", "/api/v1/notebooks/{notebook_id}/detached-assets"),
+        ("get", "/api/v1/notebooks/{notebook_id}/assets/{asset_id}/processing-jobs"),
+        ("get", "/api/v1/assets/{asset_id}/processing-budget"),
+        ("get", "/api/v1/notebooks/{notebook_id}/upload-batches"),
+        ("get", "/api/v1/notebooks/{notebook_id}/upload-batches/{batch_id}"),
+        ("post", "/api/v1/notebooks/{notebook_id}/upload-batches/{batch_id}/complete"),
+    }
+    missing = sorted(item for item in expected
+                     if item[1] not in spec or item[0] not in spec[item[1]])
+    assert missing == [], f"兼容路由缺失：{missing}"

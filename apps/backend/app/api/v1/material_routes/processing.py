@@ -2,31 +2,27 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import AssetProcessingJob
-from app.notes.assets import AssetUnavailable, assert_notebook_asset
 from app.schemas.api import JobRead
 from app.schemas.assets import AssetProcessingJobRead
 from app.services.asset_processing import (
     cancel_asset_processing,
+    list_notebook_asset_processing_jobs,
+    read_asset_processing_budget,
     retry_asset_parse,
     retry_material_parse,
     switch_asset_processing_route,
 )
-from app.services.document_reads import ensure_asset_access
 from app.services.asset_processing import (
     reparse_material as reparse_material_service,
 )
 from app.services.asset_processing import (
     request_material_ocr as request_material_ocr_service,
 )
-from app.services.errors import ApplicationError
-from app.services.processing_budget import budget_read
 
 router = APIRouter()
 
@@ -35,50 +31,31 @@ class ProcessingRouteSelection(BaseModel):
     processing_route: str
 
 
-def _http_error(exc: ApplicationError) -> HTTPException:
-    return HTTPException(status_code=exc.status_code, detail=exc.detail)
-
-
 @router.post("/materials/{material_id}/retry", response_model=JobRead, status_code=202)
 def retry_material(material_id: str, db: Session = Depends(get_db)):
-    try:
-        return retry_material_parse(db, material_id)
-    except ApplicationError as exc:
-        raise _http_error(exc) from exc
+    return retry_material_parse(db, material_id)
 
 
 @router.post("/materials/{material_id}/reparse", response_model=JobRead, status_code=202)
 def reparse_material_route(material_id: str, db: Session = Depends(get_db)):
-    try:
-        return reparse_material_service(db, material_id)
-    except ApplicationError as exc:
-        raise _http_error(exc) from exc
+    return reparse_material_service(db, material_id)
 
 
 @router.post("/materials/{material_id}/ocr", response_model=JobRead, status_code=202)
 def request_material_ocr_route(material_id: str, db: Session = Depends(get_db)):
-    try:
-        return request_material_ocr_service(db, material_id)
-    except ApplicationError as exc:
-        raise _http_error(exc) from exc
+    return request_material_ocr_service(db, material_id)
 
 
 @router.post("/assets/{asset_id}/processing-route", status_code=202)
 def switch_asset_processing_route_route(
     asset_id: str, payload: ProcessingRouteSelection, db: Session = Depends(get_db),
 ):
-    try:
-        return switch_asset_processing_route(db, asset_id, payload.processing_route)
-    except ApplicationError as exc:
-        raise _http_error(exc) from exc
+    return switch_asset_processing_route(db, asset_id, payload.processing_route)
 
 
 @router.post("/assets/{asset_id}/cancel-processing")
 def cancel_asset_processing_route(asset_id: str, db: Session = Depends(get_db)):
-    try:
-        return cancel_asset_processing(db, asset_id)
-    except ApplicationError as exc:
-        raise _http_error(exc) from exc
+    return cancel_asset_processing(db, asset_id)
 
 
 @router.post(
@@ -87,22 +64,14 @@ def cancel_asset_processing_route(asset_id: str, db: Session = Depends(get_db)):
     status_code=202,
 )
 def retry_asset_parse_route(asset_id: str, db: Session = Depends(get_db)):
-    try:
-        return retry_asset_parse(db, asset_id)
-    except ApplicationError as exc:
-        raise _http_error(exc) from exc
+    return retry_asset_parse(db, asset_id)
 
 
 @router.get("/assets/{asset_id}/processing-budget")
 def get_asset_processing_budget(
     asset_id: str, notebook_id: str | None = None, db: Session = Depends(get_db),
 ):
-    ensure_asset_access(db, asset_id, notebook_id)
-    return budget_read(asset_id) or {
-        "asset_id": asset_id, "currency": "CNY", "limit_fen": 1000,
-        "settled_fen": 0, "reserved_fen": 0, "remaining_fen": 1000,
-        "status": "active", "reservations": [],
-    }
+    return read_asset_processing_budget(db, asset_id, notebook_id)
 
 
 @router.get(
@@ -110,11 +79,4 @@ def get_asset_processing_budget(
     response_model=list[AssetProcessingJobRead],
 )
 def list_notebook_asset_jobs(notebook_id: str, asset_id: str, db: Session = Depends(get_db)):
-    try:
-        assert_notebook_asset(db, asset_id, notebook_id)
-    except AssetUnavailable as exc:
-        raise HTTPException(404, str(exc)) from exc
-    return list(db.scalars(select(AssetProcessingJob).where(
-        AssetProcessingJob.asset_id == asset_id,
-        AssetProcessingJob.notebook_id == notebook_id,
-    ).order_by(AssetProcessingJob.created_at.desc())).all())
+    return list_notebook_asset_processing_jobs(db, notebook_id, asset_id)

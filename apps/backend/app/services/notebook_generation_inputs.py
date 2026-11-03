@@ -21,6 +21,7 @@ from app.db.models import (
     ProcessingJob,
 )
 from app.services.errors import ApplicationError
+from app.services.resource_scopes import require_notebook
 
 BATCH_IDLE_CLOSE = timedelta(minutes=2)
 
@@ -104,6 +105,7 @@ def register_generation_input(
 
 
 def close_upload_batch(db: Session, notebook_id: str, batch_id: str) -> NotebookUploadBatch:
+    require_notebook(db, notebook_id)
     batch = db.get(NotebookUploadBatch, batch_id)
     if batch is None or batch.notebook_id != notebook_id:
         raise ApplicationError(404, "上传批次不存在")
@@ -158,6 +160,27 @@ def batch_status(db: Session, batch: NotebookUploadBatch) -> dict:
         "relation_jobs": [{'id': job.id, 'status': job.status, 'error_message': job.error_message}
                           for job in relation_jobs if job],
     }
+
+
+def complete_upload_batch(db: Session, notebook_id: str, batch_id: str) -> dict:
+    batch = close_upload_batch(db, notebook_id, batch_id)
+    return batch_status(db, batch)
+
+
+def get_upload_batch_status(db: Session, notebook_id: str, batch_id: str) -> dict:
+    require_notebook(db, notebook_id)
+    batch = db.get(NotebookUploadBatch, batch_id)
+    if batch is None or batch.notebook_id != notebook_id:
+        raise ApplicationError(404, "上传批次不存在")
+    return batch_status(db, batch)
+
+
+def list_upload_batch_statuses(db: Session, notebook_id: str) -> list[dict]:
+    require_notebook(db, notebook_id)
+    batches = db.scalars(select(NotebookUploadBatch).where(
+        NotebookUploadBatch.notebook_id == notebook_id,
+    ).order_by(NotebookUploadBatch.created_at.desc()).limit(30)).all()
+    return [batch_status(db, batch) for batch in batches]
 
 
 def _parse_state(db: Session, asset_id: str) -> tuple[str | None, str | None, str | None]:

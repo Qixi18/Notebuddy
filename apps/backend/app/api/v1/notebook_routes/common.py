@@ -4,12 +4,7 @@
 """
 from __future__ import annotations
 
-from fastapi import HTTPException
-from sqlalchemy.orm import Session
-
-from app.api.v1.shared import ensure_course
-from app.db.models import Course, Notebook
-from app.notes.notebook import default_notebook
+from app.db.models import Notebook
 
 
 def _cover_url(book: Notebook) -> str | None:
@@ -22,16 +17,3 @@ def _summary(book: Notebook) -> dict:
             "created_at": book.created_at, "updated_at": book.updated_at,
             "deleted_at": book.deleted_at,
             "cover_url": _cover_url(book)}
-
-def ensure_notebook(db: Session, course_id: str, notebook_id: str) -> Notebook:
-    ensure_course(db, course_id)
-    book = db.get(Notebook, notebook_id)
-    if book is None or book.course_id != course_id or book.deleted_at is not None:
-        raise HTTPException(404, "该课程中的笔记本不存在")
-    return book
-
-def legacy_book(db: Session, course: Course) -> Notebook:
-    book = default_notebook(db, course, create=False)
-    if book is None:
-        raise HTTPException(404, "此课程尚无笔记本，请先新建笔记本")
-    return book

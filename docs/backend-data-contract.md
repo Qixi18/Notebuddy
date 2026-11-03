@@ -84,6 +84,7 @@ Notebook
 | 资料解析 | `app/api/v1/materials.py`、`app/document_processing/`、Asset/ParseRun 模型 | 结构经代码核对；真实材料质量未在本次核实 |
 | 生成 | `app/api/v1/generation.py`、`app/generation/context.py`、`app/workers/notebook_generation_worker.py` | 任务快照、质量检查、revision 合并由代码核对；真实模型质量待验证 |
 | Agent 与森林 | `app/api/v1/agent.py`、`app/ai/agent_read_tools.py`、`app/forest/`、`app/notes/index.py` | 范围与读取路径代码核对；真实模型与完整浏览器体验待验证 |
+| 路由与应用服务分层（ADR-0003 Proposed） | Notebook 文档/历史/生命周期/资源和 Material 兼容聚合、DocumentIR 页面/证据、Asset 任务与预算、上传批次查询已下沉到服务；Service 预期错误由 `app/main.py` 统一映射，Quiz 不再依赖 FastAPI | `scripts/test.ps1` 后端阶段：Ruff 通过，pytest 572 passed/4 skipped；路由契约快照与边界断言通过。Web Vitest 有5个文件/22项失败，完整记录见验收快照。API 路径与 schema 未改 |
 | 旧 API/迁移兼容 | `app/api/v1/materials.py`、`notes`、迁移模块及旧模型仍存在 | 具体调用面见 [API](api.md)；外部调用方覆盖待验证 |
 
 ## 路由与写入边界

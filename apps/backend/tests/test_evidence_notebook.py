@@ -159,14 +159,13 @@ def test_multilocation_chunk_does_not_claim_first_page_or_block(session):
 
 
 def test_document_source_endpoint_enforces_notebook_ownership(session):
-    from fastapi import HTTPException
-
     from app.api.v1.materials import get_asset_document
+    from app.services.errors import ApplicationError
 
     _course, book, asset, _material = _setup(session)
     foreign_course = make_course(session, "另一个课程")
     foreign_book = make_notebook(session, foreign_course, "其他笔记")
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         get_asset_document(asset.id, notebook_id=foreign_book.id, db=session)
     assert captured.value.status_code == 404
 

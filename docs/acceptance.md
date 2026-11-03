@@ -1,5 +1,13 @@
 # 当前验收状态与矩阵
 
+## 当前快照（2026-11-03）
+
+- 本轮基线为 `feat/overall-inspection`，代码 HEAD `10486d03c94ef188aec8b3ae96c3fae6be1617c9`；改动仍在工作区，未提交、未推送。开始时另有 `CONTRIBUTING.md`、`docs/development/README.md`、`docs/module-map.md` 三份未提交文档修改，均已保留。
+- 根目录执行 `pwsh -NoProfile -File .\scripts\test.ps1`。后端 Ruff 通过；pytest 572 passed、4 skipped、2 warnings。Notebook API 路由契约快照和新增架构边界检查通过。
+- 同一官方脚本的 Web behavior tests 为 80 个文件通过、5 个文件失败；Vitest 404 passed、22 failed。失败集中在 `agent-dock.test.tsx`、`dock-interaction.test.tsx`、`multi-book-dirty-navigation.test.tsx`、`notebook-document.test.tsx`、`notebook-workspace-save-conflict.test.tsx`。本轮未改前端代码，未确认这些失败在基线分支是否已存在。完整证据见 `.runtime/logs/test-20261103-181336-49564.log`（本地忽略日志）。
+- 因官方脚本在 Vitest 阶段停止，另外分别运行 Web `npm run build` 与 Desktop `npm run build:main`，均通过；Web 构建保留既有 500 KB chunk 警告。`git diff --check` 通过。
+- 未执行真实浏览器、真实 PDF/图片质量、OCR、外部模型/账单或真实数据库迁移/恢复验收。
+
 ## 当前快照（2026-10-30）
 
 - 本轮代码基线：本地 `feat/debug-integration` `0777d0ef6ba6c44d2e498238d605631ee907c6b3`；Fetch 时远端为 `4759ff50c3100894af47dfca72476fe1c14e9e4a`。
