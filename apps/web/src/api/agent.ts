@@ -17,8 +17,11 @@ export type {
   AgentReadingContext,
   AgentScope,
   AgentStepEvent,
+  AgentStatusEvent,
   AgentSuggestion,
   AgentThinkingEvent,
+  AgentVerification,
+  AgentVerificationStatus,
   AgentStreamHandlers,
 } from './agentStream'
 
@@ -35,6 +38,7 @@ function dispatchEvent(event: AgentEvent, handlers: AgentStreamHandlers): void {
   else if (event.type === 'delta') handlers.onDelta?.(event)
   else if (event.type === 'thinking') handlers.onThinking?.(event)
   else if (event.type === 'notice') handlers.onNotice?.(event)
+  else if (event.type === 'status') handlers.onStatus?.(event)
   else if (event.type === 'final') handlers.onFinal?.(event)
   else if (event.type === 'error') handlers.onError?.(event)
 }

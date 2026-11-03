@@ -15,11 +15,24 @@ from tests.notebook_fixtures import make_asset, make_course, make_notebook
 pytest_plugins = ['tests.notebook_fixtures']
 
 
-def setup_pdf(db, tmp_path, pages=2):
+def setup_pdf(db, tmp_path, monkeypatch, pages=2):
+    from app.document_processing.engines import vision as vision_engine
+
+    monkeypatch.setattr(vision_engine, "_capability_secret_path", lambda: tmp_path / 'vision-capability-hmac.key')
+
     book = make_notebook(db, make_course(db))
     asset = make_asset(db, book, name='pages.pdf')
     asset.processing_route = 'llm'
-    asset.processing_config_json = json.dumps({'model': 'vision-test', 'base_url': 'https://example.test'})
+    vision = {'model': 'vision-test', 'base_url': 'https://example.test/v1', 'timeout_seconds': 60}
+    asset.processing_config_json = json.dumps({
+        'model': 'text-test', 'base_url': 'https://text.example/v1',
+        'vision': vision, 'vision_capability_fingerprint': vision_engine.config_fingerprint(vision),
+    })
+    cache = tmp_path / 'vision-capabilities.json'
+    cache.write_text(json.dumps({vision_engine.config_fingerprint(vision): {
+        'supports_image_input': True, 'checked_at': 'test',
+    }}), encoding='utf-8')
+    monkeypatch.setattr(vision_engine, "_capability_path", lambda: cache)
     path = tmp_path / 'pages.pdf'
     writer = PdfWriter()
     for _ in range(pages):
@@ -35,7 +48,7 @@ def page_result(text='Visual source content for a useful learning note.'):
 
 def test_null_block_levels_preserve_page_content_and_checkpoint(session, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
-    asset, path = setup_pdf(session, tmp_path, pages=1)
+    asset, path = setup_pdf(session, tmp_path, monkeypatch, pages=1)
     result = {'status': 'read', 'blocks': [
         {'type': 'heading', 'text': 'Matrix operations', 'level': 2},
         {'type': 'paragraph', 'text': 'Multiplication combines compatible matrices.', 'level': None},
@@ -87,7 +100,7 @@ def test_page_reader_still_rejects_blocks_without_source_content():
 
 def test_llm_route_reads_images_without_local_semantic_parser(session, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
-    asset, path = setup_pdf(session, tmp_path)
+    asset, path = setup_pdf(session, tmp_path, monkeypatch)
     def no_native(*args, **kwargs):
         pytest.fail('The model-only route invoked a local text/OCR parser')
     monkeypatch.setattr(service, 'parse_pdf', no_native)
@@ -110,7 +123,7 @@ def test_llm_route_reads_images_without_local_semantic_parser(session, tmp_path,
 
 def test_failed_later_page_reuses_successful_page_on_retry(session, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
-    asset, path = setup_pdf(session, tmp_path)
+    asset, path = setup_pdf(session, tmp_path, monkeypatch)
     from app.ai.deepseek import DeepSeekClient, DeepSeekError
     outputs = iter([page_result('Page one has a real source.'), DeepSeekError('Unauthorized', status_code=401)])
     def fail_later(self, *args, **kwargs):
@@ -140,7 +153,7 @@ def test_failed_later_page_reuses_successful_page_on_retry(session, tmp_path, mo
 
 def test_uncertain_page_never_promotes_partial_read_to_success(session, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
-    asset, path = setup_pdf(session, tmp_path, pages=1)
+    asset, path = setup_pdf(session, tmp_path, monkeypatch, pages=1)
     from app.ai.deepseek import DeepSeekClient
     monkeypatch.setattr(DeepSeekClient, 'complete_json', lambda *a, **k: {'status': 'unreadable', 'blocks': []})
     run = service.create_parse_run(session, asset=asset)
@@ -153,7 +166,7 @@ def test_large_pdf_yields_and_resumes_without_loading_all_page_images(session, t
     from app.ai.deepseek import DeepSeekClient
     from app.document_processing.llm_reader import ReadingPending
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
-    asset, path = setup_pdf(session, tmp_path, pages=501)
+    asset, path = setup_pdf(session, tmp_path, monkeypatch, pages=501)
     calls = []
     def answer(self, messages, **kwargs):
         calls.append(messages)

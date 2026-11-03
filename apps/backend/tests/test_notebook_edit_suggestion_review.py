@@ -1,8 +1,8 @@
-"""Agent 正文修改的确认契约，以及 Notebook 删除/恢复的数据完整性。
+"""Legacy NotebookEditSuggestion review compatibility and deletion integrity.
 
 架构约束（不可放宽）：
 - 正文唯一真源是 ``Notebook.document_json``，版本由 ``document_revision`` 守护；
-- Agent 只能产出 ``NotebookEditSuggestion``，必须经用户确认才写入；
+- 当前 Agent 不再创建建议；既有 ``NotebookEditSuggestion`` 数据仍须经用户确认才写入；
 - 未确认（提案、拒绝、失效、跨课程、已删除）时正文与 revision 必须一字不动。
 
 本文件补的是交接文档点名的缺口：拒绝确认、批量合并（apply-all 此前没有任何
@@ -15,10 +15,8 @@ import json
 import sqlite3
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import select
 
-from app.ai.agent_tools import execute_tool
 from app.api.v1.notebook import (
     apply_course_edit_suggestions,
     delete_course_notebook,
@@ -28,10 +26,17 @@ from app.api.v1.notebook import (
     restore_deleted_notebook,
     review_edit_suggestion,
 )
+from app.api.v1.notebook_routes.suggestions import (
+    apply_course_edit_suggestions as apply_course_edit_suggestions_route,
+)
+from app.api.v1.notebook_routes.suggestions import (
+    review_edit_suggestion as review_edit_suggestion_route,
+)
 from app.core.config import settings
 from app.db.forest_models import ForestJob
 from app.db.models import NotebookEditSuggestion
-from app.notes.document import load_document, normalize_document
+from app.notes.document import dump_document, load_document, normalize_document
+from app.notes.edits import apply_edits
 from app.notes.store import write_document
 from app.schemas.notebook import (
     NotebookDocumentUpdate,
@@ -39,6 +44,7 @@ from app.schemas.notebook import (
     NotebookEditSuggestionReview,
     NotebookRestoreDeletedRequest,
 )
+from app.services.errors import ApplicationError
 from tests.notebook_fixtures import (
     make_asset,
     make_course,
@@ -64,7 +70,7 @@ def checkpoint_ready(tmp_path, monkeypatch):
 
 
 def _setup(session):
-    """一门课、一本有正文的 Notebook（revision=1），可直接提案。"""
+    """一门课、一本有正文的 Notebook（revision=1），用于历史数据兼容测试。"""
     course = make_course(session)
     book = make_notebook(session, course)
     asset = make_asset(session, book)
@@ -84,14 +90,20 @@ def _setup(session):
 
 
 def _propose(session, course, book, content: str) -> str:
-    outcome = execute_tool(
-        session, course_id=course.id, name="propose_notebook_edits",
-        arguments={"rationale": "补充", "edits": [{"op": "append", "content": content}]},
-        scope="course", editable_notebook_id=book.id,
+    """Seed a historical suggestion row for backwards-compatibility review tests."""
+    edits = [{"op": "append", "content": content}]
+    proposed = apply_edits(load_document(book.document_json).content, edits)
+    suggestion = NotebookEditSuggestion(
+        notebook_id=book.id,
+        base_revision=book.document_revision,
+        rationale="历史兼容测试",
+        ops_json=json.dumps(edits, ensure_ascii=False),
+        proposed_document_json=dump_document(proposed),
+        status="pending",
     )
+    session.add(suggestion)
     session.commit()
-    assert outcome.suggestions, "提案没有生成修改建议"
-    return outcome.suggestions[0]["id"]
+    return suggestion.id
 
 
 def _body(session, book) -> tuple[str, int]:
@@ -121,7 +133,7 @@ def test_accept_with_wrong_expected_revision_is_rejected_without_writing(session
     suggestion_id = _propose(session, course, book, "版本不符时不应写入。")
     before_json, before_revision = _body(session, book)
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         review_edit_suggestion(
             book.id, suggestion_id,
             # base_revision 与当前一致，但调用方拿的 expected_revision 过期
@@ -145,7 +157,7 @@ def test_reviewing_same_suggestion_twice_is_refused(session):
         session,
     )
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         review_edit_suggestion(
             book.id, suggestion_id,
             NotebookEditSuggestionReview(decision="accept", expected_revision=revision + 1),
@@ -184,7 +196,7 @@ def test_batch_apply_refuses_duplicate_ids(session):
     suggestion_id = _propose(session, course, book, "重复编号。")
     before = _body(session, book)
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         apply_course_edit_suggestions(
             course.id,
             NotebookEditSuggestionBatchReview(suggestion_ids=[suggestion_id, suggestion_id]),
@@ -201,7 +213,7 @@ def test_batch_apply_refuses_foreign_course_suggestion(session):
     other_course = make_course(session, "另一门课")
     before = _body(session, book)
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         apply_course_edit_suggestions(
             other_course.id,
             NotebookEditSuggestionBatchReview(suggestion_ids=[suggestion_id]),
@@ -228,7 +240,7 @@ def test_batch_apply_marks_stale_when_user_edited_after_proposal(session):
     session.commit()
     after_user_edit = _body(session, book)
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         apply_course_edit_suggestions(
             course.id, NotebookEditSuggestionBatchReview(suggestion_ids=[suggestion_id]), session,
         )
@@ -250,7 +262,7 @@ def test_batch_apply_refuses_already_reviewed_suggestion(session):
     )
     before = _body(session, book)
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         apply_course_edit_suggestions(
             course.id, NotebookEditSuggestionBatchReview(suggestion_ids=[suggestion_id]), session,
         )
@@ -266,7 +278,7 @@ def test_batch_apply_ignores_suggestions_of_deleted_notebook(session, checkpoint
     session.commit()
     before = _body(session, book)
 
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         apply_course_edit_suggestions(
             course.id, NotebookEditSuggestionBatchReview(suggestion_ids=[suggestion_id]), session,
         )
@@ -289,10 +301,10 @@ def test_deleted_notebook_keeps_body_and_restores_into_course(session, checkpoin
     assert [row["id"] for row in list_deleted_notebooks(session)] == [book.id]
 
     # 删除后不能按课程读取或写入
-    with pytest.raises(HTTPException) as read_error:
+    with pytest.raises(ApplicationError) as read_error:
         get_notebook_document(course.id, book.id, session)
     assert read_error.value.status_code == 404
-    with pytest.raises(HTTPException) as write_error:
+    with pytest.raises(ApplicationError) as write_error:
         put_notebook_document(
             course.id, book.id,
             NotebookDocumentUpdate(
@@ -331,6 +343,25 @@ def test_restored_notebook_can_still_reject_its_pending_suggestion(session, chec
     assert result["revision"] == before_revision
     assert _body(session, book) == (before_json, before_revision)
     assert session.get(NotebookEditSuggestion, suggestion_id).status == "rejected"
+
+
+def test_suggestion_route_adapters_preserve_service_contract(session):
+    course, book = _setup(session)
+    suggestion_id = _propose(session, course, book, "经 API 适配器审核。")
+    result = review_edit_suggestion_route(
+        book.id, suggestion_id,
+        NotebookEditSuggestionReview(decision="accept", expected_revision=book.document_revision),
+        session,
+    )
+    assert result["revision"] == book.document_revision
+    assert "经 API 适配器审核" in json.dumps(result["content"], ensure_ascii=False)
+
+    first = _propose(session, course, book, "批量一。")
+    second = _propose(session, course, book, "批量二。")
+    batch = apply_course_edit_suggestions_route(
+        course.id, NotebookEditSuggestionBatchReview(suggestion_ids=[first, second]), session,
+    )
+    assert batch["updated"] == 2
 
 
 def _other_course_with_body(session, name: str = "另一门课"):

@@ -91,7 +91,7 @@ def create_parse_run(
 ) -> DocumentParseRun:
     """Create a new pending parse version.  The previous current run is kept."""
 
-    from app.document_processing.routes import asset_config
+    from app.document_processing.config import asset_config
     route = asset.processing_route or 'standard'
     provider = asset_config(asset) if route == 'llm' else {}
     expected_config = {'processing_route': route, 'provider': provider}
@@ -179,8 +179,17 @@ def execute_parse_run(
     run_config = json.loads(run.config_json or '{}')
     if run_config.get('processing_route', 'standard') == 'llm':
         from app.document_processing.engines.pdf_text import EngineInfo
+        from app.document_processing.engines.vision import VisionCapabilityError
         from app.document_processing.llm_reader import read_document
-        document = read_document(db, run, asset, path, progress=progress, max_new_pages=max_new_pages)
+        try:
+            document = read_document(db, run, asset, path, progress=progress, max_new_pages=max_new_pages)
+        except VisionCapabilityError as exc:
+            raise DocumentProcessingError(str(exc), code="vision_preflight_required") from exc
+        except Exception as exc:
+            code = getattr(exc, "code", "")
+            if isinstance(code, str) and code.startswith("budget_"):
+                raise DocumentProcessingError(str(exc), code=code) from exc
+            raise
         document.quality = assess(document, engines=EngineState(
             ocr=EngineInfo('disabled', '0', False), vision=EngineInfo('primary-api', '1', True)),
             doc_type=document.doc_type, notes=[])
@@ -245,18 +254,38 @@ def execute_parse_run(
         if parser_choice == "mineru":
             document = parse_with_mineru(path, context)
         elif doc_type == "pdf":
-            document = parse_pdf(
-                path, context, render_store=render_store,
-                ocr_available=ocr_ready, vision_available=vision_ready,
-                ocr_recognize=ocr_recognize, vision_describe=vision_describe,
-                figure_store=figure_store,
-            )
+            from app.db.models import NotebookAsset
+            from app.services.processing_budget import budget_scope_if_active
+
+            owner_notebook_id = db.scalar(select(NotebookAsset.notebook_id).where(
+                NotebookAsset.asset_id == asset.id, NotebookAsset.is_owner.is_(True),
+                NotebookAsset.detached_at.is_(None),
+            ))
+            with budget_scope_if_active(asset_ids=[asset.id] if owner_notebook_id else [],
+                    notebook_id=owner_notebook_id or "", stage="parse", job_id=run.id,
+                    kind="vision"):
+                document = parse_pdf(
+                    path, context, render_store=render_store,
+                    ocr_available=ocr_ready, vision_available=vision_ready,
+                    ocr_recognize=ocr_recognize, vision_describe=vision_describe,
+                    figure_store=figure_store,
+                )
         elif doc_type == "image":
-            document = parse_image(
-                path, context,
-                ocr_available=ocr_ready, vision_available=vision_ready,
-                ocr_recognize=ocr_recognize, vision_describe=vision_describe,
-            )
+            from app.db.models import NotebookAsset
+            from app.services.processing_budget import budget_scope_if_active
+
+            owner_notebook_id = db.scalar(select(NotebookAsset.notebook_id).where(
+                NotebookAsset.asset_id == asset.id, NotebookAsset.is_owner.is_(True),
+                NotebookAsset.detached_at.is_(None),
+            ))
+            with budget_scope_if_active(asset_ids=[asset.id] if owner_notebook_id else [],
+                    notebook_id=owner_notebook_id or "", stage="parse", job_id=run.id,
+                    kind="vision"):
+                document = parse_image(
+                    path, context,
+                    ocr_available=ocr_ready, vision_available=vision_ready,
+                    ocr_recognize=ocr_recognize, vision_describe=vision_describe,
+                )
         else:
             document = parse_office(path, context)
     except (UnsupportedDocument, DocumentProcessingError):
@@ -266,6 +295,9 @@ def execute_parse_run(
     except FileNotFoundError as exc:
         raise DocumentProcessingError("原始文件不存在，无法解析", code="asset_missing") from exc
     except Exception as exc:
+        code = getattr(exc, "code", "")
+        if isinstance(code, str) and code.startswith("budget_"):
+            raise DocumentProcessingError(str(exc), code=code) from exc
         raise DocumentProcessingError(f"解析失败：{type(exc).__name__}: {exc}", code="parse_failed") from exc
 
     document.quality = assess(

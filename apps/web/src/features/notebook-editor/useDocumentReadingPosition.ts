@@ -20,7 +20,8 @@ type PositionLoad = { key: string; position: NotebookReadingPosition | null; set
 
 /** Restores/saves a course Notebook's position using stable Tiptap block IDs and a separate CAS revision. */
 export function useDocumentReadingPosition({ courseId, notebookId, editorRef, ready, explicitLink, onRestore }: {
-  courseId?: string
+  /** null 表示未分类 Notebook：没有课程级阅读位置可读写 */
+  courseId?: string | null
   notebookId?: string
   editorRef: RefObject<NotebookEditorHandle | null>
   ready: boolean
@@ -37,7 +38,7 @@ export function useDocumentReadingPosition({ courseId, notebookId, editorRef, re
   const bookmarkReady = Boolean(key && load.key === key && load.settled)
 
   useEffect(() => {
-    if (!courseId || courseId === 'unbound' || !notebookId) return
+    if (!courseId || !notebookId) return
     let active = true
     canWrite.current = false
     revision.current = 0
@@ -76,7 +77,7 @@ export function useDocumentReadingPosition({ courseId, notebookId, editorRef, re
   }, [bookmark, bookmarkReady, editorRef, explicitLink, key, ready])
 
   useEffect(() => {
-    if (!ready || !bookmarkReady || !key || !courseId || courseId === 'unbound' || !notebookId) return
+    if (!ready || !bookmarkReady || !key || !courseId || !notebookId) return
     const root = editorRoot(editorRef)
     if (!root) return
     let timer: ReturnType<typeof setTimeout> | undefined

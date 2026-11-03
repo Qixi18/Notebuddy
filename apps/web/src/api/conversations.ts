@@ -2,8 +2,9 @@ import type { Conversation, ConversationMessage } from '../types'
 import { request } from './http'
 
 export type ConversationOwnership = {
-  /** 归属：course=整门课程 / global=跨课程 / note=锁定笔记 */
-  scope?: 'course' | 'global' | 'note'
+  /** 归属：course / global / notebook；note 仅兼容旧会话 */
+  scope?: 'course' | 'global' | 'notebook' | 'note'
+  notebookId?: string
   noteId?: string | null
   noteTitle?: string | null
 }
@@ -19,6 +20,7 @@ export type ConversationMessageHit = {
 }
 
 export const conversationApi = {
+  listNotebookConversations: (notebookId: string) => request<Conversation[]>(`/api/v1/notebooks/${notebookId}/conversations`),
   listConversations: (courseId: string) => request<Conversation[]>(`/api/v1/courses/${courseId}/conversations`),
   searchMessages: (courseId: string, q: string) =>
     request<ConversationMessageHit[]>(`/api/v1/courses/${courseId}/conversations/search?q=${encodeURIComponent(q)}`),
@@ -29,6 +31,11 @@ export const conversationApi = {
     }),
   deleteConversation: (conversationId: string) =>
     request<void>(`/api/v1/conversations/${conversationId}`, { method: 'DELETE' }),
+  createNotebookConversation: (notebookId: string, title = '新对话') =>
+    request<Conversation>(`/api/v1/notebooks/${notebookId}/conversations`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    }),
   createConversation: (courseId: string, title = '新对话', ownership?: ConversationOwnership) => {
     const scope = ownership?.scope ?? 'course'
     return request<Conversation>(`/api/v1/courses/${courseId}/conversations`, {

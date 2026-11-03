@@ -5,23 +5,20 @@ import { featurePath, useWorkspace } from '../components/AppLayout'
 import { TeacherCharacter, type TeacherStatus } from '../components/TeacherCharacter'
 import { api } from '../api'
 import { AssistantComposer } from '../features/assistant/AssistantComposer'
-import { AssistantContextBar, type ScopeNext } from '../features/assistant/AssistantContextBar'
+import { AssistantContextBar, type ScopeNext, type ScopeNotebook } from '../features/assistant/AssistantContextBar'
+import { NotebookScopePanel, type NotebookScopeTarget } from '../features/assistant/NotebookScopePanel'
 import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
-import { NoteScopePicker } from '../features/assistant/NoteScopePicker'
-import { NoteSuggestionCards } from '../features/assistant/AgentCards'
-import { useNoteSuggestions } from '../features/assistant/useNoteSuggestions'
-import { NotePreviewDialog } from '../features/assistant/NotePreviewDialog'
-import { ChangesPanel, type NoteChangeItem } from '../features/assistant/ChangesPanel'
 import { MistakeBook } from '../features/assistant/MistakeBook'
 import { TermDialog } from '../features/assistant/TermDialog'
 import { teacherPersonaMeta } from '../features/persona/personas'
 import { PetAvatar, type PetAvatarHandle } from '../features/pet/PetAvatar'
+import { usePetWideViewport } from '../features/pet/usePetViewport'
 import type { PetMode } from '../features/pet/petLayout'
 import { loadPetPlacement, savePetPlacement } from '../features/pet/petStorage'
 import { reportQuestion } from '../features/pet/petEggs'
 import type { AskScope } from '../features/conversation/useConversation'
-import type { AgentReadingContext, AgentScope } from '../api/agent'
+import type { AgentScope } from '../api/agent'
 
 /**
  * 答疑桌宠 · 三区工作台：
@@ -34,11 +31,9 @@ export function AssistantPage() {
     courseId,
     courses,
     materials,
-    notes,
     courseContentLoading,
     openMaterialSource,
     conversation,
-    refreshCurrentNotes,
   } = useWorkspace()
   const { askAgent, stopAgent, ready, busy, hasMessages, messages, renameConversation, deleteConversation, agentRun } = conversation
   const navigate = useNavigate()
@@ -50,69 +45,48 @@ export function AssistantPage() {
   const initialQuestionSent = useRef(false)
 
   const [draft, setDraft] = useState('')
-  /* 范围默认「全局可查」；新会话开出后、首条消息发出前可改，发出后锁定 */
-  const [scopeKind, setScopeKind] = useState<'global' | 'course' | 'note'>('global')
-  const [scopeTargetId, setScopeTargetId] = useState<string>()
-  const [scopeTargetTitle, setScopeTargetTitle] = useState<string>()
+  /* 默认仅使用当前课程范围；跨课程检索必须由用户显式切换。 */
+  const [scopeKind, setScopeKind] = useState<'global' | 'course' | 'notebook'>('course')
+  /* Notebook 范围（P0-QA-03）：独立答疑页也要能真实锁定一本 Notebook。
+     选中后由 NotebookScopePanel 用 /notebooks/{id}/conversations 建会话，
+     不复活旧 Note，也不用伪 courseId。 */
+  const [notebooks, setNotebooks] = useState<ScopeNotebook[]>([])
+  const [notebookTarget, setNotebookTarget] = useState<NotebookScopeTarget>()
   /* 课件收窄（P3）：消息级参数，仅 course 档随请求发送；不写会话 scope、不触发锁定。
      切范围档 / 切会话 / 切课程时复位（见 changeScope 与下方两个 effect）。 */
   const [materialId, setMaterialId] = useState<string>()
   /* 学习模式（P9）：消息级参数，direct=直接答 / guided=引导式；切会话/切课程复位 */
   const [learningMode, setLearningMode] = useState<'direct' | 'guided'>('direct')
   const [scopeMenuOpen, setScopeMenuOpen] = useState(false)
-  const [notePickerOpen, setNotePickerOpen] = useState(false)
-  const [previewItem, setPreviewItem] = useState<NoteChangeItem>()
   const [scopeLockHint, setScopeLockHint] = useState(false)
   const scopeLockTimer = useRef<number | undefined>(undefined)
   const [webStatus, setWebStatus] = useState<{ configured: boolean; status: string }>({ configured: false, status: 'unconfigured' })
-  const [changesOpen, setChangesOpen] = useState(false)
   const [mistakesOpen, setMistakesOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [termOpen, setTermOpen] = useState(false)
   const [railDrawerOpen, setRailDrawerOpen] = useState(false)
   const [pendingInitialQuestion, setPendingInitialQuestion] = useState<string>()
   const [petMode, setPetMode] = useState<PetMode>(() => loadPetPlacement()?.mode ?? 'rail')
+  const petWide = usePetWideViewport()
+  const visiblePetMode = petWide ? petMode : 'rail'
 
-  const scope: AskScope = useMemo(
-    () => ({ kind: scopeKind, targetId: scopeTargetId, targetTitle: scopeTargetTitle }),
-    [scopeKind, scopeTargetId, scopeTargetTitle],
-  )
+  const scope: AskScope = useMemo(() => ({ kind: scopeKind }), [scopeKind])
 
-  /* agent 产出的笔记修改建议（P4 多目标）：走课程级待确认端点，
-     目标集合 = 本课程的全部 pending（发现开关下 agent 可定位任意笔记提建议）。
-     正文缓存种子 = 工作区笔记；未命中的由 hook 按 note_id 拉取。 */
-  const noteSuggestions = useNoteSuggestions({
-    targets: [],
-    knownNotes: notes,
-    courseId,
-    refreshNotes: refreshCurrentNotes,
-    agentFinalId: agentRun?.final?.message_id,
-    resetKey: conversation.conversationId,
-  })
+  /* 本课程的 Notebook 列表：Notebook 范围必须先让用户看到真实目标，而不是猜。 */
+  useEffect(() => {
+    if (!courseId) { setNotebooks([]); return }
+    let active = true
+    void api.listNotebooks(courseId)
+      .then((items) => { if (active) setNotebooks(items.map((item) => ({ id: item.id, title: item.title }))) })
+      .catch(() => { if (active) setNotebooks([]) })
+    return () => { active = false }
+  }, [courseId])
 
-  /* 答疑页的范围语义 → agent 的请求语义。
-     答疑页的「整门课程」= agent 的 course 且不收窄到某份课件（agent 的 course 档可带 material_id）；
-     答疑页的「锁定笔记」锁的是用户指定的任意一篇，而 agent 的 note 档强制要求 reading_context.note_id
-     （后端 agent.py 会 422），所以要把这篇笔记的正文节选一起带过去。
-     发现开关（P4）：只有答疑页传 true——全局/课程档下 agent 也能自主定位笔记提交修改建议。 */
-  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; readingContext?: AgentReadingContext; allowNoteDiscovery: boolean; allowQuiz: boolean; learningMode: 'direct' | 'guided' }>(() => {
-    if (scope.kind === 'global') return { scope: 'global', allowNoteDiscovery: true, allowQuiz: true, learningMode }
-    if (scope.kind === 'note' && scope.targetId) {
-      const note = notes.find((item) => item.id === scope.targetId)
-      return {
-        scope: 'note',
-        readingContext: {
-          note_id: scope.targetId,
-          note_title: scope.targetTitle ?? note?.title,
-          excerpt: note?.content_markdown ? note.content_markdown.slice(0, 1200) : undefined,
-        },
-        allowNoteDiscovery: true,
-        allowQuiz: true,
-        learningMode,
-      }
-    }
-    return { scope: 'course', materialId, allowNoteDiscovery: true, allowQuiz: true, learningMode }
-  }, [scope.kind, scope.targetId, scope.targetTitle, notes, materialId, learningMode])
+  /* 独立答疑页只把 Notebook 范围交给 NotebookScopePanel；课程/全局仍走 agent 通道。 */
+  const agentOptions = useMemo<{ scope: AgentScope; materialId?: string; allowNoteDiscovery: boolean; allowQuiz: boolean; learningMode: 'direct' | 'guided' }>(() => {
+    if (scope.kind === 'global') return { scope: 'global', allowNoteDiscovery: false, allowQuiz: true, learningMode }
+    return { scope: 'course', materialId, allowNoteDiscovery: false, allowQuiz: true, learningMode }
+  }, [scope.kind, materialId, learningMode])
 
   /* 切换会话时，把范围 chip 对齐到该会话的真实归属。
      范围是会话级属性，存在 Conversation 行上；只有「还没有消息」的会话才允许再改。
@@ -125,19 +99,13 @@ export function AssistantPage() {
       ? conversation.conversations.find((item) => item.id === conversation.conversationId)
       : undefined
     if (!target) {
-      // 尚无活动会话（全新对话）→ 默认全局可查
-      setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined); setMaterialId(undefined); setLearningMode('direct')
+      // 尚无活动会话（全新对话）→ 默认当前课程
+      setScopeKind('course'); setMaterialId(undefined); setLearningMode('direct')
       return
     }
     setMaterialId(undefined)
     setLearningMode('direct')
-    if (target.scope === 'note') {
-      setScopeKind('note'); setScopeTargetId(target.note_id ?? undefined); setScopeTargetTitle(target.note_title ?? undefined)
-    } else if (target.scope === 'global') {
-      setScopeKind('global'); setScopeTargetId(undefined); setScopeTargetTitle(undefined)
-    } else {
-      setScopeKind('course'); setScopeTargetId(undefined); setScopeTargetTitle(undefined)
-    }
+    setScopeKind(target.scope === 'global' ? 'global' : 'course')
   }, [conversation.conversationId, conversation.conversations])
 
   /* 范围锁定：当前会话一旦有过真实问答（不含本地开场白），就不再允许改范围 */
@@ -151,11 +119,10 @@ export function AssistantPage() {
   useEffect(() => () => { if (scopeLockTimer.current) window.clearTimeout(scopeLockTimer.current) }, [])
 
   useEffect(() => {
-    setScopeKind('global')
-    setScopeTargetId(undefined)
-    setScopeTargetTitle(undefined)
+    setScopeKind('course')
     setMaterialId(undefined)
     setLearningMode('direct')
+    setNotebookTarget(undefined)
   }, [courseId])
 
   useEffect(() => { void api.getWebSearchStatus().then(setWebStatus).catch(() => setWebStatus({ configured: false, status: 'unavailable' })) }, [])
@@ -274,10 +241,19 @@ export function AssistantPage() {
     /* 已锁定的会话不再接受范围变更（UI 层拦截；后端也只在首轮落 scope，双保险） */
     if (scopeLocked) { flashScopeLockHint(); return }
     setScopeKind(next.kind)
-    setScopeTargetId(next.targetId)
-    setScopeTargetTitle(next.targetTitle)
     /* 收窄只在 course 档有意义：离开该档即复位，避免残留一个不可见的消息级参数 */
     if (next.kind !== 'course') setMaterialId(undefined)
+    if (next.kind !== 'notebook') setNotebookTarget(undefined)
+  }
+
+  /* 选定一本 Notebook：进入 Notebook 核验链（独立会话，真正按 notebook_id 建立） */
+  function changeNotebook(notebookId: string) {
+    if (scopeLocked) { flashScopeLockHint(); return }
+    const target = notebooks.find((item) => item.id === notebookId)
+    if (!target) return
+    setNotebookTarget(target)
+    setScopeKind('notebook')
+    setMaterialId(undefined)
   }
 
   function changePetMode(mode: PetMode) {
@@ -347,11 +323,7 @@ export function AssistantPage() {
       '我该怎么开始整理第一份课件？',
     ]
 
-  const scopeLabel = scopeKind === 'global'
-    ? '全局可查'
-    : scopeKind === 'note'
-      ? (scopeTargetTitle ?? '锁定笔记')
-      : '整门课程'
+  const scopeLabel = scopeKind === 'global' ? '全局可查' : '整门课程'
 
   const retrievalSummary = useMemo(() => {
     const sources = lastAssistantMessage?.sources ?? []
@@ -372,9 +344,9 @@ export function AssistantPage() {
         </div>
 
         {/* PetAvatar 必须常挂载：浮层是它内部的 portal，放进条件分支会在切形态时连人一起卸载 */}
-        <div className={`workspace-pet-block${petMode === 'float' ? ' is-floating' : ''}`}>
+        <div className={`workspace-pet-block${visiblePetMode === 'float' ? ' is-floating' : ''}`}>
           <PetAvatar
-            mode={petMode}
+            mode={visiblePetMode}
             onModeChange={changePetMode}
             status={teacherStatus}
             /* 只认「本次请求已开始吐正文」：工具阶段/思考阶段都还在 thinking */
@@ -382,7 +354,7 @@ export function AssistantPage() {
             draft={draft}
             bubbleHint={busy ? '正在翻课程资料，稍等一下…' : hasAsked ? '回答里的角标可以点，右栏能看到原文。' : `问我「${course?.name ?? '这门课'}」的问题吧`}
           />
-          {petMode === 'rail' && (
+          {visiblePetMode === 'rail' && (
             <div className="workspace-pet-identity">
               <span className="workspace-pet-identity-avatar" aria-hidden="true">
                 <TeacherCharacter status={teacherStatus} compact />
@@ -406,7 +378,7 @@ export function AssistantPage() {
           )}
         </div>
 
-        {petMode === 'float' && (
+        {visiblePetMode === 'float' && (
           <div className="workspace-pet-anchor">
             <span className="workspace-pet-anchor-avatar" aria-hidden="true">
               <TeacherCharacter status={teacherStatus} compact />
@@ -432,9 +404,9 @@ export function AssistantPage() {
               className="workspace-conv-new"
               disabled={busy || !courseId}
               onClick={() => {
-                /* 新对话一律从「全局可查」重新开始，不继承上一段的选择 */
-                changeScope({ kind: 'global' })
-                void conversation.startNewConversation({ scope: 'global' })
+                /* 新对话仅限当前课程；全局范围需要用户在上下文菜单显式选择。 */
+                changeScope({ kind: 'course' })
+                void conversation.startNewConversation({ scope: 'course' })
               }}
             >＋ 新对话</button>
           </div>
@@ -481,34 +453,31 @@ export function AssistantPage() {
             >复习</button>
             <button
               type="button"
-              className="workspace-topbar-changes"
-              onClick={() => setChangesOpen((open) => !open)}
-              aria-pressed={changesOpen}
-              title={changesOpen ? '收起改动栏' : '展开改动栏'}
-              aria-label={changesOpen ? '收起改动栏' : '展开改动栏'}
-            >改动</button>
-            <button
-              type="button"
               className="primary-button workspace-topbar-new"
               disabled={busy || !courseId}
               onClick={() => {
-                changeScope({ kind: 'global' })
-                void conversation.startNewConversation({ scope: 'global' })
+                changeScope({ kind: 'course' })
+                void conversation.startNewConversation({ scope: 'course' })
               }}
             >＋ 新对话</button>
           </div>
         </header>
 
+        {scopeKind === 'notebook' && notebookTarget && courseId ? (
+          <NotebookScopePanel
+            courseId={courseId}
+            notebook={notebookTarget}
+            onExit={() => { setNotebookTarget(undefined); setScopeKind('course') }}
+          />
+        ) : (
+          <>
         <AssistantContextBar
           courses={courses}
           scopeKind={scopeKind}
-          scopeTargetId={scopeTargetId}
-          scopeTargetTitle={scopeTargetTitle}
+          scopeNotebookId={notebookTarget?.id}
+          notebooks={notebooks}
           onScopeChange={changeScope}
-          onOpenNotePicker={() => {
-            setScopeMenuOpen(false)
-            setNotePickerOpen(true)
-          }}
+          onSelectNotebook={changeNotebook}
           onSelectCourse={(id) => {
             /* 选当前课程 = 把范围落到「整门课程」；选别的课程 = 跳到那门课的上下文 */
             if (id === courseId) changeScope({ kind: 'course' })
@@ -540,19 +509,6 @@ export function AssistantPage() {
           onSkillAsk={useStarter}
           highlightMessageId={conversation.pendingMessageId}
           onHighlightConsumed={conversation.consumePendingMessage}
-          extras={(
-            <>
-              <NoteSuggestionCards
-                suggestions={noteSuggestions.suggestions}
-                currentContentByNoteId={noteSuggestions.contentById}
-                busyId={noteSuggestions.busyId}
-                adoptedContents={noteSuggestions.adopted}
-                onReview={(suggestion, decision, finalMarkdown) => void noteSuggestions.review(suggestion, decision, finalMarkdown)}
-                onUndo={(suggestion) => void noteSuggestions.undo(suggestion)}
-              />
-              {noteSuggestions.notice ? <p className="workspace-agent-notice">{noteSuggestions.notice}</p> : null}
-            </>
-          )}
         />
 
         <div className="workspace-chat-foot" ref={composerAreaRef}>
@@ -589,18 +545,9 @@ export function AssistantPage() {
             onQuickPrompt={useStarter}
           />
         </div>
+          </>
+        )}
       </section>
-
-      <ChangesPanel
-        open={changesOpen}
-        onToggle={() => setChangesOpen((open) => !open)}
-        items={noteSuggestions.changes}
-        /* 只把已解析完成的课件传下去，正在解析的还没页数，列出来只会误导 */
-        materials={materials.filter((item) => item.status === 'completed')}
-        onApplyAll={() => void noteSuggestions.applyAll()}
-        applying={noteSuggestions.busyId === '__all__'}
-        onPreview={(item) => setPreviewItem(item)}
-      />
 
       <MistakeBook
         open={mistakesOpen}
@@ -609,16 +556,6 @@ export function AssistantPage() {
         onClose={() => setMistakesOpen(false)}
         onExplain={askFromMistake}
         onRetry={askFromMistake}
-      />
-
-      <NotePreviewDialog
-        open={Boolean(previewItem)}
-        title={previewItem?.noteTitle ?? ''}
-        chapter={previewItem?.chapter}
-        /* 多目标：预览的「当前正文」按预览项自己的目标笔记取 */
-        current={previewItem ? (noteSuggestions.contentById[previewItem.noteId] ?? '') : ''}
-        proposed={previewItem?.proposed ?? ''}
-        onClose={() => setPreviewItem(undefined)}
       />
 
       {paletteOpen && (
@@ -636,18 +573,6 @@ export function AssistantPage() {
       )}
       <TermDialog open={termOpen} onClose={() => setTermOpen(false)} courseId={courseId} />
 
-      <NoteScopePicker
-        open={notePickerOpen}
-        courses={courses}
-        currentCourseId={courseId}
-        currentNotes={notes}
-        loadNotes={(id) => api.listNotes(id)}
-        onPick={(note) => {
-          changeScope({ kind: 'note', targetId: note.id, targetTitle: note.title })
-          setNotePickerOpen(false)
-        }}
-        onClose={() => setNotePickerOpen(false)}
-      />
     </div>
   )
 }

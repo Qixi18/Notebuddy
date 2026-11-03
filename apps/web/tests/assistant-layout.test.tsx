@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+﻿import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, test, vi } from 'vitest'
 
@@ -14,6 +14,9 @@ vi.mock('../src/api', () => ({
     /* P4：答疑页挂载即按课程拉待确认建议（空列表即可） */
     listCourseSuggestions: vi.fn(async () => []),
     getNote: vi.fn(),
+    /* Notebook 范围选择：答疑页挂载时会拉当前课程的 Notebook 列表 */
+    listNotebooks: vi.fn(async () => []),
+    getNotebookDocument: vi.fn(async () => ({ revision: 0, content: { type: 'doc', content: [] } })),
     /* P6：消息全文搜索 */
     searchMessages: vi.fn(async () => []),
     /* P10：自测卷 */
@@ -26,6 +29,7 @@ import { api } from '../src/api'
 import type { ConversationMessage } from '../src/types'
 import { WorkspaceProvider, type WorkspaceContextValue } from '../src/components/AppLayout'
 import { AssistantPage } from '../src/pages/AssistantPage'
+import { PET_STORAGE_KEY } from '../src/features/pet/petStorage'
 
 afterEach(cleanup)
 
@@ -151,11 +155,42 @@ function renderPage(overrides: {
   return { ...renderResult, conversation }
 }
 
-test('三区骨架渲染：左栏课程历史、中栏上下文条与对话、右栏改动栏', () => {
+test('a floating pet keeps its identity visible on narrow screens and returns to floating when widened', () => {
+  let wide = true
+  const listeners = new Set<(event: { matches: boolean }) => void>()
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+    get matches() { return query.includes('min-width') && wide },
+    media: query,
+    addEventListener: (_name: string, callback: (event: { matches: boolean }) => void) => { if (query.includes('min-width')) listeners.add(callback) },
+    removeEventListener: (_name: string, callback: (event: { matches: boolean }) => void) => { listeners.delete(callback) },
+  })))
+  localStorage.setItem(PET_STORAGE_KEY, JSON.stringify({ version: 1, mode: 'float', xRatio: .5, yRatio: .5 }))
+  try {
+    const view = renderPage()
+    expect(document.querySelector('.workspace-petfloat')).toBeTruthy()
+    expect(view.container.querySelector('.workspace-pet-anchor')).toBeTruthy()
+
+    act(() => { wide = false; for (const listener of listeners) listener({ matches: false }) })
+    expect(document.querySelector('.workspace-petfloat')).toBeNull()
+    expect(view.container.querySelector('.workspace-pet-identity-avatar')).toBeTruthy()
+    expect(view.container.querySelector('.workspace-pet-anchor')).toBeNull()
+    expect(JSON.parse(localStorage.getItem(PET_STORAGE_KEY)!).mode).toBe('float')
+
+    act(() => { wide = true; for (const listener of listeners) listener({ matches: true }) })
+    expect(document.querySelector('.workspace-petfloat')).toBeTruthy()
+    expect(view.container.querySelector('.workspace-pet-anchor')).toBeTruthy()
+  } finally {
+    cleanup()
+    localStorage.removeItem(PET_STORAGE_KEY)
+    vi.unstubAllGlobals()
+  }
+})
+
+test('助手页面渲染主对话区且隐藏旧的建议改动栏', () => {
   renderPage()
   expect(screen.getByLabelText('桌宠与会话')).toBeTruthy()
   expect(screen.getByLabelText('课程答疑对话')).toBeTruthy()
-  expect(screen.getByLabelText('待确认改动')).toBeTruthy()
+  expect(screen.queryByLabelText('待确认改动')).toBeNull()
   /* 上下文条：可见的「上下文」二字已去掉，靠 aria-label 定位 */
   expect(screen.getByLabelText('提问上下文')).toBeTruthy()
   expect(screen.getByText('数据结构与算法')).toBeTruthy()
@@ -178,20 +213,19 @@ test('Enter 直接发送并走 agent 流式通道；Shift+Enter 只换行', asyn
   fireEvent.keyDown(textarea, { key: 'Enter' })
   await waitFor(() => expect(askAgent).toHaveBeenCalled())
   expect(askAgent.mock.calls[0][0]).toBe('为什么红黑树插入最多两次旋转？')
-  /* 答疑页已切到 agent 通道：范围按 agent 语义下发（全局可查 → scope: 'global'） */
-  expect(askAgent.mock.calls[0][1]).toMatchObject({ scope: 'global' })
+  /* 未明确切换时仅按当前课程范围提问。 */
+  expect(askAgent.mock.calls[0][1]).toMatchObject({ scope: 'course' })
   expect(askAgent.mock.calls[0][1]).not.toHaveProperty('learningGoal')
 })
 
-test('新会话范围默认「全局可查」，首条消息前可改', () => {
+test('新会话范围默认当前课程，全局检索必须显式选择', () => {
   renderPage({ conversationId: undefined, conversations: [], messages: [] })
 
-  /* 未发消息：默认全局可查（左栏脚注与上下文条都显示），且可以点开菜单改范围 */
-  expect(screen.getAllByText('全局可查').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('整门课程').length).toBeGreaterThan(0)
   fireEvent.click(screen.getAllByTitle('修改提问范围')[0])
   expect(screen.getByRole('menu')).toBeTruthy()
-  fireEvent.click(screen.getByRole('menuitemradio', { name: '整门课程' }))
-  expect(screen.getAllByText('整门课程').length).toBeGreaterThan(0)
+  fireEvent.click(screen.getByRole('menuitemradio', { name: '全局可查' }))
+  expect(screen.getAllByText('全局可查').length).toBeGreaterThan(0)
 })
 
 test('会话一旦有消息，范围锁定：点击只给提示，菜单不再打开', () => {
@@ -204,7 +238,7 @@ test('会话一旦有消息，范围锁定：点击只给提示，菜单不再�
   expect(screen.queryByRole('menuitemradio')).toBeNull()
 })
 
-test('切换到的会话按其真实归属展示范围（锁定笔记）', () => {
+test('旧 Note 会话历史可见，但范围选择器不再提供 Note 写入入口', () => {
   const hourAgo = new Date(Date.now() - 3600 * 1000).toISOString()
   renderPage({
     conversationId: 'conv-9',
@@ -212,12 +246,14 @@ test('切换到的会话按其真实归属展示范围（锁定笔记）', () =>
     messages: [greeting],
   })
   expect(screen.getAllByText('红黑树笔记').length).toBeGreaterThan(0)
+  expect(screen.queryByText('锁定笔记', { exact: true })).toBeNull()
 })
 
-test('「＋新对话」以全局可查新建，不继承上一段的选择', () => {
+test('「＋新对话」以当前课程范围新建，不继承全局选择', () => {
   const view = renderPage({ conversationId: undefined, conversations: [], messages: [] })
+  pickGlobalScope()
   fireEvent.click(screen.getAllByRole('button', { name: /＋ 新对话/ })[0])
-  expect(view.conversation.startNewConversation).toHaveBeenCalledWith({ scope: 'global' })
+  expect(view.conversation.startNewConversation).toHaveBeenCalledWith({ scope: 'course' })
 })
 
 test('回答正文不露出机器标记，点角标会定位并展开卡底依据', () => {
@@ -373,10 +409,7 @@ function pickGlobalScope() {
 
 test('课件收窄控件仅在「整门课程」档显示，点开列出当前课程课件', () => {
   renderPage()
-  /* 默认全局可查：没有收窄入口 */
-  expect(screen.queryByRole('button', { name: /课件 · / })).toBeNull()
-
-  pickCourseScope()
+  /* 默认课程范围：可按需收窄到本课的单份课件。 */
   const chip = screen.getByRole('button', { name: /课件 · / })
   expect(chip.textContent).toContain('全部')
   fireEvent.click(chip)

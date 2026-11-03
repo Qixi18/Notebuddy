@@ -30,9 +30,17 @@ pwsh -NoProfile -File .\scripts\restore.ps1 -Package -Checkpoint <包路径> -De
 
 首页的“备份检查与恢复”面板可以选择 `.notebuddy.zip`，先展示课程、资料、文件数量、哈希错误和同名文件冲突，再确认恢复到隔离目录。该入口不会替换当前数据；如需切换正式数据目录，先保留检查点并按干净目录演练。
 
+## 培养方案导入与恢复
+
+森林的“导入培养方案”支持 PDF、DOCX 或粘贴文本，默认跟随设置中的处理路线，可对本次覆盖。标准路线本地解析，可用模型时分批提取；未配置模型时明确显示本地规则。全程 AI 使用已有页渲染与模型读页服务，扫描 PDF 可直接读页，DOCX 需要本机 Word/LibreOffice 或已配置 Gotenberg；缺少模型配置在入队前拒绝。
+
+任务按冻结路线继续，成功步骤保留；失败后修正模型服务再点“重试解析”。原文件或粘贴来源被改动时必须重新导入。预览可编辑课程代码/学分/学时/必选修，排除行可恢复，显示已知学分合计，与最近20次记录中的已确认方案对比；未包含的旧课程保留。一次最多300门课程，过长资料按学期拆分；不是毕业资格或学分规则判定引擎。
+
+确认后可先查看撤销影响。撤销前在 backups 目录创建 `pre-curriculum-revert-*` 检查点；只回收仍为空的新课程，并恢复未被后续改动的旧属性。有任何版本、内容或使用冲突则整批拒绝，不自动删除后续数据。备份失败时不改课程；旧记录没有快照则无撤销入口。验证时使用合成资料与隔离库，不在正式资料上演练撤销。
+
 ## GitHub 分支保护（需仓库管理员执行）
 
-本地文档与 `.githooks/pre-commit` 不构成服务端保护，本仓库本轮未修改 GitHub 设置。管理员可对 `main` 和 `feat/debug-integration` 分别建立 Ruleset/branch protection：禁止 force push 和分支删除；按团队决策限制直接 push，要求 PR review；仅在 CI 实际存在并确认状态检查名称后，设置 required checks。检查可绕过保护的主体并尽量收窄。提交签名、线性历史是可选项；启用线性历史前需调整本手册普通 merge 冲突整合协议，避免策略相互矛盾。当前没有核实 CI required check 名称，不要凭空配置。
+本地文档与 `.githooks/pre-commit` 不构成服务端保护。仓库现有 `.github/workflows/ci.yml`，其 job check 名称配置为 `CI / quality`；需先等待 GitHub Actions 实际运行成功，并确认 GitHub 显示的状态检查名称，再由管理员对 `main` 和 `feat/debug-integration` 配置 Ruleset/branch protection。建议要求 PR review 和该 CI 检查、禁止 force push 与分支删除，并按团队决定限制直接 push；应检查可绕过保护的主体并尽量收窄。当前未核实或更改远端设置，也未确认该检查已在 GitHub 成功。提交签名、线性历史是可选项；启用线性历史前需调整本手册普通 merge 冲突整合协议，避免策略相互矛盾。
 
 如需在服务完全停止后切换当前 `data/`，使用显式替换命令：
 

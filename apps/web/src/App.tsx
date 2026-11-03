@@ -1,19 +1,20 @@
-import { Link, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation, useParams, type RouteObject } from 'react-router-dom'
 import { lazy, Suspense, useEffect, useState } from 'react'
 
 import { AppLayout, WorkspaceProvider } from './components/AppLayout'
 import { CourseRouteGuard } from './components/CourseGate'
 import { useWorkspaceState } from './features/workspace/useWorkspaceState'
 import { api } from './api'
-import { AssistantPage } from './pages/AssistantPage'
 import { CourseOverviewPage } from './pages/CourseOverviewPage'
 import { CourseLibraryPage } from './pages/CourseLibraryPage'
 import { HomePage } from './pages/HomePage'
-import { NotebookPage } from './pages/NotebookPage'
-import { UnboundNotebookPage } from './pages/UnboundNotebookPage'
 import { RecycleBinPage } from './pages/RecycleBinPage'
+import { RouteErrorPage } from './components/RouteErrorPage'
+import { LegacyNotebookRedirect as LegacyNotebookRedirectV2 } from './features/notebook-workspace/LegacyNotebookRedirect'
 
 const ForestPage = lazy(() => import('./pages/ForestPage').then((module) => ({ default: module.ForestPage })))
+const AssistantPage = lazy(() => import('./pages/AssistantPage').then((module) => ({ default: module.AssistantPage })))
+const NotebookPage = lazy(() => import('./pages/NotebookPage').then((module) => ({ default: module.NotebookPage })))
 
 export function LegacyMaterialsRedirect() {
   const { courseId } = useParams<{ courseId: string }>()
@@ -46,31 +47,38 @@ function NotFoundPage() {
   )
 }
 
-function App() {
+export function AppRoot() {
   const workspace = useWorkspaceState()
 
   return (
     <WorkspaceProvider value={workspace}>
-      <Routes>
-        <Route element={<AppLayout />}>
-          <Route index element={<HomePage />} />
-          <Route path="/courses" element={<CourseLibraryPage />} />
-          <Route path="/notebooks/unbound/:notebookId" element={<UnboundNotebookPage />} />
-          <Route path="/recycle" element={<RecycleBinPage />} />
-          <Route path="/forest" element={<Suspense fallback={<p role="status">正在打开知识森林…</p>}><ForestPage /></Suspense>} />
-          <Route path="/courses/:courseId" element={<CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard>} />
-          <Route path="/notes" element={<Navigate to="/courses" replace />} />
-          <Route path="/courses/:courseId/notebook" element={<Navigate to="/courses" replace />} />
-          <Route path="/courses/:courseId/notebooks/:notebookId" element={<CourseRouteGuard><NotebookPage /></CourseRouteGuard>} />
-          <Route path="/courses/:courseId/notes" element={<Navigate to="/courses" replace />} />
-          <Route path="/courses/:courseId/notes/:noteId" element={<Navigate to="/courses" replace />} />
-          <Route path="/courses/:courseId/materials" element={<CourseRouteGuard><LegacyMaterialsRedirect /></CourseRouteGuard>} />
-          <Route path="/courses/:courseId/assistant" element={<CourseRouteGuard><AssistantPage /></CourseRouteGuard>} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Route>
-      </Routes>
+      <Outlet />
     </WorkspaceProvider>
   )
 }
 
-export default App
+export const appRoutes: RouteObject[] = [{
+  element: <AppRoot />,
+  errorElement: <RouteErrorPage />,
+  children: [{
+    element: <AppLayout />,
+    children: [
+      { index: true, element: <HomePage /> },
+      { path: '/courses', element: <CourseLibraryPage /> },
+      { path: '/notebooks/unbound/:notebookId', element: <Suspense fallback={<p role="status">正在打开笔记本…</p>}><NotebookPage /></Suspense>, errorElement: <RouteErrorPage /> },
+      { path: '/recycle', element: <RecycleBinPage /> },
+      { path: '/forest', element: <Suspense fallback={<p role="status">正在打开知识森林…</p>}><ForestPage /></Suspense>, errorElement: <RouteErrorPage /> },
+      { path: '/courses/:courseId', element: <CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard> },
+      { path: '/notes', element: <Navigate to="/courses" replace /> },
+      { path: '/courses/:courseId/notebook', element: <CourseRouteGuard><LegacyNotebookRedirectV2 /></CourseRouteGuard> },
+      { path: '/courses/:courseId/notebooks/:notebookId', element: <CourseRouteGuard><Suspense fallback={<p role="status">正在打开笔记本…</p>}><NotebookPage /></Suspense></CourseRouteGuard>, errorElement: <RouteErrorPage /> },
+      { path: '/courses/:courseId/notes', element: <Navigate to="/courses" replace /> },
+      { path: '/courses/:courseId/notes/:noteId', element: <Navigate to="/courses" replace /> },
+      { path: '/courses/:courseId/materials', element: <CourseRouteGuard><LegacyMaterialsRedirect /></CourseRouteGuard> },
+      { path: '/courses/:courseId/assistant', element: <CourseRouteGuard><Suspense fallback={<p role="status">正在打开 AI 答疑…</p>}><AssistantPage /></Suspense></CourseRouteGuard>, errorElement: <RouteErrorPage /> },
+      { path: '*', element: <NotFoundPage /> },
+    ],
+  }],
+}]
+
+export default AppRoot

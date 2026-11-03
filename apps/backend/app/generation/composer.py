@@ -340,7 +340,7 @@ FORMAT_REPAIR_PROMPT = (
 def compose_deepseek(
     snapshot: dict[str, Any], plan: dict[str, Any], unit_ids: list[str],
 ) -> Composition:
-    from app.document_processing.routes import provider_client
+    from app.document_processing.config import provider_client
     client = provider_client(snapshot.get('provider', {})) if snapshot.get('processing_route') == 'llm' else DeepSeekClient()
     def call_json(messages, *, max_tokens):
         if snapshot.get('processing_route') == 'llm':
@@ -463,7 +463,8 @@ def _compose_deepseek_batch(
         if first_error.code == "output_truncated":
             raise
         if first_error.code != "invalid_json":
-            raise CompositionError(f"模型生成失败：{first_error}", code="model_failed") from first_error
+            code = first_error.code if first_error.code.startswith("budget_") else "model_failed"
+            raise CompositionError(f"模型生成失败：{first_error}", code=code) from first_error
         repair_messages = [
             *messages,
             {"role": "assistant", "content": "上一次模型输出无法解析为 JSON。"},
@@ -477,7 +478,8 @@ def _compose_deepseek_batch(
         except DeepSeekError as exc:
             if exc.code == "output_truncated":
                 raise
-            raise CompositionError(f"模型生成失败（JSON 修复重试后仍无效）：{exc}", code="model_failed") from exc
+            code = exc.code if exc.code.startswith("budget_") else "model_failed"
+            raise CompositionError(f"模型生成失败（JSON 修复重试后仍无效）：{exc}", code=code) from exc
     try:
         return _composition_from_deepseek_result(result, allowed_ids)
     except CompositionError as exc:
@@ -507,7 +509,8 @@ def _compose_deepseek_batch(
     except DeepSeekError as exc:
         if exc.code == "output_truncated":
             raise
-        raise CompositionError(f"模型来源映射修复失败：{exc}", code="missing_sources") from exc
+        code = exc.code if exc.code.startswith("budget_") else "missing_sources"
+        raise CompositionError(f"模型来源映射修复失败：{exc}", code=code) from exc
     repaired_sources = repaired.get("sources")
     if not isinstance(repaired_sources, dict):
         raise CompositionError("模型来源映射修复响应缺少 sources 对象", code="missing_sources")
@@ -541,7 +544,8 @@ def repair_deepseek_document_format(
             {"role": "user", "content": FORMAT_REPAIR_PROMPT},
         ], max_tokens=NOTEBOOK_GENERATION_MAX_OUTPUT_TOKENS)
     except DeepSeekError as exc:
-        raise CompositionError(f"模型正文格式矫正失败：{exc}", code="document_format_repair_failed") from exc
+        code = exc.code if exc.code.startswith("budget_") else "document_format_repair_failed"
+        raise CompositionError(f"模型正文格式矫正失败：{exc}", code=code) from exc
     try:
         composition = _composition_from_deepseek_result(result, allowed_source_ids)
     except CompositionError as exc:

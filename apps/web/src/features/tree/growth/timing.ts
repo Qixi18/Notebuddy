@@ -1,0 +1,2 @@
+export const TREE_GROWTH_LIFETIME_MS = 1600
+export const HOME_TREE_GROWTH_TIME_SCALE = 1.4

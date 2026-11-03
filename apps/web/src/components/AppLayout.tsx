@@ -1,25 +1,24 @@
-import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { Outlet, useBlocker, useLocation, useNavigate } from 'react-router-dom'
+import { createContext, lazy, Suspense, useContext, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import type {
   Course,
   Job,
   KnowledgeGraph,
   Material,
-  Note,
   Page,
   UploadResponse,
 } from '../types'
 import type { ConversationState } from '../features/conversation/useConversation'
-import { AssistantDock } from '../features/assistant/AssistantDock'
 import { NotebookBridgeProvider } from '../features/notebook-editor/NotebookBridge'
-import type { AIAction } from '../features/notebook-editor/NotebookEditor'
-import { ConfirmDialog } from './ConfirmDialog'
 import { SettingsPanel } from './SettingsPanel'
-import { shouldBlockNoteNavigation } from '../features/notebook/navigation'
-import { readStorage, writeStorage } from '../utils/safeStorage'
-import { footerNavItems, primaryNavItems, resolveActiveNav, type SidebarNavId } from '../features/navigation/sidebarNav'
-import { DOCK_STORAGE, resolveDockOpen, resolveDockWidth } from '../features/assistant/dockLayout'
+import { NotebookNavigationGuard } from '../features/notebook-workspace/NotebookNavigationGuard'
+import { useAssistantDockController } from '../features/assistant/useAssistantDockController'
+import { readStorage } from '../utils/safeStorage'
+import type { SidebarNavId } from '../features/navigation/sidebarNav'
+import { AppSidebar } from './AppSidebar'
+
+const AssistantDock = lazy(() => import('../features/assistant/AssistantDock').then((module) => ({ default: module.AssistantDock })))
 
 export type Feature = 'notes' | 'materials' | 'assistant'
 
@@ -38,24 +37,13 @@ export type WorkspaceContextValue = {
   selectedPageNumber?: number
   setSelectedPageNumber: (page: number | undefined) => void
   openMaterialSource: (materialId: string, page: number | undefined) => void
-  notes: Note[]
-  upsertNotes: (notes: Note[]) => void
-  selectedNote?: Note
-  setSelectedNoteId: (id: string | undefined) => void
-  noteDraft: string
-  setNoteDraft: (value: string) => void
-  editingNote: boolean
-  setEditingNote: (editing: boolean) => void
   graph: KnowledgeGraph
   job?: Job
   /** 答疑的唯一状态源：首页「问 AI」、答疑页、悬浮答疑坞共用同一份会话 */
   conversation: ConversationState
   busy: boolean
-  noteSaving: boolean
-  noteDirty: boolean
   documentDirty: boolean
   setDocumentDirty: (dirty: boolean) => void
-  reloadNote: () => Promise<void>
   error?: string
   setError: (message: string | undefined) => void
   createCourse: (name: string) => Promise<Course>
@@ -63,10 +51,8 @@ export type WorkspaceContextValue = {
   retryMaterial: (materialId: string) => Promise<void>
   reparseMaterial: (materialId: string) => Promise<void>
   requestOCR: (materialId: string) => Promise<void>
-  saveNote: () => Promise<void>
   refreshCourses: () => Promise<void>
   refreshCurrentMaterials: () => Promise<void>
-  refreshCurrentNotes: () => Promise<void>
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null)
@@ -105,74 +91,20 @@ export function featurePath(courseId: string, feature: Feature): string {
   return `/courses/${courseId}/${feature}`
 }
 
-function SidebarIcon({ id, fallback }: { id: SidebarNavId; fallback: string }) {
-  if (id === 'forest') return <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3 5 12l3 2-5 6 4 3h10l4-3-5-6 3-2-7-9ZM12 23v6M23 12l-3 4 2 2-2 3 2 3h6l2-3-3-3 2-2-6-4ZM25 24v5"/></svg>
-  if (id === 'recycle') return <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 9h22M12 9V5h8v4M8 9l1 19h14l1-19M13 14v9M19 14v9"/></svg>
-  return <span aria-hidden="true">{fallback}</span>
-}
-
 export function AppLayout() {
-  const { courseId, courses, error, setError, noteDirty, documentDirty, setDocumentDirty, setEditingNote } = useWorkspace()
+  const { courseId, courses, error, setError, documentDirty, setDocumentDirty } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const isHome = location.pathname === '/'
   const isForest = location.pathname === '/forest'
   const isAssistantPage = location.pathname.endsWith('/assistant')
-  const activeNav = resolveActiveNav(location.pathname)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readStorage('notebuddy.sidebar-collapsed') === 'true')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
-  const createAreaRef = useRef<HTMLDivElement>(null)
-  /* 抽屉开合与宽度都由外壳持有：宽度要写进 CSS 变量驱动网格列，正文才能跟着让位 */
-  const [dockOpen, setDockOpen] = useState(() => resolveDockOpen(readStorage(DOCK_STORAGE.open)))
-  const [dockWidth, setDockWidth] = useState(() => resolveDockWidth(readStorage(DOCK_STORAGE.width)))
-  const [dockResizing, setDockResizing] = useState(false)
-  const [notebookAction, setNotebookAction] = useState<AIAction | null>(null)
-  /* 笔记页的工具条只负责“请求打开助手”；开合仍由外壳唯一持有，避免第二套侧栏状态 */
-  useEffect(() => {
-    const openAssistant = (event: Event) => {
-      setDockOpen(true)
-      const action = (event as CustomEvent<{ action?: AIAction }>).detail?.action
-      setNotebookAction(action ?? null)
-    }
-    window.addEventListener('notebuddy:open-assistant', openAssistant)
-    return () => window.removeEventListener('notebuddy:open-assistant', openAssistant)
-  }, [])
+  const dock = useAssistantDockController()
   /* 答疑页本身就是完整助手，此处再挂一个紧凑抽屉纯属重复，故该页整页不提供悬浮球与抽屉；
      其余页面（含首页、知识森林）全局常驻 */
   const dockSupported = !isAssistantPage
-  const showAssistantDock = dockSupported && dockOpen
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => shouldBlockNoteNavigation(noteDirty || documentDirty, currentLocation, nextLocation))
-
-  useEffect(() => {
-    if (!noteDirty && !documentDirty) return
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
-    window.addEventListener('beforeunload', warnBeforeUnload)
-    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-  }, [noteDirty, documentDirty])
-
-  useEffect(() => {
-    writeStorage('notebuddy.sidebar-collapsed', String(sidebarCollapsed))
-  }, [sidebarCollapsed])
-
-  useEffect(() => {
-    if (!createOpen) return
-    const closeOutside = (event: PointerEvent) => {
-      if (!createAreaRef.current?.contains(event.target as Node)) setCreateOpen(false)
-    }
-    const closeEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setCreateOpen(false) }
-    document.addEventListener('pointerdown', closeOutside)
-    document.addEventListener('keydown', closeEscape)
-    return () => { document.removeEventListener('pointerdown', closeOutside); document.removeEventListener('keydown', closeEscape) }
-  }, [createOpen])
-
-  useEffect(() => {
-    writeStorage(DOCK_STORAGE.open, String(dockOpen))
-  }, [dockOpen])
-
-  useEffect(() => {
-    writeStorage(DOCK_STORAGE.width, String(dockWidth))
-  }, [dockWidth])
+  const showAssistantDock = dockSupported && dock.open
 
   function handleNav(id: SidebarNavId) {
     switch (id) {
@@ -194,70 +126,14 @@ export function AppLayout() {
   return (
     <NotebookBridgeProvider>
     <div
-      className={`app-shell app-shell-garden${isHome ? ' app-shell-home' : isForest ? ' app-shell-forest' : ''}${showAssistantDock ? ' app-shell-with-assistant' : ''}${sidebarCollapsed ? ' app-shell-sidebar-collapsed' : ''}${dockResizing ? ' app-shell-dock-resizing' : ''}`}
+      className={`app-shell app-shell-garden${isHome ? ' app-shell-home' : isForest ? ' app-shell-forest' : ''}${showAssistantDock ? ' app-shell-with-assistant' : ''}${sidebarCollapsed ? ' app-shell-sidebar-collapsed' : ''}${dock.resizing ? ' app-shell-dock-resizing' : ''}`}
       /* 抽屉宽度只在这一处写进 CSS 变量，网格第三列引用它，拖拽即改一格变量 */
-      style={{ '--dock-w': `${dockWidth}px` } as CSSProperties}
+      style={{ '--dock-w': `${dock.width}px` } as CSSProperties}
     >
-      <aside className={`app-sidebar${isHome ? ' app-sidebar-home' : ''}`}>
-        <div className="sidebar-header">
-          <button className="brand-lockup" onClick={() => navigate('/')} aria-label="返回首页" title={sidebarCollapsed ? '返回首页' : undefined}>
-            <span className="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.7 3.8c-7 .3-12.4 2.4-14.6 6.8-1.5 3 .1 6.1 3.2 6.4 4.9.5 9.1-4.7 11.4-13.2Z"/><path d="M4.6 21c1.9-5.4 5.3-8.9 10.4-11.8"/></svg></span>
-            <span><strong>NoteBuddy</strong><small>课程学习空间</small></span>
-          </button>
-
-          {/* 收起按钮贴侧边栏右上角：方形、纯图标，不带文字（展开态靠 aria-label 说明） */}
-          <button className="sidebar-collapse-toggle" type="button" aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}>
-            <span aria-hidden="true">{sidebarCollapsed ? '›' : '‹'}</span>
-          </button>
-        </div>
-
-        <div className="sidebar-create-area" ref={createAreaRef}>
-          <button className="sidebar-create-button" type="button" title={sidebarCollapsed ? '新建' : undefined} aria-expanded={createOpen} aria-controls={createOpen ? 'sidebar-create-menu' : undefined} onClick={() => setCreateOpen((open) => !open)}>
-            <span aria-hidden="true">＋</span><span className="sidebar-create-label">新建</span>
-          </button>
-          {createOpen && <div className="sidebar-create-menu" id="sidebar-create-menu" aria-label="新建内容">
-            <button type="button" onClick={() => { setCreateOpen(false); navigate('/courses', { state: { openCreateCourse: true } }) }}>新建课程</button>
-            <button type="button" onClick={() => { setCreateOpen(false); navigate('/courses', { state: { openCreateNote: true } }) }}>新建笔记</button>
-          </div>}
-        </div>
-        <nav className="sidebar-nav" aria-label="主导航">
-          {primaryNavItems.map((item) => (
-            <button
-              className={`sidebar-link ${activeNav === item.id ? 'sidebar-link-active' : ''}`}
-              key={item.id}
-              type="button"
-              aria-current={activeNav === item.id ? 'page' : undefined}
-              title={sidebarCollapsed ? item.label : undefined}
-              onClick={() => handleNav(item.id)}
-            >
-              <span className="sidebar-link-icon" aria-hidden="true"><SidebarIcon id={item.id} fallback={item.icon} /></span>
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </nav>
-
-        {!sidebarCollapsed && <p className="home-sidebar-quote">每一页积累，<br />都在悄悄生长。</p>}
-
-        {isHome && !sidebarCollapsed && <svg className="home-sidebar-doodle" viewBox="0 0 220 132" aria-hidden="true">
-          <path d="M14 116c47-8 128-9 192 1" fill="none" stroke="#ded7c3" strokeWidth="3" strokeLinecap="round"/>
-          <path d="M57 81c-4-17 3-28 13-36 5 13 3 24-5 34m13 2c0-20 9-32 22-39 2 16-4 29-16 40m-39-2c-10-12-10-24-5-36 13 7 19 17 17 31" fill="#86aa70" stroke="#6c965b" strokeWidth="2" strokeLinejoin="round"/>
-          <path d="M45 82h48l-6 30H51z" fill="#d7bd92" stroke="#aa8f65" strokeWidth="2"/>
-          <path d="M94 101h51v11H94zm7-14h50v11h-50zm8-14h45v11h-45" fill="#f4f2e7" stroke="#526f61" strokeWidth="2" strokeLinejoin="round"/>
-          <path d="M149 95c10-11 24-8 31 1l15 1c5 0 9 5 8 10l-1 5h-37c-8 0-14-5-16-12Z" fill="#fffdf6" stroke="#34483d" strokeWidth="2.5" strokeLinejoin="round"/>
-          <path d="M181 94c3-8 11-10 16-7l-3 10m-25 4h1m16 0h1m-10 4 4 2 4-2" fill="none" stroke="#34483d" strokeWidth="2" strokeLinecap="round"/>
-          <path d="m186 89 2-7m-2 8 7-4" fill="none" stroke="#34483d" strokeWidth="2" strokeLinecap="round"/>
-          <path d="m20 37 4-8m10 14 7-4" fill="none" stroke="#729768" strokeWidth="3" strokeLinecap="round"/>
-        </svg>}
-
-        <div className="sidebar-footer">
-          {footerNavItems.map((item) => (
-            <button className="sidebar-settings-button" key={item.id} type="button" onClick={() => handleNav(item.id)} aria-label={`打开${item.label}`}>
-              <span className="sidebar-settings-icon" aria-hidden="true">{item.icon}</span>
-              <span className="sidebar-settings-label">{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </aside>
+      <AppSidebar isHome={isHome} collapsed={sidebarCollapsed} onCollapsedChange={setSidebarCollapsed}
+        onNavigate={handleNav}
+        onCreateCourse={() => navigate('/courses', { state: { openCreateCourse: true } })}
+        onCreateNote={() => navigate('/courses', { state: { openCreateNote: true } })} />
 
       <main className={`app-main${isHome ? ' app-main-home' : isForest ? ' app-main-forest' : ''}`}>
         {error && (
@@ -268,18 +144,18 @@ export function AppLayout() {
         )}
         <Outlet />
       </main>
-      {showAssistantDock && <AssistantDock
-        width={dockWidth}
-        onWidthChange={setDockWidth}
-        onClose={() => setDockOpen(false)}
-        onResizeStateChange={setDockResizing}
-        notebookAction={notebookAction}
-        onNotebookActionConsumed={() => setNotebookAction(null)}
-      />}
-      {dockSupported && !dockOpen && <button
+      {showAssistantDock && <Suspense fallback={null}><AssistantDock
+        width={dock.width}
+        onWidthChange={dock.setWidth}
+        onClose={() => dock.setOpen(false)}
+        onResizeStateChange={dock.setResizing}
+        notebookAction={dock.notebookAction}
+        onNotebookActionConsumed={dock.clearNotebookAction}
+      /></Suspense>}
+      {dockSupported && !dock.open && <button
         className="assistant-fab"
         type="button"
-        onClick={() => setDockOpen(true)}
+        onClick={() => dock.setOpen(true)}
         aria-label="打开课程学习助手"
         title="打开课程学习助手"
       >
@@ -293,16 +169,7 @@ export function AppLayout() {
         <span className="assistant-fab-label" aria-hidden="true">叫桌宠来</span>
       </button>}
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
-      {blocker.state === 'blocked' && <ConfirmDialog
-        eyebrow="未保存的笔记"
-        title="离开正在编辑的笔记？"
-        description={documentDirty ? '正文修改尚未保存。离开此页面会丢弃未保存的内容。' : '当前修改尚未保存。离开此页面会丢弃这份草稿，已保存的笔记正文不会改变。'}
-        confirmLabel="放弃草稿并离开"
-        cancelLabel="继续编辑"
-        tone="danger"
-        onConfirm={() => { setEditingNote(false); setDocumentDirty(false); blocker.proceed() }}
-        onCancel={() => blocker.reset()}
-      />}
+      <NotebookNavigationGuard dirty={documentDirty} onDiscard={() => setDocumentDirty(false)} />
     </div>
     </NotebookBridgeProvider>
   )

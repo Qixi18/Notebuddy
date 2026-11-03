@@ -63,7 +63,7 @@ def process_notebook_relation_job(job_id: str) -> None:
                 put_step,
                 structured_call,
             )
-            from app.document_processing.routes import provider_client
+            from app.document_processing.config import provider_client
             llm_route = snapshot.get('processing_route') == 'llm'
             client = provider_client(snapshot.get('provider', {})) if llm_route else DeepSeekClient()
             if not client.configured:

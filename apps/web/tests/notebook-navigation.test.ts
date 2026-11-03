@@ -21,12 +21,17 @@ test('next and previous follow chapter order and retain IDs', () => {
   assert.equal(adjacentSection(outline, 'n1', -1), undefined)
 })
 
-test('query-only navigation protects a dirty section draft', () => {
+test('query-only navigation stays within the notebook and does not block section changes', () => {
   const here = { pathname: '/courses/c/notebook', search: '?section=n1' }
   const there = { ...here, search: '?section=n2' }
-  assert.equal(shouldBlockNoteNavigation(true, here, there), true)
+  assert.equal(shouldBlockNoteNavigation(true, here, there), false)
   assert.equal(shouldBlockNoteNavigation(false, here, there), false)
   assert.equal(shouldBlockNoteNavigation(true, here, here), false)
+  assert.equal(shouldBlockNoteNavigation(true, here, { pathname: '/forest', search: '' }), true)
+  assert.equal(shouldBlockNoteNavigation(true, { pathname: '/courses/c/notebooks/n1', search: '' }, { pathname: '/courses', search: '' }), true)
+  assert.equal(shouldBlockNoteNavigation(true, { pathname: '/notebooks/unbound/n1', search: '' }, { pathname: '/courses', search: '' }), true)
+  assert.equal(shouldBlockNoteNavigation(true, { pathname: '/courses/c/notebook/', search: '' }, { pathname: '/forest', search: '' }), true)
+  assert.equal(shouldBlockNoteNavigation(true, { pathname: '/settings/notebook', search: '' }, { pathname: '/forest', search: '' }), false)
 })
 
 test('a late chapter response cannot replace a newer saved revision', () => {

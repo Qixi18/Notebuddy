@@ -1,20 +1,22 @@
 # NoteBuddy
 
-NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、整理和编辑笔记，在知识树中定位内容，并基于课程资料进行检索答疑。当前仓库以本地 Web 应用为主要运行形态；Electron 包装仍需完整联调。Agent 入口见 [AGENTS.md](AGENTS.md)，详细规则见 [agent.md](agent.md)。
+NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、整理和编辑笔记，在知识树中定位内容，并基于课程资料进行检索答疑。当前仓库以本地 Web 应用为主要运行形态；Electron 包装仍需完整联调。Agent 规则见 [AGENTS.md](AGENTS.md)，三人协作流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，目录职责见 [模块职责地图](docs/module-map.md)。
 
 ## 当前架构基线 / 重大变更
 
 当前正式可编辑 Notebook 正文以 `Notebook.document_json` 为唯一权威源，并通过 revision/CAS 保存。原始资料解析结果、目录、检索块和森林视图属于来源或派生数据，不是第二套正文。架构决策入口见 [ADR 索引](docs/architecture-decisions/README.md)；基线记录 ADR-0001 当前为 Proposed，尚未获协作者审核。任何全局架构变更必须按根目录 [AGENTS.md](AGENTS.md) 公示并同步契约、测试和跨 Agent 影响。
 
+**当前架构公告**：`feat/overall-inspection` 是本轮工程治理和架构规范化分支；`feat/debug-integration` 是日常共享集成基线；`main` 是稳定版本分支。正文、来源解析和派生索引的权威边界见上文及 [架构说明](docs/architecture.md)。整改路线见 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md)；Notebook/Material 路由职责下沉见 [ADR-0003](docs/architecture-decisions/ADR-0003-service-layer-final-extraction.md)。其余复杂会话、Forest、Knowledge、Courses 用例及完整验收见 [ADR-0004](docs/architecture-decisions/ADR-0004-remaining-business-use-cases.md)，实现与自动回归已记录，ADR 仍为 Proposed，等待技术审查。当前主要目录职责见 [模块职责地图](docs/module-map.md)。
+
 ## 当前能力与边界
 
 - 一门课程可有多本笔记本；笔记按讲次、章节和小节组织，知识树叶子定位到具体笔记小节。课程、资料、笔记、会话及修改记录保存在本地 SQLite。
 - 资料上传后进入持久任务队列，由独立执行器解析。解析结果保留来源位置与告警；扫描 PDF 等缺少可提取文字的情况需要检查或启用 OCR。
-- Notebook 上传后的初始/增量生成通过质量门禁后可写入正式正文；Agent 主动编辑已有正文则通过待审建议或受控操作，保留用户修改与 revision 保护。旧 Note 路径另有兼容建议流程。
+- Notebook 上传后的初始/增量生成通过质量门禁后可写入正式正文；当前 Agent 答疑不修改正文，旧编辑建议数据与审核 API 暂保留兼容但不由 Agent 新建。
 - 课程答疑支持持久会话、资料检索、来源展示与可选的网络搜索。未配置外部模型时存在本地降级路径；降级结果不代表真实模型质量。
 - 首页展示近期课程知识树，森林页浏览全部课程。培养方案先预览再确认导入。
 
-产品和验证状态会随开发变化。功能细节见 [架构说明](docs/architecture.md)、[API](docs/api.md) 和 [范围变化](docs/scope-changes.md)；已执行的检查及尚待验收项见 [验收矩阵](docs/acceptance.md)。历史设计和交接记录位于 [docs/superpowers](docs/superpowers) 与 [docs/handoffs](docs/handoffs)，其中的旧方案不自动代表当前行为。
+产品和验证状态会随开发变化。功能细节见 [架构说明](docs/architecture.md)、[API](docs/api.md)；已执行的检查及尚待验收项见 [验收矩阵](docs/acceptance.md)。当前权威文档入口见 [文档导航](docs/index.md)。
 
 ## 目录
 
@@ -36,7 +38,7 @@ pwsh -NoProfile -File .\scripts\setup.ps1
 pwsh -NoProfile -File .\scripts\dev.ps1
 ```
 
-`setup.ps1` 可重复执行：优先使用项目内运行时，缺少时复制本机已有的 UV/Node；使用锁文件安装后端、Web 和 Desktop 依赖。后端标准环境是 `apps/backend/.venv-document`，包含 PyMuPDF、fonttools 及 CPU RapidOCR；RapidOCR 的 ONNX 模型随包留在该环境内。Python 安装使用 `--no-bin --no-registry`，不改系统 PATH、Python 注册表或已有 `.env`。首次安装需要联网下载依赖。
+`setup.ps1` 可重复执行：优先使用项目内运行时，缺少时复制本机已有的 UV/Node；使用锁文件安装后端、Web 和 Desktop 依赖。后端标准环境是 `apps/backend/.venv-document`，包含 PyMuPDF、fonttools 及 CPU RapidOCR；RapidOCR 的 ONNX 模型随包留在该环境内。PaddleOCR 与 MinerU 是可选本地组件；启用 `NOTEBOOK_OCR_ENGINE=auto` 时优先使用 PaddleOCR，未安装时回退到 RapidOCR。Python 安装使用 `--no-bin --no-registry`，不改系统 PATH、Python 注册表或已有 `.env`。首次安装需要联网下载依赖。
 
 可用 `-UvPath <uv.exe>`、`-NodeDirectory <Node安装目录>` 指定已有运行时，`-PythonVersion 3.12` 选择 Python；已有前端依赖时可加 `-SkipWeb -SkipDesktop`。运行时、UV/npm/Electron 下载缓存及安装日志都在 `.runtime`，不提交到 Git。安装失败会返回非零退出码并给出日志路径。
 
@@ -61,7 +63,7 @@ $env:NOTEBOOK_DESKTOP_DEV_URL = 'http://127.0.0.1:5173'
 
 ## 可选配置
 
-尚无 `.env` 时，复制根目录 `.env.example` 为 `.env`，按需填写 `DEEPSEEK_API_KEY`、`EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` 和 `TAVILY_API_KEY`。已有 `.env` 请直接编辑，避免覆盖密钥。没有外部服务配置时仍可运行本地降级功能。示例配置启用 `NOTEBOOK_OCR_ENABLED=true`、`NOTEBOOK_OCR_ENGINE=rapidocr`；已有配置由用户决定是否开启，setup 不会更改它。OCR 页数和超时限制也在示例中。
+尚无 `.env` 时，复制根目录 `.env.example` 为 `.env`，填写要使用的模型服务 API Key；如启用文档付费处理，还要按供应商当前费率补齐模型价格和有效汇率。Embedding 与 Tavily 是可选服务，只有启用对应能力时才需要配置。已有 `.env` 请直接编辑，避免覆盖密钥。未设置的本地地址、端口、OCR 和解析器参数使用程序默认值；没有外部服务配置时仍可运行本地降级功能。示例中的空价格来源或零价格会让付费调用按设计停止，避免未定价调用。
 
 本地单用户设置面板可写入部分密钥；共享或远程部署前应关闭此能力或启用口令，并单独完成身份、数据隔离和密钥管理设计。不要提交 `.env`、`data/` 或真实课件。配置和安全边界见 [安全说明](docs/security.md)。
 
@@ -89,9 +91,12 @@ pwsh -NoProfile -File .\scripts\tests\local-environment.test.ps1 -NodePath .\.ru
 
 也可在 `apps/backend` 用 `& .\.venv-document\Scripts\python.exe -m ruff check app tests`、`& .\.venv-document\Scripts\python.exe -m pytest` 运行单项检查。自动检查不能代替真实课件、浏览器流程、外部模型与部署验收；记录实际验证范围并对照 [验收矩阵](docs/acceptance.md)。
 
+GitHub Pull Request 和共享/稳定分支推送另运行 [CI 工作流](.github/workflows/ci.yml)，包括静态架构边界检查。该配置不会自动开启分支保护；Required status checks 仍需仓库管理员在 GitHub Ruleset/branch protection 中按实际成功的检查名称配置。PR 信息模板见 [.github/pull_request_template.md](.github/pull_request_template.md)。
+
 ## 进一步阅读
 
-- [软件工程文档](docs/软件工程文档/README.md)：需求分析、概要设计、需求说明和教学模板。
-- [文档索引](docs/index.md)、[架构说明](docs/architecture.md)、[API](docs/api.md)
-- [资料解析](docs/parsing.md)、[来源与证据](docs/evidence.md)、[迁移与恢复](docs/migrations.md)
-- [运维说明](docs/operations.md)、[仓库协作指南](agent.md)
+- [文档索引](docs/index.md)、[架构说明](docs/architecture.md)、[模块职责地图](docs/module-map.md)
+- [后端数据契约](docs/backend-data-contract.md)、[API](docs/api.md)、[资料解析](docs/parsing.md)
+- [迁移与恢复](docs/migrations.md)、[运维说明](docs/operations.md)、[安全说明](docs/security.md)
+- [架构决策](docs/architecture-decisions/README.md)、[验收矩阵](docs/acceptance.md)
+- [协作指南](CONTRIBUTING.md)

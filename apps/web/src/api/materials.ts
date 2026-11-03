@@ -1,4 +1,4 @@
-import type { AssetDocument, AssetProcessingJob, AssetResource, Coverage, DeletionPreview, DocumentBlock, DocumentCoverage, DocumentParseRunSummary, Job, Material, Page, PageEvidence, UploadResponse, WebSource } from '../types'
+import type { AssetDocument, AssetProcessingBudget, AssetProcessingJob, AssetResource, Coverage, DeletionPreview, DocumentBlock, DocumentCoverage, DocumentParseRunSummary, Job, Material, Page, PageEvidence, UploadResponse, WebSource } from '../types'
 import { request } from './http'
 import type { ProcessingRoute } from './config'
 
@@ -64,6 +64,9 @@ export const materialApi = {
   ),
   getAssetCoverage: (assetId: string, notebookId: string, runId?: string) => request<DocumentCoverage>(
     `/api/v1/assets/${assetId}/document/coverage?notebook_id=${encodeURIComponent(notebookId)}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`,
+  ),
+  getAssetProcessingBudget: (assetId: string, notebookId: string) => request<AssetProcessingBudget>(
+    `/api/v1/assets/${assetId}/processing-budget?notebook_id=${encodeURIComponent(notebookId)}`,
   ),
   assetPageRenderUrl: (assetId: string, notebookId: string, pageNumber: number, runId?: string) =>
     `/api/v1/assets/${assetId}/document/pages/${pageNumber}/render?notebook_id=${encodeURIComponent(notebookId)}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`,

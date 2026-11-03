@@ -5,6 +5,9 @@
 ## 当前记录
 
 - [ADR-0001：Notebook 正文权威源与资料处理边界](ADR-0001-notebook-document-source-of-truth.md) — Proposed，尚未审核。
+- [ADR-0002：Notebook 核心架构整改路线](ADR-0002-verified-notebook-assistant-and-file-budget.md) — Proposed，A1/A2、B1/B2、C1/C2、S1–S8 有实现记录；自动回归已完成，真实材料/模型/浏览器及迁移恢复验收仍未完成。协作者审核前不能视为 Accepted。
+- [ADR-0003：后端路由业务职责下沉](ADR-0003-service-layer-final-extraction.md) — Proposed，Notebook/Material 等 Service 下沉与对应自动验证已完成，等待技术把关者审查。
+- [ADR-0004：剩余复杂路由用例的应用服务边界](ADR-0004-remaining-business-use-cases.md) — Proposed，`f52ced9` 基线上的会话/森林/知识/课程用例分层与自动验收已完成；真实资料、模型及浏览器人工验收仍有明确缺口，等待技术审查。
 
 ## 状态含义
 

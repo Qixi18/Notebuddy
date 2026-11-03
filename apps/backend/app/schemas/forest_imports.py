@@ -5,17 +5,17 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 Level = Literal["foundation", "professional", "application", "unspecified"]
 
 
-class CurriculumRow(BaseModel):
+class CurriculumCourseFields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    key: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=200)
+    course_code: str | None = Field(default=None, max_length=80)
+    credits: float | None = Field(default=None, ge=0, le=100, allow_inf_nan=False)
+    hours: float | None = Field(default=None, ge=0, le=10000, allow_inf_nan=False)
+    requirement: Literal['required', 'elective', 'unspecified'] = 'unspecified'
     semester: int | None = Field(default=None, ge=1, le=30)
     level: Level = "unspecified"
     prerequisites: list[str] = Field(default_factory=list, max_length=30)
-    source_label: str = Field(max_length=500)
-    source_excerpt: str = Field(max_length=12000)
-    existing_course_id: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -31,6 +31,19 @@ class CurriculumRow(BaseModel):
             raise ValueError("先修课程名称无效")
         return list(dict.fromkeys(name.strip() for name in value))
 
+    @field_validator('course_code')
+    @classmethod
+    def clean_code(cls, value):
+        return value.strip() or None if value is not None else None
+
+
+class CurriculumRow(CurriculumCourseFields):
+    key: str = Field(min_length=1, max_length=100)
+    source_label: str = Field(max_length=500)
+    source_excerpt: str = Field(max_length=12000)
+    existing_course_id: str | None = None
+    expected_profile_revision: int | None = Field(default=None, ge=0)
+
 
 class CurriculumConfirm(BaseModel):
     rows: list[CurriculumRow] = Field(min_length=1, max_length=300)
@@ -38,13 +51,17 @@ class CurriculumConfirm(BaseModel):
 
 class CurriculumImportRead(BaseModel):
     id: str
-    status: Literal["pending", "processing", "preview", "confirmed", "failed"]
+    status: Literal["pending", "processing", "preview", "confirmed", "failed", "reverted"]
     filename: str | None
     mode: str | None
     warnings: list[str]
     rows: list[CurriculumRow]
     error_message: str | None
     job_id: str | None
+    progress: int = Field(default=0, ge=0, le=100)
+    processing_route: Literal['standard', 'llm'] = 'standard'
+    phase: str | None = None
+    can_revert: bool = False
 
 
 class ForestJobRead(BaseModel):

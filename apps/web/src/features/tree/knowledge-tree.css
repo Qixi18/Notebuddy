@@ -18,9 +18,6 @@
 .kt-book-title { fill: #344c36; font-size: 17px; font-weight: 600; }
 .kt-note-label { fill: #334b35; font-family: var(--nb-sans); }
 .kt-state { fill: #54624b; font: 12px var(--nb-sans); }
-.kt-tree-planned .kt-branch image, .kt-tree-planned [data-leaf-paint] image { opacity: .65; filter: saturate(.42); }
-.kt-tree-planned .kt-sapling-crown image { opacity: .86; filter: saturate(.65); }
-.kt-tree-completed .kt-branch image, .kt-tree-completed [data-leaf-paint] image { filter: saturate(1.1) brightness(.83); }
 .kt-note-label-bg, .kt-leaf-hit, .kt-book-plaque { stroke: transparent; stroke-width: 2; transition: fill 150ms, stroke 150ms; }
 .kt-note-label-bg { fill: #e4edda; fill-opacity: 1; stroke: #a4b58e; stroke-width: .8; vector-effect: non-scaling-stroke; }
 .kt-note-label { font-weight: 500; }

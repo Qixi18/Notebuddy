@@ -152,6 +152,15 @@
 .forest-import-confirm { display: flex; align-items: center; justify-content: space-between; gap: 25px; padding-top: 20px; }
 .forest-import-confirm p { color: #98a48c; font-size: 11px; }
 .forest-import-confirm button { white-space: nowrap; font-size: 12px; }
+.forest-import-summary, .forest-import-restores { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: 16px 0; font-size: 13px; }
+.forest-import-summary span, .forest-import-table td > small { color: #728269; line-height: 1.6; }
+.forest-import-table td > small { display: block; margin-top: 9px; }
+.forest-import-restores button { padding: 6px 10px; font-size: 12px; }
+.forest-import-comparison { margin: 16px 0; padding: 12px; background: #eff4e7; font-size: 13px; line-height: 1.8; }
+.forest-import-comparison summary { cursor: pointer; }
+.forest-import-table .forest-import-metadata { font-size: 12px; color: #566b4d; }
+.forest-import-metadata label { display: block; margin-top: 10px; }
+.forest-import-metadata input, .forest-import-metadata select { display: block; width: 100%; }
 .forest-task-status { text-align: center; padding: 45px 20px; color: #92a17e; }
 .forest-task-status h3 { font: 500 23px var(--nb-sans); }
 .forest-task-status p { font-size: 12px; line-height: 1.8; }

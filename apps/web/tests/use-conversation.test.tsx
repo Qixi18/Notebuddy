@@ -24,6 +24,10 @@ vi.mock('../src/api', () => ({
     createConversation: vi.fn(async (_courseId: string, title: string) => ({
       id: 'conv-b', course_id: 'c1', title, default_scope: 'global', created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
     })),
+    listNotebookConversations: vi.fn(async () => []),
+    createNotebookConversation: vi.fn(async (notebookId: string) => ({
+      id: 'conv-notebook', course_id: null, notebook_id: notebookId, title: '新对话', default_scope: 'notebook', scope: 'notebook', created_at: '2026-01-02T00:00:00Z', updated_at: '2026-01-02T00:00:00Z',
+    })),
     listConversationMessages: vi.fn(async () => []),
   },
 }))
@@ -46,6 +50,7 @@ vi.mock('../src/api/agent', async (importOriginal) => {
 })
 
 import { useConversation } from '../src/features/conversation/useConversation'
+import { api } from '../src/api'
 
 afterEach(cleanup)
 
@@ -56,12 +61,32 @@ function Harness() {
   return null
 }
 
+function NotebookHarness() {
+  state.conv = useConversation(undefined, 'book-unbound')
+  return null
+}
+
 async function renderReady() {
   render(<Harness />)
   await waitFor(() => expect(state.conv?.ready).toBe(true))
   /* 断言一律走 getConv()：state.conv 每次 re-render 都会被 Harness 刷新 */
   return () => state.conv!
 }
+
+test('无历史会话时创建当前课程范围，不默认开启全局检索', async () => {
+  vi.mocked(api.listConversations).mockResolvedValueOnce([])
+  await renderReady()
+  await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith('c1', '新对话', { scope: 'course' }))
+})
+
+test('未分类 Notebook 会话直接按 Notebook ID 创建，不使用课程 ID', async () => {
+  render(<NotebookHarness />)
+  await waitFor(() => expect(state.conv?.ready).toBe(true))
+  expect(api.listNotebookConversations).toHaveBeenCalledWith('book-unbound')
+  expect(api.createNotebookConversation).toHaveBeenCalledWith('book-unbound')
+  expect(api.createConversation).not.toHaveBeenCalled()
+  expect(state.conv?.conversationId).toBe('conv-notebook')
+})
 
 test('流式中切换会话：旧流被中止、agentRun 清空、busy 正常归还', async () => {
   const getConv = await renderReady()

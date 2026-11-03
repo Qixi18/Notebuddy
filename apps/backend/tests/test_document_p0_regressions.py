@@ -105,3 +105,41 @@ def test_image_job_reuses_completed_run_and_retry_preserves_old_on_failure(
     assert session.get(AssetProcessingJob, retry.id).status == "failed"
     assert current_run(session, asset.id).id == run.id
     assert session.get(DocumentBlock, original_id) is not None
+
+
+def test_reading_pending_image_job_does_not_receive_finished_at(
+    session, engine, tmp_path, monkeypatch,
+):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.core.config import settings
+    from app.document_processing.llm_reader import ReadingPending
+    from app.workers import asset_worker
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(asset_worker, "SessionLocal", sessionmaker(engine, expire_on_commit=False))
+    book = make_notebook(session, None)
+    asset = make_asset(session, book, media_type="image", extension=".png")
+    source = tmp_path / asset.storage_key
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"image")
+    job = AssetProcessingJob(
+        asset_id=asset.id, notebook_id=book.id, owner_link_id="owner-probe",
+        kind="image_parse", status="processing",
+    )
+    session.add(job)
+    session.commit()
+    monkeypatch.setattr(asset_worker, "storage_path", lambda _: source)
+    monkeypatch.setattr(asset_worker, "create_parse_run", lambda *args, **kwargs: type(
+        "Run", (), {"id": "parse-run", "status": "pending"},
+    )())
+    monkeypatch.setattr(asset_worker, "execute_parse_run", lambda *args, **kwargs: (_ for _ in ()).throw(
+        ReadingPending("waiting for reading"),
+    ))
+
+    asset_worker.process_asset_job(job.id)
+
+    session.expire_all()
+    saved = session.get(AssetProcessingJob, job.id)
+    assert saved.status == "pending"
+    assert saved.finished_at is None

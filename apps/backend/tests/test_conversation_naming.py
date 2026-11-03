@@ -12,10 +12,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1 import agent, conversations
 from app.db.database import Base, get_db
 from app.db.models import Conversation, Course
 from app.main import app
+from app.services import agent_execution, assistant_execution
 from app.services.conversations import DEFAULT_CONVERSATION_TITLE, derive_conversation_title
 
 
@@ -68,7 +68,7 @@ def test_derive_title_prefixes_only_special_scopes_and_truncates() -> None:
 def test_first_message_renames_and_applies_scope(tmp_path, monkeypatch) -> None:
     client, _factory, (course_id, conversation_id) = _setup(tmp_path)
     try:
-        monkeypatch.setattr(conversations, "run_answer", lambda *_a, **_k: _fake_answer())
+        monkeypatch.setattr(assistant_execution, "run_answer", lambda *_a, **_k: _fake_answer())
         # 答疑页自动建的是「新对话」course 会话；首轮提问携带用户实际选择的范围
         response = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
             "question": "红黑树的五个不变量是什么",
@@ -90,7 +90,7 @@ def test_first_message_renames_and_applies_scope(tmp_path, monkeypatch) -> None:
 def test_second_message_keeps_title_and_ignores_scope_change(tmp_path, monkeypatch) -> None:
     client, _factory, (course_id, conversation_id) = _setup(tmp_path)
     try:
-        monkeypatch.setattr(conversations, "run_answer", lambda *_a, **_k: _fake_answer())
+        monkeypatch.setattr(assistant_execution, "run_answer", lambda *_a, **_k: _fake_answer())
         client.post(f"/api/v1/conversations/{conversation_id}/messages", json={"question": "第一问"})
         # 中途改范围 + 换问题：会话已有用户消息，scope 与标题都不应变
         second = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={
@@ -113,7 +113,7 @@ def test_agent_transport_renames_too(tmp_path, monkeypatch) -> None:
         def run_agent(*_a, **_k) -> Iterator[dict]:
             yield {"type": "final", **_fake_answer(), "mode": "agent", "suggestions": []}
 
-        monkeypatch.setattr(agent, "run_agent", run_agent)
+        monkeypatch.setattr(agent_execution, "run_agent", run_agent)
         streamed = client.post(f"/api/v1/conversations/{conversation_id}/agent-messages", json={"question": "从桌宠问的一个问题"})
         assert streamed.status_code == 200, streamed.text
         assert '"conversation_title": "从桌宠问的一个问题"' in streamed.text

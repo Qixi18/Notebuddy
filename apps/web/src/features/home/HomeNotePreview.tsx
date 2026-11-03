@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { api } from '../../api'
 import type { HomeLeafPreview } from './HomeCourseTree'
 import './note-preview.css'
 
-function excerpt(text: string) {
-  const plain = text.replace(/\s+/g, ' ').trim()
-  return plain.length > 145 ? `${plain.slice(0, 145)}…` : plain
+function PreviewMarkdown({ text, inline = false }: { text: string; inline?: boolean }) {
+  return <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[[rehypeKatex, { strict: false, trust: false }]]}
+    skipHtml disallowedElements={['a', 'img']} unwrapDisallowed components={inline ? { p: 'span' } : undefined}>{text}</ReactMarkdown>
 }
 export function HomeNotePreview({ id, preview, courseId, onEnter, onLeave, onDismiss }: {
   id: string; preview: HomeLeafPreview; courseId: string
@@ -31,6 +34,7 @@ export function HomeNotePreview({ id, preview, courseId, onEnter, onLeave, onDis
     window.addEventListener('scroll', measure, true)
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure)
     if (preview.target.ownerSVGElement) observer?.observe(preview.target.ownerSVGElement)
+    if (host.current) observer?.observe(host.current)
     return () => { window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true); observer?.disconnect() }
   }, [preview.target, text])
   useEffect(() => {
@@ -38,7 +42,7 @@ export function HomeNotePreview({ id, preview, courseId, onEnter, onLeave, onDis
     if (preview.book.course_id !== courseId || preview.leaf.section.notebook_id !== preview.book.id) return
     void api.getNotebookSections(courseId, preview.book.id).then(sections => {
       const section = sections.find(row => row.block_id === blockId)
-      if (active) setLoaded({ id: noteId, text: section ? excerpt(section.excerpt)
+      if (active) setLoaded({ id: noteId, text: section ? section.excerpt.trim()
         || '此小节暂时没有正文，点击叶子打开笔记。' : '预览暂不可用，点击叶子打开笔记。' })
     }).catch(() => { if (active) setLoaded({ id: noteId, text: '预览暂不可用，点击叶子打开笔记。' }) })
     return () => { active = false }
@@ -50,8 +54,8 @@ export function HomeNotePreview({ id, preview, courseId, onEnter, onLeave, onDis
   }, [onDismiss])
   return createPortal(<div ref={host} className="home-leaf-preview" id={id} role="tooltip" style={{ left: position.left, top: position.top, visibility: position.ready ? 'visible' : 'hidden' }} onMouseEnter={onEnter} onMouseLeave={onLeave}>
     <small>{preview.book.title} <span>·</span> {preview.leaf.chapterTitle}</small>
-    <strong>{preview.leaf.section.title}</strong>
-    <p>{text ?? '正在读取笔记…'}</p>
+    <strong><PreviewMarkdown text={preview.leaf.section.title} inline /></strong>
+    <div className="home-leaf-preview-content"><PreviewMarkdown text={text ?? '正在读取笔记…'} /></div>
     <span className="home-leaf-preview-hint">点击叶子，打开完整笔记 ↗</span>
   </div>, document.body)
 }

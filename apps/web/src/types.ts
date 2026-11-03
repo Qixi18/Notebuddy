@@ -195,6 +195,17 @@ export type AssetResource = {
   created_at: string
 }
 
+export type AssetProcessingBudget = {
+  asset_id: string
+  currency: 'CNY'
+  limit_fen: number
+  settled_fen: number
+  reserved_fen: number
+  remaining_fen: number
+  status: 'active' | 'exhausted' | 'uncertain' | 'overrun' | 'closed'
+  reservations: Array<{ stage: string; reserved_fen: number; charged_fen: number | null; state: string }>
+}
+
 export type DocumentParseRunSummary = {
   id: string; asset_id: string; status: string; is_current: boolean
   page_count: number; text_chars: number; quality_status: string
@@ -484,13 +495,14 @@ export type KnowledgeChange = {
 
 export type Conversation = {
   id: string
-  course_id: string
+  course_id: string | null
+  notebook_id?: string | null
   title: string
   default_scope: string
   created_at: string
   updated_at: string
-  /** 会话归属：course=整门课程 / global=跨课程 / note=锁定笔记（后端 B1 落地后可用） */
-  scope?: 'course' | 'global' | 'note' | null
+  /** 会话归属：course / global / notebook；note 仅用于历史兼容 */
+  scope?: 'course' | 'global' | 'notebook' | 'note' | null
   note_id?: string | null
   note_title?: string | null
 }
@@ -525,6 +537,8 @@ export type ConversationMessage = {
   conversation_title?: string
   suggestions?: import('./api/agentStream').AgentSuggestion[]
   process?: import('./api/agentStream').AgentProcessTrace | null
+  /** 发布前核验摘要：历史回看也要能分辨「已核实 / 部分未核实 / 未核验」 */
+  verification?: import('./api/agentStream').AgentVerification | null
 }
 
 export type KnowledgeProposal = {
@@ -563,6 +577,8 @@ export type Feedback = {
 export type SettingsStatus = {
   deepseek: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }
   embedding: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null }
+  vision: { configured: boolean; masked_key: string | null; base_url: string | null; model: string | null; timeout_seconds: number | null; image_capability: { status: string; supports_image_input: boolean; model?: string | null; checked_at?: string | null } }
+  budget?: { limit_cny: string; currency: string; text: Record<string, string | number | boolean | null>; vision: Record<string, string | number | boolean | null>; fx_usd_cny: string; fx_source: string; fx_as_of: string; fx_buffer_percent: string }
   storage: { data_dir: string; database: string; max_upload_mb: number; processing_route?: 'standard' | 'llm' }
   limits: { allowed_extensions: string[]; editable_keys: string[]; secret_write_enabled: boolean; token_required: boolean }
   source: { env_path: string; env_exists: boolean; override_keys: string[] }

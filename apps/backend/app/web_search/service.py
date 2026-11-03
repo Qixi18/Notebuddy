@@ -29,12 +29,13 @@ def search_policy(*, allow: bool) -> SearchPolicy:
 def search_with_sources(
     db: Session,
     *,
-    course_id: str,
+    course_id: str | None,
     query: str,
     policy: SearchPolicy,
     material_id: str | None = None,
     source_query: str | None = None,
     origin: str | None = None,
+    notebook_id: str | None = None,
 ) -> list[dict]:
     """Use cache, audit provider calls, and persist reviewed course-scoped sources.
 
@@ -59,11 +60,10 @@ def search_with_sources(
             cache_search(query, results)
             finish_call(db, audit, started, status="success", response_units=len(results))
         for item in results:
-            if db.scalar(select(WebSource.id).where(
-                WebSource.course_id == course_id, WebSource.url == item["url"],
-            )) is None:
+            source_scope = (WebSource.notebook_id == notebook_id) if notebook_id else (WebSource.course_id == course_id)
+            if db.scalar(select(WebSource.id).where(source_scope, WebSource.url == item["url"])) is None:
                 db.add(WebSource(
-                    course_id=course_id, material_id=material_id,
+                    course_id=course_id, notebook_id=notebook_id, material_id=material_id,
                     search_query=(source_query or query)[:1000],
                     title=item["title"], url=item["url"], site_name=item["site_name"],
                     snippet=item["snippet"], score=item.get("score"),

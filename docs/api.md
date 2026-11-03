@@ -1,6 +1,6 @@
-# API 路由现状（2026-10-30 源码核对）
+# API 路由现状（2026-11-03 源码核对）
 
-前缀为 `/api/v1`，路由模块以 `apps/backend/app/api/v1/routes.py` 实际注册为准。此处的主路径/兼容分类不意味着兼容 API 已废弃，也不代表每个响应字段均已完成文档化。
+前缀为 `/api/v1`，路由模块以 `apps/backend/app/api/v1/routes.py` 实际注册为准。此处的主路径/兼容分类不意味着兼容 API 已废弃，也不代表每个响应字段均已完成文档化。2026-11-03 核对的已注册模块中没有旧 `notes` API Router；当前 Notebook 正文以 Notebook 路由为准。
 
 | 类别 | 方法/路径 | 用途与边界 |
 |---|---|---|
@@ -12,10 +12,13 @@
 | 当前主路径 | `/notebooks/{notebook_id}/generation-jobs` 及 job 查询、重试、取消 | 持久生成任务；基准 revision 和输入快照用于安全合并 |
 | 当前/兼容能力 | `GET /courses/{course_id}/knowledge-graph`、`GET /courses/{course_id}/knowledge-structure`、`GET /courses/{course_id}/knowledge-proposals`、`GET /courses/{course_id}/knowledge-changes`、`POST /knowledge-proposals/{proposal_id}/review` | `knowledge.py` 仍注册；图和结构从 NotebookSection 派生，提案 API 保留课程知识提案工作流 |
 | 当前主路径 | `/agent`、`/conversations`、`/forest`、`/quiz` 等模块 | 会话/Agent、森林、测验等接口；服务端校验课程或 Notebook 范围 |
-| 保留兼容 | `/courses/{course_id}/materials`、`/materials/{material_id}/...`、旧 `/notes/...` | 传统资料/Note 兼容接口仍由已注册模块提供；不构成新正文源，不应仅凭新 Notebook 流程将其称为已撤销 |
+| 保留兼容 | `/courses/{course_id}/materials`、`/materials/{material_id}/...` | 传统资料接口仍由已注册的 `materials` 模块提供；不构成新正文源 |
+| 历史/未注册 | 历史文档中列出的旧 `/notes/...` API | 当前 `routes.py` 未注册 Note Router。Web `api/notes.ts` 标记为 retired 且无运行时导入方；`useNoteEditor` 也无运行时导入方。旧模型、迁移和类型不能据此视为已删除 |
 | 历史/撤销 | 本轮未发现并逐项证明的撤销路由 | 不作废弃清单推断；需有代码与调用方证据后再列 |
 
-以下历史分阶段内容含仍注册的当前/兼容 API，也含已演进的旧设计描述，不能整段视为已废弃。`knowledge` 模块仍提供课程 KnowledgeProposal 查询与审核；但前端 `api/notes.ts` 仍请求 `/courses/{course_id}/note-suggestions` 与 `/notes/{note_id}/suggestions`，本轮在 `apps/backend/app/api/v1/` 未找到相应路由，属于待确认的前后端不一致，不能记为已提供或已验收接口。它们不改变 Notebook 正文以 `document_json` 为唯一权威源的契约。当前路由是 `config, courses, materials, jobs, knowledge, notebook, generation, assistant, conversations, agent, feedback, backup, terms, forest, forest_imports, quiz`。详细参数请对照路由 schema；此页分组尚未逐端点补全权限、响应字段和自动测试覆盖。
+以下历史分阶段内容含仍注册的当前/兼容 API，也含已演进的旧设计描述，不能整段视为当前 API 清单。特别是其中 `/notes/...`、`/sources/...` 和 NoteSuggestion 路径属于旧 Note API 记录，当前 backend 未注册这些接口；前端 `api/notes.ts` 与 `useNoteEditor` 没有运行时调用方。App 中旧前端地址 `/courses/:courseId/notes/:noteId` 仅重定向到 `/courses`，不是后端 API，也不代表旧笔记已恢复。Knowledge 模块仍提供课程 KnowledgeProposal 查询与审核。上述历史路径不改变 Notebook 正文以 `document_json` 为唯一权威源的契约。当前注册路由为 `config, courses, materials, jobs, knowledge, notebook, generation, assistant, conversations, agent, feedback, backup, terms, forest, forest_imports, quiz`。详细参数请对照路由 schema；此页分组尚未逐端点补全权限、响应字段和自动测试覆盖。
+
+下列按阶段保存的 API 表格是历史契约快照，其中涉及旧 Note API 的行不代表当前路由注册或验收；实际请求能力须以当前 Router 注册和 schema 为准。
 
 # API 契约
 
@@ -100,6 +103,8 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 | 反馈 | `POST/GET/PATCH /courses/{course_id}/feedback` | 答案、笔记、提案和来源反馈按目标去重并验证课程归属；PATCH 只更新人工处理状态和脱敏处理说明 |
 | 术语说明 | `POST /courses/{course_id}/terms/explain` | 返回原文、常见译法、学科语境和出处不确定性；未配置可核验服务时保守返回，不伪造词源 |
 
+三个提问入口（单次答疑、普通会话消息、Agent 流式消息）的 `teacher_persona` 均默认使用 `vodyanitsa`（沃雅妮莎）。历史客户端传入的 `elf`、`doubao`、`feiyu` 会归一为当前角色；其他未知值仍返回参数校验错误。前端统一发送 `vodyanitsa`。
+
 答疑先检索课程内部资料；只有没有直接命中且策略允许时才调用联网搜索。回答来源按课件、网络补充、直接支持/相关支持分别标记。
 
 独立的 `POST /courses/{course_id}/assistant` 是单次答疑，不写入会话历史。连续追问与刷新后恢复使用上述会话端点；数据库位置、失败记录和两种传输的共享规则见 [后端调用与业务数据存储契约](backend-data-contract.md)。
@@ -130,9 +135,11 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 
 扫描型 PDF 没有文字层时只记录 OCR 候选和待检查告警，不生成伪造的文本或来源。OCR 是独立的可选适配器，受 `NOTEBOOK_OCR_ENABLED`、`NOTEBOOK_OCR_MAX_PAGES` 和 `NOTEBOOK_OCR_LANGUAGE` 控制。
 
+课程资料上传正式接收 PDF、PPTX、DOCX；独立 Notebook 图片资源上传接收 PNG、JPEG、WebP、GIF。PDF 与图片走当前 Document Processing 质量门禁。PPTX/DOCX 为保留格式兼容，现由旧解析器转换为 DocumentIR，功能受限：嵌入图片、公式、图表和表格结构不保证完整；接口接收成功不代表这些内容达到与 PDF 相同的解析质量。生成仍须通过 IR 质量门禁。
+
 ## 知识森林接口
 
-以下地址均加 `/api/v1` 前缀。固定类型和请求字段见 [知识森林契约](superpowers/specs/2026-10-11-knowledge-forest-design.md)。
+以下地址均加 `/api/v1` 前缀。固定类型和请求字段以当前路由及 schema 为准；历史设计材料已从当前工作树清理，可从 Git 历史追溯。
 
 | 能力 | 接口 | 行为 |
 | --- | --- | --- |
@@ -141,9 +148,10 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 | 修改课程树信息 | `PATCH /forest/courses/{course_id}` | 提交 `expected_revision`，旧版本返回 409；不复用笔记本排序版本 |
 | 藤蔓与候选 | `GET/POST /forest/relations` | 查询状态；显式手动连接两个不同课程的真实笔记 |
 | 审核/移除关系 | `POST /forest/relations/{id}/review`、`DELETE /forest/relations/{id}` | 确认或拒绝 AI 候选；版本或来源变化时需复核；移除不改笔记正文 |
-| 培养方案导入 | `POST /forest/curriculum-imports` | multipart `file`（PDF/DOCX）或 `text`，登记独立待处理任务，201 返回导入记录 |
-| 导入列表/预览 | `GET /forest/curriculum-imports`、`GET /forest/curriculum-imports/{id}` | 显示解析模式、告警、可修改课程行、来源位置与错误 |
+| 培养方案导入 | `POST /forest/curriculum-imports` | multipart `file`（PDF/DOCX）或 `text`，可传 `processing_route=standard/llm`；省略时使用设置默认值，路线和非敏感模型身份随任务冻结 |
+| 导入列表/预览 | `GET /forest/curriculum-imports`、`GET /forest/curriculum-imports/{id}` | 最近20条；返回路线、phase、progress、解析模式、告警、课程元数据、不可改来源及 can_revert |
 | 导入确认/重试 | `POST /forest/curriculum-imports/{id}/confirm`、`POST /forest/curriculum-imports/{id}/retry` | 确认 `{rows:[...]}` 才关联或建课；失败可重试，已有课程和笔记不删除 |
+| 撤销影响/执行 | `GET /forest/curriculum-imports/{id}/revert-preview`、`POST /forest/curriculum-imports/{id}/revert` | 展示恢复属性与回收空课程清单；创建检查点后重新检查版本/使用痕迹；冲突整批409，备份失败503；成功为 reverted |
 | 关系分析任务 | `POST /forest/courses/{course_id}/suggest-relations` | 手动重跑分析；资料生成笔记后也自动登记任务 |
 | 最近课程关联任务 | `GET /forest/courses/{course_id}/latest-job` | 返回最近持久任务或 null；聚焦课程时显示自动任务错误和原任务重试入口 |
 | 森林任务查询/重试 | `GET /forest/jobs/{id}`、`POST /forest/jobs/{id}/retry` | 持久任务状态和可读错误，失败重试由独立执行器领取 |

@@ -907,14 +907,21 @@
 /* ============================================================ 悬浮坞 / 球 */
 
 .assistant-dock {
+  height: 100dvh;
+  min-height: 0;
   border-left-color: var(--nb-line);
   padding: 20px 16px 14px;
   background: var(--nb-white);
 }
 
 .assistant-dock-heading {
+  flex: none;
   gap: 11px;
 }
+
+.assistant-dock-body { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+.assistant-dock-body > :not(.assistant-dock-messages) { flex-shrink: 0; }
+.assistant-dock-body .assistant-dock-messages { min-height: 120px; }
 
 .assistant-dock-avatar {
   display: grid;
@@ -929,8 +936,8 @@
 }
 
 .assistant-dock-avatar .teacher-character.teacher-character-compact {
-  width: 48px;
-  height: 48px;
+  width: 100%;
+  height: 100%;
   background: transparent;
 }
 
@@ -1803,7 +1810,7 @@
 }
 
 .workspace-pet-anchor-avatar { display: inline-grid; place-items: center; width: 34px; height: 34px; flex: none; }
-.workspace-pet-anchor-avatar .teacher-character { width: 34px; }
+.workspace-pet-anchor-avatar .teacher-character { width: 100%; height: 100%; }
 .workspace-pet-anchor-text { display: flex; flex-direction: column; min-width: 0; }
 .workspace-pet-anchor-text strong { font-size: 12px; color: var(--nb-ink); }
 .workspace-pet-anchor-text span { color: var(--nb-muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1970,6 +1977,7 @@
 }
 
 .workspace-topbar-actions {
+  flex: none;
   margin-left: auto;
   display: flex;
   align-items: center;
@@ -1977,6 +1985,8 @@
 }
 
 .workspace-topbar-actions button {
+  flex: none;
+  white-space: nowrap;
   border: 1px solid transparent;
   background: none;
   border-radius: 8px;
@@ -3110,11 +3120,12 @@ button.workspace-evidence-open:hover, .workspace-evidence-open:hover { backgroun
   }
 
   .workspace-pet-identity-avatar { display: inline-grid; place-items: center; width: 38px; height: 38px; flex: none; }
-  .workspace-pet-identity-avatar .teacher-character { width: 38px; }
+  .workspace-pet-identity-avatar .teacher-character { width: 100%; height: 100%; }
   .workspace-pet-identity-text { min-width: 0; }
   .workspace-pet-identity-text h2 { font-size: 13px; }
   .workspace-pet-identity-text p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .workspace-pet-identity-foot { margin-left: auto; }
+  .workspace-pet-identity-foot { flex: none; margin-left: auto; }
+  .workspace-pet-status { white-space: nowrap; }
   .workspace-pet-floatout { display: none; }
 
   .workspace-rail-scroll { display: none; }
@@ -3146,7 +3157,9 @@ button.workspace-evidence-open:hover, .workspace-evidence-open:hover { backgroun
     background: rgba(31, 42, 34, .22);
   }
 
-  .workspace-topbar { padding: 9px 12px; }
+  .workspace-topbar { flex-wrap: wrap; gap: 8px; padding: 9px 12px; }
+  .workspace-title { flex-basis: 100%; }
+  .workspace-topbar-actions { margin-left: 0; flex-wrap: wrap; }
   .workspace-topbar-conv-toggle { display: inline-flex; }
   .workspace-topbar-crumbs span:first-child { display: none; }
   .workspace-topbar-crumbs span[aria-hidden] { display: none; }

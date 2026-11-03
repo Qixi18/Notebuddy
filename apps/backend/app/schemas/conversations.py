@@ -1,13 +1,15 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.schemas.assistant import AssistantSource
-
-TeacherPersonaId = Literal["elf", "doubao", "feiyu"]
+from app.schemas.assistant import (
+    DEFAULT_TEACHER_PERSONA,
+    AssistantSource,
+    TeacherPersonaId,
+)
 
 
 class ConversationCreate(BaseModel):
@@ -25,7 +27,8 @@ class ConversationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    course_id: str
+    course_id: str | None
+    notebook_id: str | None = None
     title: str
     default_scope: str
     scope: str | None = None
@@ -87,6 +90,8 @@ class ConversationMessageRead(BaseModel):
     mode: str = ""
     sources: list[AssistantSource] = Field(default_factory=list)
     process: dict | None = None
+    # 核验结论是面向用户的历史状态；与内部过程字段分开返回。
+    verification: dict | None = None
     suggestions: list[dict] | None = None
     # 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表，避免仍显示「新对话」。
     conversation_title: str = "新对话"
@@ -99,13 +104,14 @@ class ConversationMessageCreate(BaseModel):
     page_number: int | None = Field(default=None, ge=1)
     allow_web: bool = True
     idempotency_key: str | None = Field(default=None, max_length=120)
-    # 本次回答使用哪一位 AI 教师的人设；未知取值由 app.ai.personas 回落到默认角色的做法保持一致
-    teacher_persona: TeacherPersonaId = "elf"
+    # 与普通答疑共用唯一人设及历史角色 ID 的兼容归一化。
+    teacher_persona: TeacherPersonaId = DEFAULT_TEACHER_PERSONA
     # 会话归属：仅在会话尚无任何用户消息（首轮）时落库，之后忽略——范围是会话级属性。
     # 用于把答疑页自动建的「整门课程」空会话，在首轮改写成用户实际选择的范围。
-    scope: Literal["course", "global", "note"] | None = None
+    scope: Literal["course", "global", "note", "notebook"] | None = None
     note_id: str | None = Field(default=None, max_length=36)
     note_title: str | None = Field(default=None, max_length=300)
+    notebook_context: dict | None = None
 
 
 class ReadingContext(BaseModel):
@@ -121,7 +127,7 @@ class NotebookDocumentContext(BaseModel):
     """整篇 Notebook 编辑器的上下文，与分节 Note 的 ReadingContext 互斥。"""
 
     model_config = ConfigDict(extra="forbid")
-    course_id: str = Field(min_length=1, max_length=36)
+    course_id: str | None = Field(default=None, max_length=36)
     notebook_id: str = Field(min_length=1, max_length=36)
     revision: int = Field(ge=0)
     title: str | None = Field(default=None, max_length=200)
@@ -133,14 +139,14 @@ class AgentMessageCreate(BaseModel):
     """悬浮坞 agent 提问（SSE 流式端点的请求体）。"""
 
     question: str = Field(min_length=1, max_length=2000)
-    # note=锁定当前笔记 / course=整门课程 / global=跨课程全局可查（写建议仍只对打开的笔记）
-    scope: Literal["note", "course", "global"] = "course"
+    # notebook=仅当前 Notebook；note 保留给旧历史会话兼容。
+    scope: Literal["notebook", "note", "course", "global"] = "course"
     learning_goal: str | None = Field(default=None, max_length=60)
     material_id: str | None = None
     allow_web: bool = True
     allow_quiz: bool = True
     learning_mode: Literal["direct", "guided"] = "direct"
     idempotency_key: str | None = Field(default=None, max_length=120)
-    teacher_persona: TeacherPersonaId = "elf"
+    teacher_persona: TeacherPersonaId = DEFAULT_TEACHER_PERSONA
     reading_context: ReadingContext | None = None
     notebook_context: NotebookDocumentContext | None = None

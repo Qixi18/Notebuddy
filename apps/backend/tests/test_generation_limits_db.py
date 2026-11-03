@@ -22,9 +22,10 @@ from tests.test_generation_limits import _client, _response, _valid_result
 def generation_db(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{(tmp_path / 'generation.db').as_posix()}")
     Base.metadata.create_all(engine)
-    monkeypatch.setattr(worker, "SessionLocal", sessionmaker(
-        bind=engine, autoflush=False, expire_on_commit=False,
-    ))
+    factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr(worker, "SessionLocal", factory)
+    from app.services import processing_budget
+    monkeypatch.setattr(processing_budget, "SessionLocal", factory)
     with Session(engine, autoflush=False, expire_on_commit=False) as db:
         yield db
     engine.dispose()
@@ -88,14 +89,16 @@ def test_model_ids_reused_across_planner_batches_keep_exact_sources(generation_d
     assert doc["content"][0]["content"][0]["text"] == "用户自己保存的正文"
 
 
-def test_failed_split_is_atomic_then_retry_appends_once(generation_db, monkeypatch):
+def test_uncertain_provider_failure_keeps_append_atomic_and_blocks_paid_retry(generation_db, monkeypatch):
     from app.api.v1.generation import retry_generation_job
 
     db = generation_db
     book, job = _job(db)
     should_fail = True
+    provider_calls = []
 
     def responder(payload):
+        provider_calls.append(1)
         units = json.loads(payload["messages"][1]["content"])["units"]
         blocks = [block for unit in units for block in unit["blocks"]]
         if len(blocks) > 2:
@@ -111,19 +114,19 @@ def test_failed_split_is_atomic_then_retry_appends_once(generation_db, monkeypat
     assert job.status == "failed"
     assert db.get(Notebook, book.id).document_revision == 1
     assert db.scalar(select(NotebookBlockSource)) is None
+    failed_call_count = len(provider_calls)
     should_fail = False
     retry_generation_job(book.id, job.id, db)
     _run(job.id)
     db.expire_all()
     db.refresh(job)
-    assert job.status == "completed", job.error_message
+    assert job.status == "failed"
+    assert job.error_code == "budget_uncertain"
+    assert len(provider_calls) == failed_call_count
     notebook = db.get(Notebook, book.id)
-    assert notebook.document_revision == 2
-    before = notebook.document_json
-    worker.process_generation_job(job.id)
-    db.expire_all()
-    assert db.get(Notebook, book.id).document_json == before
-    assert "用户自己保存的正文" in before
+    assert notebook.document_revision == 1
+    assert db.scalar(select(NotebookBlockSource)) is None
+    assert "用户自己保存的正文" in notebook.document_json
 
 
 @pytest.mark.parametrize("repair_succeeds", [True, False])

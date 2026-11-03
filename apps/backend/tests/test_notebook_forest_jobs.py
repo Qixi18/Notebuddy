@@ -5,7 +5,7 @@ import json
 import pytest
 from sqlalchemy import select
 
-from app.db.models import ForestJob, NotebookRelation
+from app.db.models import ForestJob, NotebookGenerationJob, NotebookRelation
 from app.forest import jobs, notebook_relations
 from app.forest.notebook_relations import enqueue_notebook_relations
 from app.notes.store import write_document
@@ -109,7 +109,7 @@ def test_relation_job_requires_live_body_in_two_courses(session):
     assert enqueue_notebook_relations(session, book.course_id) is None
 
 
-def test_generation_enqueues_notebook_relations_automatically(session, engine, monkeypatch):
+def test_file_generation_does_not_enqueue_unbudgeted_relations(session, engine, monkeypatch):
     from app.api.v1.generation import create_generation_job
     from app.schemas.generation import NotebookGenerationCreate
     from app.workers import notebook_generation_worker
@@ -125,8 +125,10 @@ def test_generation_enqueues_notebook_relations_automatically(session, engine, m
     notebook_generation_worker.process_generation_job(created["id"])
     session.expire_all()
     task = session.scalar(select(ForestJob).where(ForestJob.kind == "notebook_relations"))
-    assert task is not None and task.status == "pending"
-    assert "极限" in task.source_snapshot_json
+    assert task is None
+    generated = session.get(NotebookGenerationJob, created["id"])
+    assert generated.status == "completed"
+    assert generated.relation_job_id is None
 
 
 def test_retry_commits_pending_state_and_keeps_attempt_identity(session, engine):

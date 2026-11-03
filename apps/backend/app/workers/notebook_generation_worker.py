@@ -36,7 +36,7 @@ from app.document_processing.checkpoints import (
     put_step,
     structured_call,
 )
-from app.document_processing.routes import provider_client
+from app.document_processing.config import provider_client
 from app.generation.composer import (
     CompositionError,
     combine_compositions,
@@ -46,7 +46,7 @@ from app.generation.composer import (
 from app.generation.context import GenerationInputError, current_outline
 from app.generation.figures import append_source_figures
 from app.generation.llm_planner import build_llm_plan
-from app.generation.planner import build_plan
+from app.generation.planner import build_plan, units_by_id
 from app.generation.quality_gate import inspect_generated_math
 from app.generation.resume import compose_batch
 from app.notes.document import (
@@ -59,6 +59,9 @@ from app.notes.document import (
 )
 from app.notes.store import DocumentConflict, body_fingerprint, write_document
 from app.services.notebook_generation_inputs import cancel_generation_inputs
+from app.services.processing_budget import (
+    processing_budget_scope,
+)
 
 PROMPT_VERSION = "notebook-generation-v4-math-contract"
 logger = logging.getLogger(__name__)
@@ -105,6 +108,8 @@ def process_generation_job(job_id: str) -> None:
             return
         snapshot = _parse_json(job.input_snapshot_json) or {}
         llm_route = snapshot.get('processing_route') == 'llm'
+        source_asset_ids = sorted({source['asset_id'] for source in snapshot.get('sources') or []
+                                   if isinstance(source, dict) and isinstance(source.get('asset_id'), str)})
         model_steps = 0
         def cached_model_call(messages, *, max_tokens=6000, validator=None):
             nonlocal model_steps
@@ -120,7 +125,10 @@ def process_generation_job(job_id: str) -> None:
                 raise CompositionError('任务已停止', code='cancelled')
             db.commit()
             client = provider_client(snapshot.get('provider', {}))
-            result = structured_call(client, messages, max_tokens=max_tokens)
+            with processing_budget_scope(asset_ids=source_asset_ids,
+                    notebook_id=job.notebook_id, stage='plan', job_id=job.id,
+                    step_key=identity, kind='text'):
+                result = structured_call(client, messages, max_tokens=max_tokens)
             if validator:
                 validator(result)
             if not _checkpoint(db, job, attempt):
@@ -165,7 +173,10 @@ def process_generation_job(job_id: str) -> None:
                 db.commit()
                 return
             except Exception as exc:
-                _fail_inputs(db, job, "plan_failed", f"生成计划构建失败：{exc}", attempt)
+                code = getattr(exc, "code", "")
+                if not isinstance(code, str) or not code.startswith("budget_"):
+                    code = "plan_failed"
+                _fail_inputs(db, job, code, f"生成计划构建失败：{exc}", attempt)
                 return
             job.knowledge_plan_json = json.dumps(plan, ensure_ascii=False)
             job.input_snapshot_json = json.dumps(snapshot, ensure_ascii=False)
@@ -177,7 +188,12 @@ def process_generation_job(job_id: str) -> None:
                 nonlocal model_steps
                 if model_steps >= 2:
                     raise WorkPending()
-                result = compose(snapshot, plan, batch, generator=generator)
+                ids = units_by_id(plan)
+                assets = sorted({ids[unit_id]['source_asset_id'] for unit_id in batch
+                                 if unit_id in ids and ids[unit_id].get('source_asset_id')})
+                with processing_budget_scope(asset_ids=assets, notebook_id=job.notebook_id,
+                        stage='compose', job_id=job.id, step_key=','.join(batch), kind='text'):
+                    result = compose(snapshot, plan, batch, generator=generator)
                 result.nodes = _normalize_model_blocks(result.nodes)
                 if not _checkpoint(db, job, attempt):
                     raise CompositionError('任务已停止', code='cancelled')
@@ -192,7 +208,12 @@ def process_generation_job(job_id: str) -> None:
                     compositions.append(compose_batch(db, job.id, snapshot, plan, batch, generator,
                                                        compose_impl=fresh_composition))
                 else:
-                    compositions.append(compose(snapshot, plan, batch, generator=generator))
+                    ids = units_by_id(plan)
+                    assets = sorted({ids[unit_id]['source_asset_id'] for unit_id in batch
+                                     if unit_id in ids and ids[unit_id].get('source_asset_id')})
+                    with processing_budget_scope(asset_ids=assets, notebook_id=job.notebook_id,
+                            stage='compose', job_id=job.id, step_key=','.join(batch), kind='text'):
+                        compositions.append(compose(snapshot, plan, batch, generator=generator))
                 if not _checkpoint(db, job, attempt):
                     return
         except WorkPending:
@@ -207,7 +228,10 @@ def process_generation_job(job_id: str) -> None:
             _fail_inputs(db, job, getattr(exc, "code", "generation_failed"), str(exc), attempt)
             return
         except Exception as exc:  # provider boundary; keep the job retryable
-            _fail_inputs(db, job, "generation_internal_error",
+            code = getattr(exc, "code", "")
+            if not isinstance(code, str) or not code.startswith("budget_"):
+                code = "generation_internal_error"
+            _fail_inputs(db, job, code,
                          f"生成任务失败：{type(exc).__name__}", attempt)
             return
 
@@ -247,9 +271,11 @@ def process_generation_job(job_id: str) -> None:
                 if isinstance(block, dict) and isinstance(block.get("block_id"), str)
             }
             try:
-                repaired = repair_deepseek_document_format(
-                    normalized_nodes, source_map, allowed_source_ids, str(first_validation_error),
-                )
+                with processing_budget_scope(asset_ids=source_asset_ids, notebook_id=job.notebook_id,
+                        stage='repair', job_id=job.id, kind='text'):
+                    repaired = repair_deepseek_document_format(
+                        normalized_nodes, source_map, allowed_source_ids, str(first_validation_error),
+                    )
                 format_repair_count = 1
                 source_map = repaired.source_map
                 normalized_nodes = _normalize_model_blocks(repaired.nodes)
@@ -311,13 +337,6 @@ def process_generation_job(job_id: str) -> None:
             job.error_code = job.error_message = None
             job.finished_at = job.updated_at = datetime.now(UTC)
             _complete_inputs(db, job, next_revision)
-            if notebook.course_id is not None:
-                from app.forest.notebook_relations import enqueue_notebook_relations
-
-                relation_job = enqueue_notebook_relations(db, notebook.course_id, notebook_id=notebook.id,
-                    processing_route=snapshot.get('processing_route', 'standard'),
-                    provider=snapshot.get('provider', {}))
-                job.relation_job_id = relation_job.id if relation_job else None
             db.commit()
         except Exception:
             db.rollback()

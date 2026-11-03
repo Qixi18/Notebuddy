@@ -11,7 +11,7 @@ export function TrunkSprite({ variant, empty = false }: { variant: number; empty
   </svg>
 }
 
-/** Redrawn lower stocks; the existing procedural crown remains unchanged. */
+/** Illustrated roots beneath the count-aware procedural trunk and crown. */
 export function RootstockSprite({ variant }: { variant: number }) {
   const crops = ['30 35 665 735', '695 35 665 735', '1360 35 639 735']
   const offsets = [-24, -8, -14]

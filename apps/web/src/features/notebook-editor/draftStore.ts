@@ -10,8 +10,12 @@ export type NotebookDraft = {
 const DB_NAME = 'notebuddy-editor'
 const STORE = 'drafts'
 
-function draftKey(courseId: string, notebookId: string): string {
-  return `notebook:${courseId}:${notebookId}`
+/** 本地草稿命名空间：未分类 Notebook 用显式 ``unbound`` 段，而不是把伪课程 ID
+    传进业务 API。键格式与历史版本一致，旧草稿仍能读到。 */
+const UNBOUND_NAMESPACE = 'unbound'
+
+function draftKey(courseId: string | null, notebookId: string): string {
+  return `notebook:${courseId ?? UNBOUND_NAMESPACE}:${notebookId}`
 }
 
 function openDatabase(): Promise<IDBDatabase | null> {
@@ -30,7 +34,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
   })
 }
 
-export async function readDraft(courseId: string, notebookId: string): Promise<NotebookDraft | null> {
+export async function readDraft(courseId: string | null, notebookId: string): Promise<NotebookDraft | null> {
   const key = draftKey(courseId, notebookId)
   const database = await openDatabase()
   if (!database) return readFallback(key)
@@ -43,7 +47,7 @@ export async function readDraft(courseId: string, notebookId: string): Promise<N
   })
 }
 
-export async function writeDraft(courseId: string, notebookId: string, content: DocNode, revision: number): Promise<void> {
+export async function writeDraft(courseId: string | null, notebookId: string, content: DocNode, revision: number): Promise<void> {
   const draft: NotebookDraft = { key: draftKey(courseId, notebookId), content, revision, updatedAt: new Date().toISOString() }
   const database = await openDatabase()
   if (!database) { writeFallback(draft); return }
@@ -55,7 +59,7 @@ export async function writeDraft(courseId: string, notebookId: string, content: 
   })
 }
 
-export async function clearDraft(courseId: string, notebookId: string): Promise<void> {
+export async function clearDraft(courseId: string | null, notebookId: string): Promise<void> {
   const key = draftKey(courseId, notebookId)
   writeFallback(null, key)
   const database = await openDatabase()

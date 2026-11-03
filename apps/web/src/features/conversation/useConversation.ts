@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { api } from '../../api'
 import type { ConversationOwnership } from '../../api/conversations'
-import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent } from '../../api/agent'
+import { streamAgentMessage, type AgentDeltaEvent, type AgentErrorEvent, type AgentFinalEvent, type AgentNoticeEvent, type AgentNotebookContext, type AgentReadingContext, type AgentScope, type AgentStatusEvent, type AgentStepEvent, type AgentSuggestion, type AgentThinkingEvent, type AgentVerification } from '../../api/agent'
 import type { Conversation, ConversationMessage } from '../../types'
 import { TEACHER_PERSONA, teacherPersonaMeta } from '../persona/personas'
 
@@ -18,11 +18,16 @@ import { TEACHER_PERSONA, teacherPersonaMeta } from '../persona/personas'
  */
 
 export type AskScope = {
-  /** 会话归属：全局可查 / 整门课程 / 锁定笔记 */
-  kind?: 'global' | 'course' | 'note'
-  /** 锁定笔记时的笔记 id（kind === 'note'） */
+  /**
+   * 会话归属：全局可查 / 整门课程 / 锁定一本 Notebook。
+   *
+   * 2026-11-01 复审 P1：新提问不再用遗留的 ``note`` 表达范围；旧会话的
+   * ``note_id`` 快照只作为历史兼容读保留。
+   */
+  kind?: 'global' | 'course' | 'notebook'
+  /** 锁定 Notebook 时的 Notebook id（kind === 'notebook'） */
   targetId?: string
-  /** 锁定笔记时的笔记标题，用于历史分组与标签 */
+  /** 锁定 Notebook 时的标题，用于历史分组与标签 */
   targetTitle?: string
 }
 
@@ -33,10 +38,14 @@ export type AgentRunStep = AgentStepEvent & { startedAt?: number; durationMs?: n
 export type AgentRunState = {
   steps: AgentRunStep[]
   streamingText: string
-  /** 思维链累计文本（所有轮次拼接）；仅展示用，不持久化 */
+  /** 旧版思维链累计文本；服务端已不外发，恒为空字符串，保留字段给旧测试/旧界面 */
   thinking: string
   notice?: string
+  /** 服务端阶段状态（thinking/drafting/…/verified）：区分「还在核验」与「已核验」 */
+  status?: AgentStatusEvent['status']
   final?: AgentFinalEvent
+  /** 发布前核验摘要；用来在实时块里标注「已核实 / 部分未核实 / 未核验」 */
+  verification?: AgentVerification
   /** 用户主动中断：保留已收到的正文，实时块改渲染成「已中断」而不是一直「执行中」 */
   aborted?: boolean
 }
@@ -112,7 +121,7 @@ function greetingMessage(conversationId: string | undefined, content: string): C
   }
 }
 
-export function useConversation(courseId?: string): ConversationState {
+export function useConversation(courseId?: string, notebookId?: string): ConversationState {
   const courseRef = useRef(courseId)
   courseRef.current = courseId
   const greeting = teacherPersonaMeta().greeting
@@ -181,13 +190,31 @@ export function useConversation(courseId?: string): ConversationState {
     setPendingMessageId(undefined)
     setReady(false)
     creatingRef.current = null
+    if (notebookId) {
+      void api.listNotebookConversations(notebookId).then(async (items) => {
+        const next = items.length > 0 ? items : [await api.createNotebookConversation(notebookId)]
+        if (!active || historyRequestRef.current !== request) return
+        setConversations(next)
+        setConversationId(next[0].id)
+        const loaded = await api.listConversationMessages(next[0].id)
+        if (!active || historyRequestRef.current !== request) return
+        setHistory(loaded)
+        seedSuggestionsFromMessages(loaded)
+        setReady(true)
+      }).catch((cause: unknown) => {
+        if (!active || historyRequestRef.current !== request) return
+        setError(cause instanceof Error ? cause.message : 'Notebook 会话读取失败')
+        setReady(true)
+      })
+      return () => { active = false }
+    }
     if (!courseId) {
       setReady(true)
       return () => { active = false }
     }
     void api.listConversations(courseId).then(async (items) => {
-      /* 课程没有历史时先建一段空会话；范围默认「全局可查」，用户可在首条消息前改 */
-      const next = items.length > 0 ? items : [await api.createConversation(courseId, '新对话', { scope: 'global' })]
+      /* 课程没有历史时先建一段空会话；全局范围必须由用户显式选择 */
+      const next = items.length > 0 ? items : [await api.createConversation(courseId, '新对话', { scope: 'course' })]
       if (!active || historyRequestRef.current !== request) return
       setConversations(next)
       setConversationId(next[0].id)
@@ -202,7 +229,7 @@ export function useConversation(courseId?: string): ConversationState {
       setReady(true)
     })
     return () => { active = false }
-  }, [courseId])
+  }, [courseId, notebookId])
 
   const selectConversation = useCallback(async (id: string, pendingMessageId?: string) => {
     const request = ++historyRequestRef.current
@@ -255,7 +282,7 @@ export function useConversation(courseId?: string): ConversationState {
 
   const deleteConversation = useCallback(async (id: string): Promise<boolean> => {
     const requestCourseId = courseId
-    if (!requestCourseId) return false
+    if (!requestCourseId && !notebookId) return false
     try {
       await api.deleteConversation(id)
       if (courseRef.current !== requestCourseId) return true
@@ -271,13 +298,13 @@ export function useConversation(courseId?: string): ConversationState {
       if (courseRef.current === requestCourseId) setError(cause instanceof Error ? cause.message : '删除失败')
       return false
     }
-  }, [courseId, conversationId, conversations, selectConversation])
+  }, [courseId, notebookId, conversationId, conversations, selectConversation])
 
   /* 悬浮坞的「新建对话」：后端只有会话级接口，没有单条消息删除，
      因此「清空」等价于开一段新会话，旧会话仍可在答疑页的历史里找回 */
   const startNewConversation = useCallback(async (ownership?: ConversationOwnership): Promise<void> => {
     const requestCourseId = courseId
-    if (!requestCourseId || busyRef.current) return
+    if ((!requestCourseId && !notebookId) || busyRef.current) return
     busyRef.current = true
     setBusy(true)
     setError(undefined)
@@ -288,7 +315,9 @@ export function useConversation(courseId?: string): ConversationState {
     setAgentSuggestionsByMessage({})
     setPendingMessageId(undefined)
     try {
-      const created = await api.createConversation(requestCourseId, '新对话', ownership)
+      const created = notebookId
+        ? await api.createNotebookConversation(notebookId)
+        : await api.createConversation(requestCourseId!, '新对话', ownership)
       if (courseRef.current !== requestCourseId) return
       historyRequestRef.current += 1
       setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)])
@@ -302,14 +331,16 @@ export function useConversation(courseId?: string): ConversationState {
       busyRef.current = false
       if (courseRef.current === requestCourseId) setBusy(false)
     }
-  }, [courseId])
+  }, [courseId, notebookId])
 
   /* 会话尚未建立就发问时补建一个（悬浮坞可能在异步建会话完成前就提交） */
   const ensureConversation = useCallback(async (ownership?: ConversationOwnership): Promise<string | undefined> => {
-    if (!courseId) return undefined
+    if (!courseId && !notebookId) return undefined
     if (conversationId) return conversationId
     if (creatingRef.current) return creatingRef.current
-    const pending = api.createConversation(courseId, '新对话', ownership).then((created) => {
+    const pending = (notebookId
+      ? api.createNotebookConversation(notebookId)
+      : api.createConversation(courseId!, '新对话', ownership)).then((created) => {
       if (courseRef.current === courseId) {
         setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)])
         setConversationId(created.id)
@@ -322,12 +353,15 @@ export function useConversation(courseId?: string): ConversationState {
     })
     creatingRef.current = pending
     return pending
-  }, [courseId, conversationId])
+  }, [courseId, notebookId, conversationId])
 
   const ask = useCallback(async (text: string, scope: AskScope = {}): Promise<boolean> => {
     const question = text.trim()
     const requestCourseId = courseId
-    if (!requestCourseId || !question || busyRef.current) return false
+    /* Notebook 范围必须走 agent 流式通道（它才带 notebook_context 与核验后发布），
+       课程 JSON 通道不接受 Notebook 归属，不能在这里偷偷降级成课程范围。 */
+    if (scope.kind === 'notebook') return false
+    if (!requestCourseId || notebookId || !question || busyRef.current) return false
     busyRef.current = true
     setBusy(true)
     setError(undefined)
@@ -335,9 +369,7 @@ export function useConversation(courseId?: string): ConversationState {
        course 也显式传，避免与「未指定」混淆（未指定时由调用方决定默认值）。 */
     const ownership = scope.kind === 'global'
       ? { scope: 'global' as const }
-      : scope.kind === 'note'
-        ? { scope: 'note' as const, noteId: scope.targetId ?? null, noteTitle: scope.targetTitle ?? null }
-        : { scope: 'course' as const }
+      : { scope: 'course' as const }
     let localUserId = ''
     try {
       const targetId = await ensureConversation(ownership)
@@ -366,8 +398,6 @@ export function useConversation(courseId?: string): ConversationState {
            会把这条推断分支短路掉，反而更差。 */
         allow_web: true,
         scope: ownership?.scope,
-        note_id: ownership?.noteId ?? null,
-        note_title: ownership?.noteTitle ?? null,
         idempotency_key: `${targetId}-${askedAt}`,
       })
       if (courseRef.current !== requestCourseId) return true
@@ -383,8 +413,9 @@ export function useConversation(courseId?: string): ConversationState {
           if (firstTurn && ownership?.scope) {
             next.scope = ownership.scope
             next.default_scope = ownership.scope
-            next.note_id = ownership.scope === 'note' ? (ownership.noteId ?? null) : null
-            next.note_title = ownership.scope === 'note' ? (ownership.noteTitle ?? null) : null
+            /* 新提问不再产生 note 归属；旧会话的 note_id 快照是只读历史，这里只清空本会话的新值 */
+            next.note_id = null
+            next.note_title = null
           }
           return next
         }))
@@ -402,13 +433,13 @@ export function useConversation(courseId?: string): ConversationState {
       busyRef.current = false
       if (courseRef.current === requestCourseId) setBusy(false)
     }
-  }, [courseId, ensureConversation])
+  }, [courseId, notebookId, ensureConversation])
 
   /* agent 流式提问：本地插入用户消息 → 逐步更新 agentRun → final 规范成消息入历史 */
   const askAgent = useCallback(async (text: string, options: AgentAskOptions): Promise<boolean> => {
     const question = text.trim()
     const requestCourseId = courseId
-    if (!requestCourseId || !question || busyRef.current) return false
+    if ((!requestCourseId && !notebookId) || !question || busyRef.current) return false
     busyRef.current = true
     setBusy(true)
     setError(undefined)
@@ -431,8 +462,9 @@ export function useConversation(courseId?: string): ConversationState {
         ...(firstTurn ? {
           scope: options.scope,
           default_scope: options.scope,
+          notebook_id: options.scope === 'notebook' ? options.notebookContext?.notebook_id ?? notebookId ?? null : null,
           note_id: options.scope === 'note' ? options.notebookContext?.notebook_id ?? null : null,
-          note_title: options.scope === 'note'
+          note_title: options.scope === 'note' || options.scope === 'notebook'
             ? options.notebookContext?.title ?? options.readingContext?.note_title ?? item.note_title
             : null,
         } : {}),
@@ -445,7 +477,9 @@ export function useConversation(courseId?: string): ConversationState {
     const refreshSavedConversation = async (reloadHistory: boolean) => {
       if (!targetId || !isCurrentRequest()) return
       const [savedConversations, savedMessages] = await Promise.allSettled([
-        api.listConversations(requestCourseId),
+        notebookId
+          ? api.listNotebookConversations(notebookId)
+          : api.listConversations(requestCourseId!),
         reloadHistory ? api.listConversationMessages(targetId) : Promise.resolve(undefined),
       ])
       if (!isCurrentRequest()) return
@@ -530,10 +564,29 @@ export function useConversation(courseId?: string): ConversationState {
         if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
         setAgentRun((current) => current ? { ...current, notice: event.text } : current)
       },
+      onStatus: (event: AgentStatusEvent) => {
+        if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+        const labels: Partial<Record<AgentStatusEvent['status'], string>> = {
+          thinking: '正在思考',
+          reading_notebook: '正在读取当前笔记', drafting: '正在组织答案',
+          checking_sources: '正在逐条核对资料', searching_web: '正在检索外部来源',
+          finalizing: '正在整理核验结果',
+          verified: '已通过证据核验',
+          partially_verified: '部分主张未核实（已标注）',
+          verified_no_claims: '无需核验的表达性回答',
+          unverified_no_evidence: '本轮没有可引用来源（未核验）',
+          verification_unavailable: '核验暂不可用（未核验）',
+        }
+        setAgentRun((current) => current
+          ? { ...current, status: event.status, notice: labels[event.status] ?? current.notice }
+          : current)
+      },
         onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
         onFinal: (final: AgentFinalEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
-          setAgentRun((current) => current ? { ...current, final } : current)
+          setAgentRun((current) => current
+            ? { ...current, final, verification: final.verification ?? undefined }
+            : current)
           /* 建议按产生它的助手消息 id 分桶累计（桶内按 id 去重）：技能卡跟随对应那轮回答渲染，
               生命周期跟随会话，不随下一次提问的 agentRun 重置而消失。
               key 与下方入历史消息的 id 同源，历史重载（服务端 id）后依然对得上。 */
@@ -560,6 +613,7 @@ export function useConversation(courseId?: string): ConversationState {
             mode: final.mode,
             sources: final.sources ?? [],
             process: final.process ?? null,
+            verification: final.verification ?? null,
           }])
           // 同步后端回写的标题，并在首轮同步归属（scope/笔记快照）。
           // 归属是会话级属性：只在首轮落库时确定，后续轮次不得按本轮参数改写。
@@ -591,7 +645,7 @@ export function useConversation(courseId?: string): ConversationState {
           抢先 setBusy(false)，吞掉加载态；门内表示仍是本会话的本请求，正常复位 */
       if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setBusy(false)
     }
-  }, [courseId, ensureConversation])
+  }, [courseId, notebookId, ensureConversation])
 
   /* 中断正在进行的回答：abort 当前请求，已收到的正文保留（实时块改渲染成「已中断」） */
   const stopAgent = useCallback(() => {

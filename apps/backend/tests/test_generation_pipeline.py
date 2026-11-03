@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -19,6 +18,7 @@ from app.db.models import (
 from app.generation.composer import CompositionError, compose_deepseek
 from app.notes.document import load_document
 from app.schemas.generation import NotebookGenerationCreate
+from app.services.errors import ApplicationError
 from app.workers import notebook_generation_worker as worker
 from tests.notebook_fixtures import (
     make_asset,
@@ -203,7 +203,7 @@ def test_generation_rejects_insufficient_parse_quality(db):
     document.pages[0].text = ""
     persist_existing_ir(db, asset=asset, document=document)
     db.commit()
-    with pytest.raises(HTTPException) as captured:
+    with pytest.raises(ApplicationError) as captured:
         _create_job(db, book, asset, "bad-quality")
     assert captured.value.status_code == 409
     assert captured.value.detail["code"] == "parse_quality_insufficient"

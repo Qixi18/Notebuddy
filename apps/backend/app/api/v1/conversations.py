@@ -1,25 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
-
-from app.ai.orchestrator import run_answer
-from app.api.v1.shared import ensure_conversation, ensure_course
 from app.db.database import get_db
-from app.db.models import (
-    Conversation,
-    ConversationMessage,
-    Material,
-    MessageEvidence,
-    Note,
-    Notebook,
-    PageBlock,
-    SourceRef,
-)
+from app.db.models import Conversation, ConversationMessage
 from app.schemas.api import (
     ConversationCreate,
     ConversationMessageCreate,
@@ -29,14 +14,34 @@ from app.schemas.api import (
     ConversationTitleUpdate,
     MessageEvidenceRead,
 )
+from app.services.assistant_execution import (
+    send_conversation_message,
+)
 from app.services.assistant_sources import sources_from_evidence
 from app.services.conversations import (
     DEFAULT_CONVERSATION_TITLE,
-    derive_conversation_title,
-    persist_assistant_message,
+    list_conversation_messages,
+    normalize_conversation_scope,
     search_course_messages,
 )
-from app.services.course_scope import material_in_course
+from app.services.conversations import (
+    create_course_conversation as create_course_conversation_use_case,
+)
+from app.services.conversations import (
+    create_notebook_conversation as create_notebook_conversation_use_case,
+)
+from app.services.conversations import (
+    delete_conversation as delete_conversation_use_case,
+)
+from app.services.conversations import (
+    list_course_conversations as list_course_conversations_use_case,
+)
+from app.services.conversations import (
+    list_notebook_conversations as list_notebook_conversations_use_case,
+)
+from app.services.conversations import (
+    rename_conversation as rename_conversation_use_case,
+)
 
 router = APIRouter()
 
@@ -100,53 +105,34 @@ def _message_read(db: Session, message: ConversationMessage, conversation_title:
         evidence=evidence,
         mode=_mode_from_evidence(message),
         sources=sources_from_evidence(db, message),
-        process=message.process,
+        process={key: value for key, value in (message.process or {}).items() if key != "verification"} or None,
+        verification=(message.process or {}).get("verification"),
         suggestions=message.suggestions,
         conversation_title=conversation_title or DEFAULT_CONVERSATION_TITLE,
     )
 
 
-_LEGACY_SCOPE = {"material": "course", "page": "course"}
-_VALID_SCOPE = {"course", "global", "note"}
-
-
-def _normalize_scope(value: str | None) -> str:
-    """把旧词 material/page 与非法值都归一到 course / global / note。"""
-    if not value:
-        return "course"
-    if value in _VALID_SCOPE:
-        return value
-    return _LEGACY_SCOPE.get(value, "course")
-
-
 @router.post("/courses/{course_id}/conversations", response_model=ConversationRead, status_code=201)
 def create_conversation(course_id: str, payload: ConversationCreate, db: Session = Depends(get_db)) -> Conversation:
-    course = ensure_course(db, course_id)
-    scope = _normalize_scope(payload.scope or payload.default_scope)
+    scope = normalize_conversation_scope(payload.scope or payload.default_scope)
     # 只有锁定笔记的会话才带笔记快照；其余范围忽略，避免脏字段混进历史分组。
     note_id = payload.note_id if scope == "note" else None
     note_title = payload.note_title if scope == "note" else None
-    if scope == "note":
-        notebook = db.get(Notebook, note_id) if note_id else None
-        if notebook is None and note_id:
-            legacy_note = db.get(Note, note_id)
-            notebook = db.get(Notebook, legacy_note.notebook_id) if legacy_note and legacy_note.notebook_id else None
-        if notebook is None or notebook.deleted_at is not None or notebook.course_id != course.id:
-            raise HTTPException(status_code=404, detail="锁定的笔记不存在或不属于当前课程")
-        note_id = notebook.id
-        note_title = (note_title or notebook.title)[:300]
-    conversation = Conversation(
-        course_id=course_id,
-        title=payload.title.strip(),
-        default_scope=scope,
-        scope=scope,
-        note_id=note_id,
-        note_title=note_title,
-    )
-    db.add(conversation)
-    db.commit()
-    db.refresh(conversation)
-    return conversation
+    return create_course_conversation_use_case(db, course_id=course_id, title=payload.title.strip(),
+        scope=scope, note_id=note_id, note_title=note_title)
+
+
+@router.post("/notebooks/{notebook_id}/conversations", response_model=ConversationRead, status_code=201)
+def create_notebook_conversation(
+    notebook_id: str, payload: ConversationCreate, db: Session = Depends(get_db),
+) -> Conversation:
+    """Create a transcript owned by one Notebook, independent of its course binding."""
+    return create_notebook_conversation_use_case(db, notebook_id, payload.title.strip())
+
+
+@router.get("/notebooks/{notebook_id}/conversations", response_model=list[ConversationRead])
+def list_notebook_conversations(notebook_id: str, db: Session = Depends(get_db)) -> list[Conversation]:
+    return list_notebook_conversations_use_case(db, notebook_id)
 
 
 @router.patch("/conversations/{conversation_id}", response_model=ConversationRead)
@@ -154,42 +140,19 @@ def rename_conversation(
     conversation_id: str, payload: ConversationTitleUpdate, db: Session = Depends(get_db),
 ) -> Conversation:
     """重命名会话：仅改标题。手动改名后，首条问题的自动命名不会再覆盖它。"""
-    conversation = ensure_conversation(db, conversation_id)
-    conversation.title = payload.title.strip()
-    db.add(conversation)
-    db.commit()
-    db.refresh(conversation)
-    return conversation
+    return rename_conversation_use_case(db, conversation_id, payload.title.strip())
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
 def delete_conversation(conversation_id: str, db: Session = Depends(get_db)) -> None:
     """删除整段会话。ORM 级联清空消息与证据（messages / evidence 均 delete-orphan，
     且 FK ondelete=CASCADE）；note_suggestions 不挂 conversation_id，无孤儿行。"""
-    conversation = ensure_conversation(db, conversation_id)
-    db.delete(conversation)
-    db.commit()
+    delete_conversation_use_case(db, conversation_id)
 
 
 @router.get("/courses/{course_id}/conversations", response_model=list[ConversationRead])
 def list_conversations(course_id: str, db: Session = Depends(get_db)) -> list[Conversation]:
-    ensure_course(db, course_id)
-    conversations = list(db.scalars(select(Conversation).where(
-        Conversation.course_id == course_id,
-    ).order_by(Conversation.updated_at.desc())).all())
-    # Historical scope snapshots may contain a legacy Note ID. Resolve them on
-    # read so the client can open the canonical Notebook without rewriting data.
-    for conversation in conversations:
-        if conversation.scope != "note" or not conversation.note_id:
-            continue
-        if db.get(Notebook, conversation.note_id) is not None:
-            continue
-        legacy_note = db.get(Note, conversation.note_id)
-        notebook = db.get(Notebook, legacy_note.notebook_id) if legacy_note and legacy_note.notebook_id else None
-        if notebook is not None and notebook.course_id == course_id and notebook.deleted_at is None:
-            conversation.note_id = notebook.id
-            conversation.note_title = conversation.note_title or notebook.title
-    return conversations
+    return list_course_conversations_use_case(db, course_id)
 
 
 @router.get("/courses/{course_id}/conversations/search", response_model=list[ConversationMessageHit])
@@ -197,21 +160,12 @@ def search_course_conversations(
     course_id: str, q: str = Query(default="", max_length=120), db: Session = Depends(get_db)
 ) -> list[dict]:
     """课程内会话消息全文搜索（P6）：提问与回答都参与匹配，返回消息级命中片段。"""
-    ensure_course(db, course_id)
     return search_course_messages(db, course_id, q)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[ConversationMessageRead])
 def list_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[ConversationMessageRead]:
-    conversation = ensure_conversation(db, conversation_id)
-    messages = list(db.scalars(
-        select(ConversationMessage).where(ConversationMessage.conversation_id == conversation_id)
-        .options(
-            selectinload(ConversationMessage.evidence).selectinload(MessageEvidence.source_ref)
-            .selectinload(SourceRef.page_block).selectinload(PageBlock.page),
-            selectinload(ConversationMessage.evidence).selectinload(MessageEvidence.web_source),
-        ).order_by(ConversationMessage.created_at)
-    ).all())
+    conversation, messages = list_conversation_messages(db, conversation_id)
     return [_message_read(db, message, conversation.title) for message in messages]
 
 
@@ -221,86 +175,13 @@ def send_message(
     payload: ConversationMessageCreate,
     db: Session = Depends(get_db),
 ) -> ConversationMessageRead:
-    conversation = ensure_conversation(db, conversation_id)
-    if payload.idempotency_key:
-        existing = db.scalar(select(ConversationMessage).where(
-            ConversationMessage.conversation_id == conversation_id,
-            ConversationMessage.role == "user",
-            ConversationMessage.idempotency_key == payload.idempotency_key,
-        ))
-        if existing is not None:
-            answer = db.scalar(select(ConversationMessage).where(
-                ConversationMessage.conversation_id == conversation_id,
-                ConversationMessage.role == "assistant",
-                ConversationMessage.created_at >= existing.created_at,
-            ).order_by(ConversationMessage.created_at).limit(1))
-            if answer is not None:
-                return _message_read(db, answer)
-
-    selected = db.get(Material, payload.material_id) if payload.material_id else None
-    if payload.material_id and (
-        selected is None or selected.deleted_at is not None
-        or not material_in_course(db, selected, conversation.course_id)
-    ):
-        raise HTTPException(status_code=404, detail="所选资料不属于当前课程")
-    history = [(message.role, message.content) for message in conversation.messages]
-    is_first_turn = not any(message.role == "user" for message in conversation.messages)
-    user = ConversationMessage(
-        conversation_id=conversation_id, role="user", content=payload.question.strip(),
-        learning_goal=payload.learning_goal, status="completed", idempotency_key=payload.idempotency_key,
+    conversation, assistant = send_conversation_message(
+        db, conversation_id, question=payload.question,
+        learning_goal=payload.learning_goal,
+        idempotency_key=payload.idempotency_key, allow_web=payload.allow_web,
+        notebook_context=payload.notebook_context,
+        material_id=payload.material_id, page_number=payload.page_number,
+        scope=payload.scope, note_id=payload.note_id, note_title=payload.note_title,
+        teacher_persona=payload.teacher_persona,
     )
-    db.add(user)
-    # 范围是会话级属性：仅在本会话尚无任何用户消息时落库，把答疑页载入时自动建的
-    # 空会话改写成用户实际选择的范围；此后的提问忽略 payload.scope。
-    if is_first_turn:
-        new_scope = _normalize_scope(payload.scope or conversation.scope)
-        conversation.default_scope = new_scope
-        conversation.scope = new_scope
-        conversation.note_id = payload.note_id if new_scope == "note" else None
-        conversation.note_title = payload.note_title if new_scope == "note" else None
-    # 标题仍是默认值就用首条问题命名（同源复用：同一会话只命名一次）
-    if conversation.title.strip() == DEFAULT_CONVERSATION_TITLE:
-        conversation.title = derive_conversation_title(payload.question, conversation.scope, conversation.note_title)
-    try:
-        db.commit()
-    except IntegrityError:
-        # 幂等键「先查后插」非原子：并发同键请求绕过预检后撞唯一约束
-        db.rollback()
-        raise HTTPException(status_code=409, detail="该问题已提交过，请勿重复发送") from None
-    course = ensure_course(db, conversation.course_id)
-    try:
-        result = run_answer(
-            db,
-            course_id=conversation.course_id,
-            course_name=course.name,
-            question=payload.question,
-            material_id=payload.material_id,
-            page_number=payload.page_number,
-            allow_web=payload.allow_web,
-            learning_goal=payload.learning_goal,
-            history=history,
-            teacher_persona=payload.teacher_persona,
-        )
-        claims = result.get("claims") or [{
-            "claim_key": "answer",
-            "chunk_indexes": list(range(len(result["chunks"]))),
-            "web_indexes": list(range(len(result["web_results"]))),
-        }]
-        assistant = persist_assistant_message(
-            db, conversation=conversation, learning_goal=payload.learning_goal,
-            content=result["answer"], model_version=result.get("model_version"),
-            chunks=result["chunks"], web_results=result["web_results"], claims=claims,
-        )
-        return _message_read(db, assistant, conversation.title)
-    except Exception as exc:
-        db.rollback()
-        failed = ConversationMessage(
-            conversation_id=conversation_id, role="assistant",
-            content="本次回答未完成，已保留失败状态；请稍后重试或查看课程检索片段。",
-            learning_goal=payload.learning_goal, status="failed", failure_type=type(exc).__name__,
-        )
-        db.add(failed)
-        conversation.updated_at = datetime.now(UTC)
-        db.commit()
-        db.refresh(failed)
-        return _message_read(db, failed, conversation.title)
+    return _message_read(db, assistant, conversation.title)

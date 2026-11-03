@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { CourseTree } from '../../../types'
 import { canPlayGrowth, growthLedger, sectionGrowthKey, treeGrowthEnabled } from './ledger'
+import { TREE_GROWTH_LIFETIME_MS } from './timing'
 
 export type GrowthAnimations = { courses: Set<string>; books: Set<string>; sections: Set<string> }
 const EMPTY: GrowthAnimations = { courses: new Set(), books: new Set(), sections: new Set() }
@@ -46,7 +47,7 @@ export function useGrowthBlocked(): boolean {
  * Converts new directory entries into short-lived visual receipts. Storage keeps
  * IDs only; Notebook text and edit state never enter the growth ledger.
  */
-export function useGrowthPlayback(trees: CourseTree[], visibleCourseIds: string[], courseIds: string[]): GrowthAnimations {
+export function useGrowthPlayback(trees: CourseTree[], visibleCourseIds: string[], courseIds: string[], timeScale = 1): GrowthAnimations {
   const version = useSyncExternalStore(growthLedger.subscribe, growthLedger.snapshot, () => 0)
   const reduced = useReducedMotion()
   const blocked = useGrowthBlocked()
@@ -92,8 +93,8 @@ export function useGrowthPlayback(trees: CourseTree[], visibleCourseIds: string[
 
   useEffect(() => {
     if (!active.courses.size && !active.books.size && !active.sections.size) return
-    const timer = window.setTimeout(() => setActive(EMPTY), 1600)
+    const timer = window.setTimeout(() => setActive(EMPTY), Math.round(TREE_GROWTH_LIFETIME_MS * timeScale))
     return () => window.clearTimeout(timer)
-  }, [active])
+  }, [active, timeScale])
   return enabled && !reduced ? active : EMPTY
 }

@@ -8,6 +8,7 @@ import { loadPetPlacement, savePetSize } from './petStorage'
 import { usePetAction } from './usePetAction'
 import { usePetDrag } from './usePetDrag'
 import { usePetEasterEggs } from './usePetEasterEggs'
+import { usePetWideViewport } from './usePetViewport'
 
 /**
  * 页内桌宠：rail 态是左栏舞台，拖出（位移 > 6px）后切到 float 态，
@@ -16,7 +17,6 @@ import { usePetEasterEggs } from './usePetEasterEggs'
  */
 
 const FLOAT_HOST_ID = 'notebuddy-pet-float-host'
-const FLOAT_MIN_VIEWPORT = 900
 
 export type PetAvatarHandle = {
   yieldFromRect: (rect: DOMRect | null) => void
@@ -33,22 +33,6 @@ function ensureFloatHost(): HTMLElement | null {
   return host
 }
 
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => {
-    if (typeof matchMedia === 'undefined') return true
-    return matchMedia(query).matches
-  })
-  useEffect(() => {
-    if (typeof matchMedia === 'undefined') return
-    const list = matchMedia(query)
-    const onChange = (event: MediaQueryListEvent) => setMatches(event.matches)
-    list.addEventListener('change', onChange)
-    setMatches(list.matches)
-    return () => list.removeEventListener('change', onChange)
-  }, [query])
-  return matches
-}
-
 export const PetAvatar = forwardRef<PetAvatarHandle, {
   mode: PetMode
   onModeChange: (mode: PetMode) => void
@@ -62,7 +46,7 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
   /** 输入区容器：浮层压住它时自动让位 */
   avoidRef?: RefObject<HTMLElement | null>
 }>(function PetAvatar({ mode, onModeChange, status, streaming = false, bubbleHint, draft = '', avoidRef }, ref) {
-  const wide = useMediaQuery(`(min-width: ${FLOAT_MIN_VIEWPORT}px)`)
+  const wide = usePetWideViewport()
   const effectiveMode: PetMode = wide ? mode : 'rail'
 
   const stageRef = useRef<HTMLDivElement | null>(null)

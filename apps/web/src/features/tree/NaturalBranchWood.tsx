@@ -7,7 +7,7 @@ export const NaturalBranchWood = memo(function NaturalBranchWood({ limb, texture
     data-growth-limb={limb.id} data-growth-book={limb.bookId} data-growth-note={limb.level === 3 ? limb.id.replace(/:twig$/, '') : undefined}
     data-growth-path={limb.centerPath} data-growth-radius={limb.rootRadius} data-growth-level={stock ? 0 : limb.level} data-growth-parent={primaryParent ?? limb.parentId ?? undefined} data-growth-parent-t={primaryParent ? 1 : limb.parentT}>
     <defs><clipPath id={clip}><path d={limb.outline} /></clipPath></defs>
-    <path d={limb.outline} fill={`url(#${textureId}-wood)`} stroke="#796e56" strokeWidth=".4" />
+    <path d={limb.outline} fill={`url(#${textureId}-wood)`} stroke={limb.level > 1 ? '#938568' : undefined} strokeWidth=".35" />
     <g clipPath={`url(#${clip})`} opacity={limb.level === 3 ? .5 : .88}>
       {limb.textureSpans.map((span, index) => <g key={index} transform={`translate(${span.center.x},${span.center.y}) rotate(${span.angle})`}>
         <rect x={-span.width / 2} y={-span.length / 2} width={span.width} height={span.length} fill={`url(#${textureId}-bark)`} mask={`url(#${textureId}-bark-edge)`} />

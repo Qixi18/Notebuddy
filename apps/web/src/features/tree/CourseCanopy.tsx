@@ -4,7 +4,6 @@ import type { CourseCanopy as CanopyGeometry } from './courseCanopyGeometry'
 import type { KnowledgeLeaf } from './treeGeometry'
 import { NaturalBranchWood } from './NaturalBranchWood'
 import { TrunkSprite, RootstockSprite, LeafSprite } from './TreeSprites'
-import { rootstockJoin } from './naturalBranchGeometry'
 import { SaplingCrown } from './SaplingCrown'
 import { TreeAction } from './TreeAction'
 import { detailInteraction, operationSize } from './treeInteraction'
@@ -27,7 +26,9 @@ export function CourseCanopy({ canopy, empty, previewId, previewNoteId, onPrevie
   const hitCells = useMemo(() => forest ? leafHitCells(items.flatMap(item => item.leaves)) : new Map(), [items, forest])
   const clipIds = new Map([...hitCells.keys()].map((id, index) => [id, `${texture}-hit-${index}`]))
   const detail = !forest || detailInteraction(zoom)
-  const barkCrop = ['200 796 64 160', '630 792 64 160', '1020 660 64 160'][variant]
+  const barkCrop = (empty ? ['200 796 64 160', '630 792 64 160', '1020 660 64 160'] : ['350 300 64 160', '1010 300 64 160', '1640 300 64 160'])[variant]
+  const woodColors = empty ? ['#786c51', '#a18b65', '#c7b68a', '#8c7b5d'] : ['#a29776', '#c5b694', '#ded1b1', '#b3a382']
+  const trunk = items[0]?.branch.trunk
   const show = (book: NotebookRead, leaf: KnowledgeLeaf) => {
     const target = targets.current.get(leaf.section.id)
     if (target) onPreview({ book, leaf, target })
@@ -35,18 +36,18 @@ export function CourseCanopy({ canopy, empty, previewId, previewNoteId, onPrevie
   return <>
     <defs>
       {[...hitCells].map(([id, cell]) => <clipPath key={id} id={clipIds.get(id)} clipPathUnits="userSpaceOnUse"><polygon points={cell.map((point: { x: number; y: number }) => `${point.x},${point.y}`).join(' ')} /></clipPath>)}
-      <linearGradient id={`${texture}-wood`}><stop stopColor="#786c51" /><stop offset=".3" stopColor="#a18b65" /><stop offset=".58" stopColor="#c7b68a" /><stop offset="1" stopColor="#8c7b5d" /></linearGradient>
-      <pattern id={`${texture}-bark`} patternUnits="userSpaceOnUse" width="36" height="90" x="-18" y="-45"><svg width="36" height="90" viewBox={barkCrop} preserveAspectRatio="none"><image href="/assets/forest/trunks-atlas.webp" width="1254" height="1254" /></svg></pattern>
+      <linearGradient id={`${texture}-wood`}><stop stopColor={woodColors[0]} /><stop offset=".3" stopColor={woodColors[1]} /><stop offset=".58" stopColor={woodColors[2]} /><stop offset="1" stopColor={woodColors[3]} /></linearGradient>
+      <pattern id={`${texture}-bark`} patternUnits="userSpaceOnUse" width="36" height="90" x="-18" y="-45"><svg width="36" height="90" viewBox={barkCrop} preserveAspectRatio="none"><image href={`/assets/forest/${empty ? 'trunks-atlas.webp' : 'rootstocks-v2.png'}`} width={empty ? 1254 : 1999} height={empty ? 1254 : 787} /></svg></pattern>
       <linearGradient id={`${texture}-bark-feather`} x1="0" x2="0" y1="0" y2="1"><stop stopColor="black" /><stop offset=".2" stopColor="white" /><stop offset=".8" stopColor="white" /><stop offset="1" stopColor="black" /></linearGradient>
       <mask id={`${texture}-bark-edge`} maskContentUnits="objectBoundingBox"><rect width="1" height="1" fill={`url(#${texture}-bark-feather)`} /></mask>
-      <linearGradient id={`${texture}-junction`} x1="0" x2="0" y1="-215" y2="-170" gradientUnits="userSpaceOnUse"><stop stopColor="black" /><stop offset="1" stopColor="white" /></linearGradient>
+      <linearGradient id={`${texture}-junction`} x1="0" x2="0" y1="-205" y2="-130" gradientUnits="userSpaceOnUse"><stop stopColor="black" /><stop offset="1" stopColor="white" /></linearGradient>
       <mask id={`${texture}-trunk`} maskUnits="userSpaceOnUse" x="-160" y="-280" width="320" height="330"><rect x="-160" y="-280" width="320" height="330" fill={`url(#${texture}-junction)`} /></mask>
     </defs>
     <ellipse cy="9" rx="180" ry="22" fill="#a2ab73" opacity=".14" aria-hidden="true" />
     {empty && <SaplingCrown variant={variant} textureId={texture} />}
-    {items.map(({ branch, transform, scaleY }, index) => <g key={`${branch.book.id}-${index}`} transform={transform}>
+    {trunk && <g data-growth-trunk="true"><NaturalBranchWood limb={trunk} textureId={texture} stock /></g>}
+    {items.map(({ branch, transform }, index) => <g key={`${branch.book.id}-${index}`} transform={transform}>
       <g data-wood-notebook-id={branch.book.id} className={growingBooks?.has(branch.book.id) ? 'kt-branch-growth' : undefined}>
-        <g data-trunk-join={branch.book.id}><NaturalBranchWood limb={rootstockJoin(branch.primary, scaleY)} textureId={texture} /></g>
         {branch.limbs.map(limb => <NaturalBranchWood key={limb.id} limb={limb} textureId={texture} />)}
       </g>
     </g>)}

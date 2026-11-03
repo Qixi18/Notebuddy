@@ -10,10 +10,12 @@ from datetime import UTC, datetime
 from pydantic import ValidationError
 from sqlalchemy import select, update
 
-from app.ai.deepseek import DeepSeekClient, DeepSeekError
+from app.ai.deepseek import DeepSeekError
 from app.db.database import SessionLocal
 from app.db.forest_models import CurriculumImport, ForestJob
+from app.document_processing.checkpoints import WorkPending
 from app.forest.curriculum import CurriculumError, extract_curriculum
+from app.forest.curriculum_processing import CurriculumProcessingError
 
 
 def claim_next_forest_job() -> str | None:
@@ -44,7 +46,7 @@ def mark_interrupted_forest_jobs(*, force: bool = False) -> int:
             job.finished_at = datetime.now(UTC)
             if job.curriculum_import_id:
                 record = db.get(CurriculumImport, job.curriculum_import_id)
-                if record is not None and record.status != "confirmed":
+                if record is not None and record.status not in {"confirmed", "reverted"}:
                     record.status = "failed"
                     record.error_message = job.error_message
         db.commit()
@@ -56,6 +58,22 @@ def retry_job(db, job: ForestJob) -> ForestJob:
         raise CurriculumError("该森林任务类型已退役，请手动建立 Notebook 关系")
     if job.status not in {"failed", "pending"}:
         raise CurriculumError("只有失败的任务可以重试")
+    if job.kind == "curriculum_import":
+        record = db.get(CurriculumImport, job.curriculum_import_id)
+        if record is None or record.status != "failed" or job.status != "failed":
+            raise CurriculumError("只有失败且尚未确认的培养方案可以重试")
+        changed = db.execute(update(ForestJob).where(
+            ForestJob.id == job.id, ForestJob.status == "failed",
+        ).values(status="pending", error_message=None, finished_at=None,
+                 started_at=None, heartbeat_at=None, updated_at=datetime.now(UTC)))
+        reset = db.execute(update(CurriculumImport).where(
+            CurriculumImport.id == record.id, CurriculumImport.status == "failed",
+        ).values(status="pending", error_message=None))
+        if changed.rowcount != 1 or reset.rowcount != 1:
+            db.rollback()
+            raise CurriculumError("培养方案状态已变化，请刷新后重试")
+        db.flush()
+        return job
     job.status = "pending"
     job.error_message = None
     job.finished_at = None
@@ -77,28 +95,33 @@ def process_forest_job(job_id: str) -> None:
             process_notebook_relation_job(job_id)
             return
         try:
-            job.progress = 10
+            job.progress = max(job.progress, 5)
             job.heartbeat_at = datetime.now(UTC)
             if job.kind != "curriculum_import":
                 raise CurriculumError("该森林任务类型已退役")
             record = db.get(CurriculumImport, job.curriculum_import_id)
-            if record is None or record.status == "confirmed":
+            if record is None or record.status not in {"pending", "processing"}:
                 raise CurriculumError("培养方案已确认或不存在")
             record.status = "processing"
             db.commit()
-            extract_curriculum(db, record, client=DeepSeekClient())
+            extract_curriculum(db, record, max_new_steps=3)
             job.status = "completed"
             job.progress = 100
             job.error_message = None
             job.heartbeat_at = datetime.now(UTC)
             job.finished_at = datetime.now(UTC)
             db.commit()
+        except WorkPending:
+            job.status = 'pending'
+            job.heartbeat_at = datetime.now(UTC)
+            record.status = 'pending'
+            db.commit()
         except Exception as exc:
             db.rollback()
             job = db.get(ForestJob, job_id)
             if job is None:
                 return
-            if isinstance(exc, CurriculumError):
+            if isinstance(exc, (CurriculumError, CurriculumProcessingError)):
                 message = str(exc)
             elif isinstance(exc, ValidationError):
                 message = "AI 输出格式或来源校验失败，请重试并核对资料"
@@ -107,12 +130,11 @@ def process_forest_job(job_id: str) -> None:
             else:
                 message = "森林任务处理失败；数据和原文件保留，请检查资料后重试"
             job.status = "failed"
-            job.progress = 0
             job.error_message = message
             job.finished_at = datetime.now(UTC)
             if job.curriculum_import_id:
                 record = db.get(CurriculumImport, job.curriculum_import_id)
-                if record is not None and record.status != "confirmed":
+                if record is not None and record.status not in {"confirmed", "reverted", "preview"}:
                     record.status = "failed"
                     record.error_message = message
             db.commit()

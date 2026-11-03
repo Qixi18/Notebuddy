@@ -7,7 +7,7 @@ import type { AssistantSource } from '../types'
  * ``agent.ts`` 的流式客户端与这里共享同一套事件类型与解析规则。
  */
 
-export type AgentScope = 'note' | 'course' | 'global'
+export type AgentScope = 'notebook' | 'note' | 'course' | 'global'
 
 export type AgentStepEvent = {
   type: 'step'
@@ -18,9 +18,48 @@ export type AgentStepEvent = {
 
 export type AgentDeltaEvent = { type: 'delta'; text: string }
 
+/** 旧版逐字思维链事件；服务端已不再外发，保留类型给旧历史/兼容消费者。 */
 export type AgentThinkingEvent = { type: 'thinking'; text: string }
 
 export type AgentNoticeEvent = { type: 'notice'; text: string }
+
+/**
+ * 服务端阶段状态。``verified`` 及之后的档位是「核验后发布」的发布门禁结果，
+ * 前端据此区分「已核实 / 部分未核实 / 未核验」，不能把三者显示成同一个样子。
+ */
+export type AgentVerificationStatus =
+  | 'verified'
+  | 'partially_verified'
+  | 'verified_no_claims'
+  | 'unverified_no_evidence'
+  | 'verification_unavailable'
+
+export type AgentStatusEvent = {
+  type: 'status'
+  status:
+    | 'thinking'
+    | 'reading_notebook'
+    | 'drafting'
+    | 'checking_sources'
+    | 'searching_web'
+    | 'finalizing'
+    | AgentVerificationStatus
+}
+
+/** 发布前证据核验摘要（不含思维链、不含内部提示词）。 */
+export type AgentVerification = {
+  status: AgentVerificationStatus
+  /** 需要展示给用户的口径说明；已核实时为 null/undefined */
+  notice?: string | null
+  claims?: {
+    claim: string
+    verdict: 'supported' | 'contradicted' | 'insufficient'
+    evidence_ids?: string[]
+    source_ids?: string[]
+  }[]
+  evidence_count?: number
+  web_source_count?: number
+}
 
 export type AgentSuggestion =
   | { type: 'note_suggestion'; id: string; note_id: string; note_title: string; impact: string }
@@ -53,8 +92,9 @@ export type AgentSuggestion =
     }
 
 export type AgentProcessTrace = {
-  thinking: string
+  thinking?: string
   thinking_ms?: number
+  thinking_chars?: number
   steps: { tool: string; detail: string; duration_ms?: number | null }[]
 }
 
@@ -68,6 +108,8 @@ export type AgentFinalEvent = {
   message_id?: string
   fallback?: boolean
   reason?: string
+  /** 发布前核验摘要：前端必须据此标识「已核实 / 部分未核实 / 未核验」 */
+  verification?: AgentVerification | null
   /** agent 过程轨迹（服务端计时持久化），前端随消息渲染成可展开折叠块 */
   process?: AgentProcessTrace | null
   /** 首条问题触发后由后端回写的会话标题；前端据此刷新历史列表 */
@@ -81,6 +123,7 @@ export type AgentEvent =
   | AgentDeltaEvent
   | AgentThinkingEvent
   | AgentNoticeEvent
+  | AgentStatusEvent
   | AgentFinalEvent
   | AgentErrorEvent
 
@@ -92,7 +135,7 @@ export type AgentReadingContext = {
 }
 
 export type AgentNotebookContext = {
-  course_id: string
+  course_id?: string | null
   notebook_id: string
   revision: number
   title?: string
@@ -122,6 +165,7 @@ export type AgentStreamHandlers = {
   onDelta?: (event: AgentDeltaEvent) => void
   onThinking?: (event: AgentThinkingEvent) => void
   onNotice?: (event: AgentNoticeEvent) => void
+  onStatus?: (event: AgentStatusEvent) => void
   onFinal?: (event: AgentFinalEvent) => void
   onError?: (event: AgentErrorEvent) => void
 }

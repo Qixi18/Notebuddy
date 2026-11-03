@@ -6,7 +6,6 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,6 +20,8 @@ from app.db.models import (
     NotebookUploadBatch,
     ProcessingJob,
 )
+from app.services.errors import ApplicationError
+from app.services.resource_scopes import require_notebook
 
 BATCH_IDLE_CLOSE = timedelta(minutes=2)
 
@@ -46,22 +47,22 @@ def ensure_upload_batch(
     now = datetime.now(UTC)
     identity = (batch_id or new_id()).strip()
     if not identity or len(identity) > 36:
-        raise HTTPException(422, "上传批次编号不合法")
+        raise ApplicationError(422, "上传批次编号不合法")
     batch = db.get(NotebookUploadBatch, identity)
     if batch is not None:
         if batch.notebook_id != notebook_id:
-            raise HTTPException(409, "上传批次不属于当前笔记")
+            raise ApplicationError(409, "上传批次不属于当前笔记")
         if batch.closed_at is not None:
-            raise HTTPException(409, "上传批次已关闭")
+            raise ApplicationError(409, "上传批次已关闭")
         if isinstance(processing_route, str) and processing_route != batch.processing_route:
-            raise HTTPException(409, "同一上传批次必须使用同一处理路线")
+            raise ApplicationError(409, "同一上传批次必须使用同一处理路线")
         batch.updated_at = now
         return batch
-    from app.document_processing.routes import resolve_route
+    from app.document_processing.config import resolve_route
     try:
         route = resolve_route(processing_route)
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise ApplicationError(422, str(exc)) from exc
     batch = NotebookUploadBatch(
         id=identity, notebook_id=notebook_id, created_at=now, updated_at=now,
         closed_at=now if close_if_new else None,
@@ -82,7 +83,7 @@ def register_generation_input(
     now = datetime.now(UTC)
     batch = db.get(NotebookUploadBatch, batch_id)
     if batch is None or batch.notebook_id != notebook_id:
-        raise HTTPException(409, "上传批次不存在或不属于当前笔记")
+        raise ApplicationError(409, "上传批次不存在或不属于当前笔记")
     batch.updated_at = now
     if row is None:
         row = NotebookGenerationInput(
@@ -104,9 +105,10 @@ def register_generation_input(
 
 
 def close_upload_batch(db: Session, notebook_id: str, batch_id: str) -> NotebookUploadBatch:
+    require_notebook(db, notebook_id)
     batch = db.get(NotebookUploadBatch, batch_id)
     if batch is None or batch.notebook_id != notebook_id:
-        raise HTTPException(404, "上传批次不存在")
+        raise ApplicationError(404, "上传批次不存在")
     batch.closed_at = batch.closed_at or datetime.now(UTC)
     batch.updated_at = datetime.now(UTC)
     db.commit()
@@ -158,6 +160,27 @@ def batch_status(db: Session, batch: NotebookUploadBatch) -> dict:
         "relation_jobs": [{'id': job.id, 'status': job.status, 'error_message': job.error_message}
                           for job in relation_jobs if job],
     }
+
+
+def complete_upload_batch(db: Session, notebook_id: str, batch_id: str) -> dict:
+    batch = close_upload_batch(db, notebook_id, batch_id)
+    return batch_status(db, batch)
+
+
+def get_upload_batch_status(db: Session, notebook_id: str, batch_id: str) -> dict:
+    require_notebook(db, notebook_id)
+    batch = db.get(NotebookUploadBatch, batch_id)
+    if batch is None or batch.notebook_id != notebook_id:
+        raise ApplicationError(404, "上传批次不存在")
+    return batch_status(db, batch)
+
+
+def list_upload_batch_statuses(db: Session, notebook_id: str) -> list[dict]:
+    require_notebook(db, notebook_id)
+    batches = db.scalars(select(NotebookUploadBatch).where(
+        NotebookUploadBatch.notebook_id == notebook_id,
+    ).order_by(NotebookUploadBatch.created_at.desc()).limit(30)).all()
+    return [batch_status(db, batch) for batch in batches]
 
 
 def _parse_state(db: Session, asset_id: str) -> tuple[str | None, str | None, str | None]:
@@ -325,10 +348,9 @@ def _enqueue_ready_group(db, batch, ready, now) -> int:
     ).encode()).hexdigest()
     key = f'batch-{batch.id[:20]}-{fingerprint[:48]}'
     try:
-        from app.api.v1.generation import create_generation_job
-        from app.schemas.generation import NotebookGenerationCreate
-        response = create_generation_job(batch.notebook_id,
-            NotebookGenerationCreate(asset_ids=asset_ids), key, db)
+        from app.services.generation_jobs import create_generation_job
+        response = create_generation_job(db, batch.notebook_id,
+            asset_ids, key)
         task_id = response['id']
         task = db.get(NotebookGenerationJob, task_id)
         for row in ready:
@@ -346,7 +368,7 @@ def _enqueue_ready_group(db, batch, ready, now) -> int:
                 row.finished_at = now
         db.commit()
         return 1
-    except HTTPException as exc:
+    except ApplicationError as exc:
         db.rollback()
         failed = db.scalars(select(NotebookGenerationInput).where(
             NotebookGenerationInput.asset_id.in_(asset_ids), NotebookGenerationInput.status == 'ready')).all()

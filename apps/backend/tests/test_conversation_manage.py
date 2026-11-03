@@ -6,10 +6,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1 import conversations
 from app.db.database import Base, get_db
 from app.db.models import Conversation, ConversationMessage, Course, MessageEvidence
 from app.main import app
+from app.services import assistant_execution
 
 
 def _setup(tmp_path):
@@ -58,7 +58,7 @@ def test_delete_removes_conversation_and_cascades_messages_and_evidence(tmp_path
             "claims": [{"claim_key": "answer", "chunk_indexes": [], "web_indexes": [0]}],
             "model_version": "test-model",
         }
-        monkeypatch.setattr(conversations, "run_answer", lambda *_a, **_k: result)
+        monkeypatch.setattr(assistant_execution, "run_answer", lambda *_a, **_k: result)
         # 先造一条消息（带证据），验证删除时级联清掉
         posted = client.post(f"/api/v1/conversations/{conversation_id}/messages", json={"question": "第一问"})
         assert posted.status_code == 201

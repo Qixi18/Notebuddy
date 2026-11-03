@@ -5,20 +5,17 @@
 ## 当前入口
 
 - [项目运行、环境准备与启动](../README.md)
-- [代码架构](architecture.md)
-- [接口](api.md)、[解析](parsing.md)、[知识整合](knowledge-integration.md)
+- [协作与 Agent 规则](../CONTRIBUTING.md)、[Agent 简明规则](../AGENTS.md)
+- [代码架构](architecture.md)、[模块职责地图](module-map.md)
+- [接口](api.md)、[解析](parsing.md)
 - [后端调用与业务数据存储契约](backend-data-contract.md)：并行开发共用的调用链、数据归属与本地存储路径
 - [架构决策索引](architecture-decisions/README.md)：全局变更公告及待审/已接受决策
+- [开发状态、路线图与任务日志](development/README.md)
 - [数据迁移](migrations.md)、[运维](operations.md)、[安全](security.md)
-- [验收矩阵](acceptance.md)、[证据约束](evidence.md)、[RAG 评估](rag-evaluation.md)
+- [验收矩阵](acceptance.md)、[答疑验收](acceptance-notebook-qa.md)、[文件预算验收](acceptance-file-budget.md)
 
-## 历史设计与实施记录
+## 历史记录
 
-- `superpowers/specs/`：各专项设计和未来部署方案；设计不代表已验收。
-- `superpowers/plans/`：实施计划。
-- `handoffs/`：各阶段交接与验证记录。
-- `design-references/` 和根目录 SVG：视觉参考或提案。
+部分过期设计和交接材料已从当前工作树移除；当前仍保留专项设计、迁移方案、运行手册和验收记录。阅读时应依据文档内的日期、分支与 Proposed/Accepted 状态判断适用性，需要追溯已移除内容时可查 Git 历史。历史验收数据只证明对应日期的执行结果，不自动构成当前实现要求。尤其旧 Note/ParsedPage/知识提案流程须先核对当前路由和数据契约。
 
-`superpowers/`、旧交接记录和历史验收数据仅证明对应日期的方案或执行结果，不自动构成当前实现要求。尤其旧 Note/ParsedPage/知识提案流程须先核对当前路由和数据契约。
-
-查代码时从 `apps/web/src/pages/` 的路由入口或 `apps/backend/app/api/v1/` 的接口入口进入；树绘制在 `apps/web/src/features/tree/`，笔记编辑与阅读在 `apps/web/src/features/notebook-editor/`，森林关系仍在 `apps/web/src/features/forest/`。
+查代码时可从 [模块职责地图](module-map.md)定位；Web 路由定义位于 `apps/web/src/App.tsx`，后端 API 注册位于 `apps/backend/app/api/v1/routes.py`。具体调用链和数据边界以架构说明、契约与当前源码为准。

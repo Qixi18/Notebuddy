@@ -76,11 +76,58 @@ def test_reading_position_uses_block_id(client, session):
     })
     assert saved.status_code == 200, saved.text
     assert saved.json()["block_id"] == "h-2"
+    duplicate_initial = client.put(url, json={
+        "mode": "book", "section_offset": 0.3, "expected_revision": 0,
+        "block_id": "h-1",
+    })
+    assert duplicate_initial.status_code == 409
     missing = client.put(url, json={
         "mode": "book", "section_offset": 0.2, "expected_revision": 1,
         "block_id": "missing-block",
     })
     assert missing.status_code == 404
+    updated = client.put(url, json={
+        "mode": "book", "section_offset": 0.4, "expected_revision": 1,
+        "block_id": "h-1",
+    })
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["revision"] == 2
+    stale = client.put(url, json={
+        "mode": "book", "section_offset": 0.5, "expected_revision": 1,
+        "block_id": "h-2",
+    })
+    assert stale.status_code == 409
+
+
+def test_notebook_chapter_order_uses_expected_revision(client, session):
+    course = make_course(session, "排序课程")
+    book = make_notebook(session, course, "排序笔记")
+    materials = []
+    for title in ("第一讲", "第二讲"):
+        asset = make_asset(session, book)
+        materials.append(make_material(session, book, asset, title=title))
+    session.commit()
+    url = f"/api/v1/courses/{course.id}/notebooks/{book.id}/order"
+    initial_revision = book.order_revision
+
+    reordered = client.patch(url, json={
+        "material_ids": [materials[1].id, materials[0].id],
+        "expected_order_revision": initial_revision,
+    })
+    assert reordered.status_code == 200, reordered.text
+    assert reordered.json()["order_revision"] == initial_revision + 1
+
+    stale = client.patch(url, json={
+        "material_ids": [materials[0].id, materials[1].id],
+        "expected_order_revision": initial_revision,
+    })
+    assert stale.status_code == 409
+
+    invalid = client.patch(url, json={
+        "material_ids": [materials[1].id, materials[1].id],
+        "expected_order_revision": initial_revision + 1,
+    })
+    assert invalid.status_code == 422
 
 
 def test_course_tree_and_overview_use_body(client, session):
@@ -146,6 +193,38 @@ def test_forest_relations_between_notebooks(client, session):
     assert [row["id"] for row in listed.json()] == [relation["id"]]
     deleted = client.delete(f"/api/v1/forest/relations/{relation['id']}")
     assert deleted.status_code == 200
+    from app.db.models import NotebookRelation, NotebookRelationSuppression
+    from app.forest.suppressions import pair_key
+
+    suppression_key = pair_key(book_a.id, None, book_b.id, None, "prerequisite")
+    assert session.get(NotebookRelation, relation["id"]) is None
+    assert session.get(NotebookRelationSuppression, suppression_key) is not None
+
+
+def test_explicit_notebook_relations_share_validation_and_suppression(client, session):
+    from app.db.models import NotebookRelation, NotebookRelationSuppression
+    from app.forest.suppressions import pair_key
+
+    _course_a, book_a = _ready_book(session, title="普通关系 A", course_name="课程 A")
+    _course_b, book_b = _ready_book(session, title="普通关系 B", course_name="课程 B")
+    url = f"/api/v1/notebooks/{book_a.id}/relations"
+    payload = {
+        "target_notebook_id": book_b.id,
+        "relation_type": "related",
+        "description": "关联说明",
+    }
+
+    created = client.post(url, json=payload)
+    assert created.status_code == 201, created.text
+    assert client.post(url, json=payload).status_code == 409
+    self_link = client.post(url, json={**payload, "target_notebook_id": book_a.id})
+    assert self_link.status_code == 422
+
+    relation_id = created.json()["id"]
+    assert client.delete(f"{url}/{relation_id}").status_code == 204
+    key = pair_key(book_a.id, None, book_b.id, None, "related")
+    assert session.get(NotebookRelation, relation_id) is None
+    assert session.get(NotebookRelationSuppression, key) is not None
 
 
 def test_forest_search_finds_body_text(client, session):

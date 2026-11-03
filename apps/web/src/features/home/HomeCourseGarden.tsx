@@ -4,11 +4,13 @@ import type { TreeRelation, ForestCourse } from '../forest/types'
 import { stateLabels } from '../forest/types'
 import { notebookGeometry } from '../tree/treeGeometry'
 import { HomeCourseTree, type HomeLeafPreview } from './HomeCourseTree'
+import { StoneCourseTitle } from './StoneCourseTitle'
 import { HomeNotePreview } from './HomeNotePreview'
 import { HomeCourseVines } from './HomeCourseVines'
 import { growthLedger } from '../tree/growth/ledger'
 import { useGrowthPlayback, type GrowthAnimations } from '../tree/growth/useGrowthPlayback'
 import { hashId } from '../tree/layout'
+import { HOME_TREE_GROWTH_TIME_SCALE } from '../tree/growth/timing'
 
 type Actions = {
   onRoot: (courseId: string) => void
@@ -30,7 +32,7 @@ export function HomeCourseGarden({ courses, trees, relations = [], selectedRelat
   const grove = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => { for (const tree of trees) growthLedger.observeDirectory(tree) }, [trees])
   const courseIds = courses.map(course => course.course_id)
-  const growth = useGrowthPlayback(trees, courseIds, courseIds)
+  const growth = useGrowthPlayback(trees, courseIds, courseIds, HOME_TREE_GROWTH_TIME_SCALE)
   const [selectedBooks, setSelectedBooks] = useState<Record<string, string>>(readSelectedBooks)
   const selectBook = (courseId: string, notebookId: string) => {
     setSelectedBooks(previous => {
@@ -67,13 +69,15 @@ function HomeCourseCard({ course, directory, selected, onSelect, growth, onRoot,
   const leaves = activeBook ? notebookGeometry(activeBook).leaves : []
   const openBook = (book: NotebookRead) => onNotebook(course.course_id, book.id)
   const previewId = `home-preview-${course.course_id}`
-  return <article className={`home-course-card kt-tree-${course.learning_state}`} data-course-id={course.course_id} data-stone-variant={hashId(course.course_id) % 2} aria-labelledby={`home-course-${course.course_id}`}>
+  const stoneVariant = hashId(course.course_id) % 2
+  return <article className={`home-course-card kt-tree-${course.learning_state}`} data-course-id={course.course_id} data-stone-variant={stoneVariant} aria-labelledby={`home-course-${course.course_id}`}>
     <HomeCourseTree courseId={course.course_id} books={books} selectedBookId={activeBook?.id} previewId={previewId} previewNoteId={preview?.leaf.section.id} growth={growth} onPreview={showPreview} onLeave={leavePreview} onNotebook={openBook} onNote={(book, section) => onNote(course.course_id, book.id, section)} />
     <div className="home-course-details">
     <header className="home-course-card-header">
       <h2 id={`home-course-${course.course_id}`} aria-label={course.name}>
         <button type="button" className={`home-course-stone-button${Array.from(course.name).length > 10 ? ' is-long-name' : ''}`} aria-label={`课程菜单：${course.name}`} title={`${course.name} · 管理课程、资料与笔记本`} onClick={() => onRoot(course.course_id)}>
-          <span className="home-course-stone-name">{course.name}</span>
+          <img className="home-course-stone-art" src={`/assets/forest/course-garden-stone-${stoneVariant ? 'b' : 'a'}.png`} alt="" aria-hidden="true" width="2172" height="724" />
+          <StoneCourseTitle name={course.name} />
         </button>
       </h2>
       <p><span className={`home-course-state home-course-state-${course.learning_state}`}><i />{stateLabels[course.learning_state]}</span><span>·</span>{books.length} 本笔记<span>·</span>{course.note_count} 个知识点</p>
