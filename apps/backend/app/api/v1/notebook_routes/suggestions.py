@@ -20,6 +20,8 @@ from app.schemas.notebook import (
     NotebookEditSuggestionRead,
     NotebookEditSuggestionReview,
 )
+from app.services.errors import ApplicationError
+from app.services.notebook_suggestions import SuggestionReview
 from app.services.notebook_suggestions import (
     apply_course_edit_suggestions as apply_course_edit_suggestions_service,
 )
@@ -28,6 +30,13 @@ from app.services.notebook_suggestions import (
 )
 
 router = APIRouter()
+
+
+def _service_result(callable_, *args):
+    try:
+        return callable_(*args)
+    except ApplicationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 @router.get("/notebooks/{notebook_id}/edit-suggestions",
             response_model=list[NotebookEditSuggestionRead])
@@ -102,11 +111,15 @@ def list_course_edit_suggestions(course_id: str, status: str | None = "pending",
 def review_edit_suggestion(notebook_id: str, suggestion_id: str,
                            payload: NotebookEditSuggestionReview,
                            db: Session = Depends(get_db)):
-    return review_edit_suggestion_service(db, notebook_id, suggestion_id, payload)
+    command = SuggestionReview(
+        decision=payload.decision, expected_revision=payload.expected_revision,
+        selected_operation_indices=payload.selected_operation_indices,
+    )
+    return _service_result(review_edit_suggestion_service, db, notebook_id, suggestion_id, command)
 
 @router.post("/courses/{course_id}/notebook-edit-suggestions/apply-all")
 def apply_course_edit_suggestions(course_id: str, payload: NotebookEditSuggestionBatchReview,
                                   db: Session = Depends(get_db)):
     """Apply selected pending Notebook suggestions atomically, one revision per Notebook."""
     ensure_course(db, course_id)
-    return apply_course_edit_suggestions_service(db, course_id, payload)
+    return _service_result(apply_course_edit_suggestions_service, db, course_id, payload.suggestion_ids)

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from app.document_processing import rendering
-from app.document_processing.llm_reader import read_page_image, validate_read_page
 from app.document_processing.config import route_limits
+from app.document_processing.llm_reader import read_page_image, validate_read_page
 from app.forest.curriculum_processing import CurriculumProcessingError
 from app.parsers.base import ParsedBlock, ParsedDocument, ParsedPage
 

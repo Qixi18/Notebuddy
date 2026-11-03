@@ -155,8 +155,10 @@ def test_agent_stream_does_not_publish_body_when_gate_fails(session, monkeypatch
     def failing_gate(*_args, **_kwargs):
         raise AnswerVerificationError("核验结构无效")
 
-    monkeypatch.setattr(agent_api, "run_agent", fake_run_agent)
-    monkeypatch.setattr(agent_api, "verify_answer", failing_gate)
+    from app.services import agent_execution
+
+    monkeypatch.setattr(agent_execution, "run_agent", fake_run_agent)
+    monkeypatch.setattr(agent_execution, "verify_answer", failing_gate)
 
     from app.db.models import Conversation, Course
     from app.schemas.api import AgentMessageCreate

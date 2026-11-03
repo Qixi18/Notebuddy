@@ -64,7 +64,7 @@ def test_llm_upload_bypasses_standard_docx_position_limit(session, tmp_path, mon
 
     monkeypatch.setattr(settings, 'data_dir', tmp_path)
     monkeypatch.setattr(settings, 'max_pages', 1)
-    monkeypatch.setattr('app.document_processing.routes.ensure_vision_preflight', lambda: None)
+    monkeypatch.setattr('app.document_processing.config.ensure_vision_preflight', lambda: None)
     course = make_course(session)
     book = make_notebook(session, course)
     document = Document()
@@ -91,8 +91,7 @@ pytest_plugins = ['tests.notebook_fixtures']
 
 
 def test_batch_freezes_route_when_settings_changes(session, monkeypatch):
-    from fastapi import HTTPException
-
+    from app.services.errors import ApplicationError
     from app.services.notebook_generation_inputs import ensure_upload_batch
     from tests.notebook_fixtures import make_course, make_notebook
     book = make_notebook(session, make_course(session))
@@ -100,7 +99,7 @@ def test_batch_freezes_route_when_settings_changes(session, monkeypatch):
     batch = ensure_upload_batch(session, book.id, 'batch-freeze')
     monkeypatch.setattr(settings, 'document_processing_route', 'standard')
     assert ensure_upload_batch(session, book.id, batch.id).processing_route == 'llm'
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(ApplicationError) as error:
         ensure_upload_batch(session, book.id, batch.id, processing_route='standard')
     assert error.value.status_code == 409
 
@@ -116,7 +115,7 @@ def test_switching_failed_asset_keeps_old_parse_and_requeues_same_source(session
         persist_ir,
     )
     book = make_notebook(session, make_course(session))
-    monkeypatch.setattr('app.document_processing.routes.ensure_vision_preflight', lambda: None)
+    monkeypatch.setattr('app.document_processing.config.ensure_vision_preflight', lambda: None)
     asset = make_asset(session, book)
     material = make_material(session, book, asset)
     persist_ir(session, book, asset)

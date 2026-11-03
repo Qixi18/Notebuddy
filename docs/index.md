@@ -12,13 +12,8 @@
 - [数据迁移](migrations.md)、[运维](operations.md)、[安全](security.md)
 - [验收矩阵](acceptance.md)、[证据约束](evidence.md)、[RAG 评估](rag-evaluation.md)
 
-## 历史设计与实施记录
+## 历史记录
 
-- `superpowers/specs/`：各专项设计和未来部署方案；设计不代表已验收。
-- `superpowers/plans/`：实施计划。
-- `handoffs/`：各阶段交接与验证记录。
-- `design-references/` 和根目录 SVG：视觉参考或提案。
-
-`superpowers/`、旧交接记录和历史验收数据仅证明对应日期的方案或执行结果，不自动构成当前实现要求。尤其旧 Note/ParsedPage/知识提案流程须先核对当前路由和数据契约。
+历史设计、实施计划、交接记录和视觉参考已从当前工作树清理；需要追溯时可查看 Git 历史。历史验收数据只证明对应日期的执行结果，不自动构成当前实现要求。尤其旧 Note/ParsedPage/知识提案流程须先核对当前路由和数据契约。
 
 查代码时从 `apps/web/src/pages/` 的路由入口或 `apps/backend/app/api/v1/` 的接口入口进入；树绘制在 `apps/web/src/features/tree/`，笔记编辑与阅读在 `apps/web/src/features/notebook-editor/`，森林关系仍在 `apps/web/src/features/forest/`。

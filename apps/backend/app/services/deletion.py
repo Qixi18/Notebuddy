@@ -33,10 +33,31 @@ from app.notes.assets import AssetUnavailable, storage_path
 from app.notes.attachments import AttachmentRejected, attachment_path
 from app.notes.notebook import bump_order_revision
 from app.services.course_scope import material_course_id
+from app.services.errors import ApplicationError
 
 
 class DeletionConflict(ValueError):
     pass
+
+
+def restore_material(db: Session, material_id: str) -> Material:
+    material = db.get(Material, material_id)
+    if material is None or material.deleted_at is None:
+        raise ApplicationError(404, "待恢复资料不存在")
+    course_id = material_course_id(db, material)
+    if course_id is not None:
+        course = db.get(Course, course_id)
+        if course is None or course.deleted_at is not None:
+            raise ApplicationError(404, "课程不存在")
+    material.deleted_at = None
+    bump_order_revision(db, course_id, material.notebook_id)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(material)
+    return material
 
 
 def _material_ids(db: Session, course_id: str) -> list[str]:
@@ -66,15 +87,15 @@ def impact_preview(db: Session, *, course_id: str | None, material_id: str | Non
     )) if run_ids else 0
     active = db.scalar(select(func.count(ProcessingJob.id)).where(
         ProcessingJob.material_id.in_(material_ids),
-        ProcessingJob.status.in_(["pending", "processing"])
+        ProcessingJob.status.in_(["pending", "processing", "cancel_requested"])
     )) if material_ids else 0
     image_active = db.scalar(select(func.count(AssetProcessingJob.id)).where(
         AssetProcessingJob.asset_id.in_(asset_ids),
-        AssetProcessingJob.status.in_(["pending", "processing"]),
+        AssetProcessingJob.status.in_(["pending", "processing", "cancel_requested"]),
     )) if asset_ids else 0
     generation_active = db.scalar(select(func.count(NotebookGenerationJob.id)).where(
         NotebookGenerationJob.notebook_id.in_([item.notebook_id for item in materials if item.notebook_id]),
-        NotebookGenerationJob.status.in_(["pending", "processing"]),
+        NotebookGenerationJob.status.in_(["pending", "processing", "cancel_requested"]),
     )) if materials else 0
     # A running relation job may be reading evidence from any target course.
     # Pending jobs only pin their source course; completed/failed jobs never pin it.

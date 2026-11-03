@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import uuid
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.db.model_utils import new_id
 from app.db.models import (
     Asset,
     Notebook,
@@ -16,13 +18,119 @@ from app.db.models import (
     NotebookCoverAsset,
     utc_now,
 )
+from app.notes.assets import (
+    AssetUnavailable,
+    assert_notebook_asset,
+    remove_notebook_asset,
+    storage_path,
+)
 from app.notes.attachments import (
     MAX_ATTACHMENT_BYTES,
     AttachmentRejected,
     sniff_image_mime,
     store_attachment,
 )
+from app.services.errors import ApplicationError
 from app.services.image_assets import finalize_staged_image, write_staged_image
+
+
+def restore_notebook_asset(db: Session, notebook_id: str, asset_id: str) -> tuple[Asset, str]:
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise ApplicationError(404, "笔记不存在")
+    owner = db.scalar(select(NotebookAsset).where(
+        NotebookAsset.notebook_id == notebook_id,
+        NotebookAsset.asset_id == asset_id,
+        NotebookAsset.is_owner.is_(True),
+    ))
+    asset = db.get(Asset, asset_id)
+    if owner is None or asset is None:
+        raise ApplicationError(404, "这份资源不属于当前 Notebook")
+    if owner.detached_at is None:
+        return asset, owner.role
+    if asset.state != "ready":
+        raise ApplicationError(409, "资源文件已不可恢复，请重新上传原文件")
+    active_owner = db.scalar(select(NotebookAsset.id).where(
+        NotebookAsset.asset_id == asset_id,
+        NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_(None),
+    ))
+    if active_owner is not None:
+        raise ApplicationError(409, "资源已归属其他位置，无法恢复到当前 Notebook")
+    try:
+        storage_path(asset)
+    except AssetUnavailable as exc:
+        raise ApplicationError(409, "资源文件缺失，无法恢复") from exc
+    owner.detached_at = None
+    db.commit()
+    return asset, owner.role
+
+
+def mark_notebook_asset_inline(db: Session, notebook_id: str, asset_id: str) -> tuple[Asset, str]:
+    notebook = db.get(Notebook, notebook_id)
+    if notebook is None or notebook.deleted_at is not None:
+        raise ApplicationError(404, "笔记不存在")
+    try:
+        asset = assert_notebook_asset(db, asset_id, notebook_id)
+    except AssetUnavailable as exc:
+        raise ApplicationError(404, str(exc)) from exc
+    if asset.media_type != "image":
+        raise ApplicationError(422, "只有图片资源可以插入正文")
+    link = db.scalar(select(NotebookAsset).where(
+        NotebookAsset.notebook_id == notebook_id,
+        NotebookAsset.role == "inline_image",
+        NotebookAsset.is_owner.is_(True),
+        NotebookAsset.detached_at.is_(None),
+        NotebookAsset.asset_id == asset_id,
+    ))
+    if link is not None:
+        return asset, "inline_image"
+
+    inline_id = new_id()
+    extension = asset.extension.lower()
+    if extension not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        extension = ".png"
+    storage_key = f"notebooks/{notebook_id}/images/{inline_id}{extension}"
+    target = (settings.data_dir / storage_key).resolve()
+    base = (settings.data_dir / "notebooks" / notebook_id / "images").resolve()
+    if not target.is_relative_to(base):
+        raise ApplicationError(400, "图片存储路径不合法")
+    try:
+        source = storage_path(asset)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+    except (AssetUnavailable, OSError) as exc:
+        target.unlink(missing_ok=True)
+        raise ApplicationError(409, "无法复制图片到笔记目录") from exc
+    now = utc_now()
+    inline_asset = Asset(
+        id=inline_id, source_type="user_upload", media_type="image",
+        mime_type=asset.mime_type, extension=extension,
+        original_name=asset.original_name, storage_key=storage_key,
+        byte_size=asset.byte_size, sha256=asset.sha256, state="ready",
+        created_at=now, verified_at=now,
+    )
+    db.add_all([inline_asset, NotebookAsset(
+        notebook_id=notebook_id, asset_id=inline_id, role="inline_image",
+        is_owner=True, created_at=now,
+    )])
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        target.unlink(missing_ok=True)
+        raise
+    return inline_asset, "inline_image"
+
+
+def delete_notebook_asset(db: Session, notebook_id: str, asset_id: str) -> str:
+    if db.get(Notebook, notebook_id) is None:
+        raise ApplicationError(404, "笔记不存在")
+    try:
+        return remove_notebook_asset(db, notebook_id, asset_id)
+    except AssetUnavailable as exc:
+        message = str(exc)
+        raise ApplicationError(404 if "不存在" in message else 409, message) from exc
 
 
 def create_notebook_attachment(
@@ -30,7 +138,7 @@ def create_notebook_attachment(
 ) -> NotebookAttachment:
     notebook = db.get(Notebook, notebook_id)
     if notebook is None or notebook.deleted_at is not None:
-        raise HTTPException(404, "笔记不存在")
+        raise ApplicationError(404, "笔记不存在")
     try:
         attachment = store_attachment(
             db, notebook_id=notebook_id, filename=filename, data=data,
@@ -40,7 +148,7 @@ def create_notebook_attachment(
         return attachment
     except AttachmentRejected as exc:
         db.rollback()
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        raise ApplicationError(exc.status_code, str(exc)) from exc
     except Exception:
         db.rollback()
         raise
@@ -49,7 +157,7 @@ def create_notebook_attachment(
 def delete_notebook_cover(db: Session, notebook_id: str) -> None:
     book = db.get(Notebook, notebook_id)
     if book is None:
-        raise HTTPException(404, "笔记不存在")
+        raise ApplicationError(404, "笔记不存在")
     cover = db.get(NotebookCoverAsset, notebook_id)
     asset = db.get(Asset, cover.asset_id) if cover else None
     if cover:
@@ -70,10 +178,10 @@ def delete_notebook_cover(db: Session, notebook_id: str) -> None:
 def replace_notebook_cover(db: Session, notebook_id: str, *, filename: str, data: bytes) -> Notebook:
     book = db.get(Notebook, notebook_id)
     if book is None or book.deleted_at is not None:
-        raise HTTPException(404, "笔记不存在")
+        raise ApplicationError(404, "笔记不存在")
     mime = sniff_image_mime(data)
     if not data or len(data) > MAX_ATTACHMENT_BYTES or mime is None:
-        raise HTTPException(413 if len(data) > MAX_ATTACHMENT_BYTES else 422,
+        raise ApplicationError(413 if len(data) > MAX_ATTACHMENT_BYTES else 422,
                             "封面需为不超过 10 MB 的 PNG、JPEG、WebP 或 GIF 图片")
     extension = {"image/png": ".png", "image/jpeg": ".jpg",
                  "image/webp": ".webp", "image/gif": ".gif"}[mime]

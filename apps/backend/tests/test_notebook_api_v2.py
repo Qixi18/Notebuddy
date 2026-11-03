@@ -193,6 +193,38 @@ def test_forest_relations_between_notebooks(client, session):
     assert [row["id"] for row in listed.json()] == [relation["id"]]
     deleted = client.delete(f"/api/v1/forest/relations/{relation['id']}")
     assert deleted.status_code == 200
+    from app.db.models import NotebookRelation, NotebookRelationSuppression
+    from app.forest.suppressions import pair_key
+
+    suppression_key = pair_key(book_a.id, None, book_b.id, None, "prerequisite")
+    assert session.get(NotebookRelation, relation["id"]) is None
+    assert session.get(NotebookRelationSuppression, suppression_key) is not None
+
+
+def test_explicit_notebook_relations_share_validation_and_suppression(client, session):
+    from app.db.models import NotebookRelation, NotebookRelationSuppression
+    from app.forest.suppressions import pair_key
+
+    _course_a, book_a = _ready_book(session, title="普通关系 A", course_name="课程 A")
+    _course_b, book_b = _ready_book(session, title="普通关系 B", course_name="课程 B")
+    url = f"/api/v1/notebooks/{book_a.id}/relations"
+    payload = {
+        "target_notebook_id": book_b.id,
+        "relation_type": "related",
+        "description": "关联说明",
+    }
+
+    created = client.post(url, json=payload)
+    assert created.status_code == 201, created.text
+    assert client.post(url, json=payload).status_code == 409
+    self_link = client.post(url, json={**payload, "target_notebook_id": book_a.id})
+    assert self_link.status_code == 422
+
+    relation_id = created.json()["id"]
+    assert client.delete(f"{url}/{relation_id}").status_code == 204
+    key = pair_key(book_a.id, None, book_b.id, None, "related")
+    assert session.get(NotebookRelation, relation_id) is None
+    assert session.get(NotebookRelationSuppression, key) is not None
 
 
 def test_forest_search_finds_body_text(client, session):

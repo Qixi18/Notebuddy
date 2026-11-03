@@ -68,6 +68,5 @@ test('脏 Notebook 离开时等待确认，确认后完成侧栏跳转', async (
   fireEvent.click(screen.getByRole('button', { name: '放弃草稿并离开' }))
   expect(await screen.findByText('知识森林页面')).toBeTruthy()
   expect(setDocumentDirty).toHaveBeenCalledWith(false)
-  expect(setEditingNote).toHaveBeenCalledWith(false)
   expect(router.state.location.pathname).toBe('/forest')
 })

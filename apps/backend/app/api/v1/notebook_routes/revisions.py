@@ -8,13 +8,13 @@ from app.db.database import get_db
 from app.db.models import Notebook
 from app.notes.document import document_to_blocks, load_document
 from app.notes.history import get_snapshot, list_snapshots
-from app.services.notebook_document import restore_notebook_document
 from app.schemas.notebook import (
     NotebookDocumentRead,
     NotebookRestoreRequest,
     NotebookRevisionRead,
     NotebookRevisionSummary,
 )
+from app.services.notebook_document import restore_notebook_document
 
 from .common import ensure_notebook
 

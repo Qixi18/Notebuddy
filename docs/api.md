@@ -136,7 +136,7 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 
 ## 知识森林接口
 
-以下地址均加 `/api/v1` 前缀。固定类型和请求字段见 [知识森林契约](superpowers/specs/2026-10-11-knowledge-forest-design.md)。
+以下地址均加 `/api/v1` 前缀。固定类型和请求字段以当前路由及 schema 为准；历史设计材料已从当前工作树清理，可从 Git 历史追溯。
 
 | 能力 | 接口 | 行为 |
 | --- | --- | --- |

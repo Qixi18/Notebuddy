@@ -21,10 +21,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1 import agent as agent_api
 from app.db.database import Base, get_db
 from app.db.models import Conversation, ConversationMessage, Course
 from app.main import app
+from app.services import agent_execution
 
 pytest_plugins = ["tests.notebook_fixtures"]
 
@@ -93,7 +93,7 @@ def test_stream_hides_reasoning_and_publishes_after_gate(tmp_path, monkeypatch):
                 "web_results": [], "suggestions": [],
             }
 
-        monkeypatch.setattr(agent_api, "run_agent", fake_run_agent)
+        monkeypatch.setattr(agent_execution, "run_agent", fake_run_agent)
 
         with TestClient(app) as client:
             response = client.post(

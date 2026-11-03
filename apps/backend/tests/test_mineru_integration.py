@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.v1 import materials
 from app.core.config import settings
 from app.db.models import DocumentPage, MaterialPage
 from app.document_processing.adapters.mineru import _map_item
@@ -422,24 +421,29 @@ def test_document_figure_endpoint_serves_only_current_run_image(session, tmp_pat
 
 def test_mineru_ocr_retry_does_not_require_separate_ocr_engine(monkeypatch):
     monkeypatch.setenv("NOTEBOOK_DOCUMENT_PARSER", "mineru")
-    monkeypatch.setattr(materials, "ensure_material", lambda *_: SimpleNamespace(id="material-1"))
-    monkeypatch.setattr(materials.mineru_adapter, "availability", lambda: {"available": True})
+    from app.services import asset_processing
+
+    monkeypatch.setattr(asset_processing, "_material", lambda *_: SimpleNamespace(id="material-1"))
+    monkeypatch.setattr(asset_processing.mineru_adapter, "configured", lambda: True)
+    monkeypatch.setattr(asset_processing.mineru_adapter, "availability", lambda: {"available": True})
     job = SimpleNamespace(id="job-1")
     calls = []
-    monkeypatch.setattr(materials, "reparse_material", lambda mid, db: calls.append(mid) or job)
+    monkeypatch.setattr(asset_processing, "reparse_material", lambda db, mid: calls.append(mid) or job)
 
     def unexpected_ocr_check():
         raise AssertionError("MinerU must not depend on the separate OCR capability")
 
-    monkeypatch.setattr(materials, "ocr_status", unexpected_ocr_check)
-    assert materials.request_material_ocr("material-1", object()) is job
+    monkeypatch.setattr(asset_processing, "ocr_status", unexpected_ocr_check)
+    assert asset_processing.request_material_ocr(object(), "material-1") is job
     assert calls == ["material-1"]
 
 
 def test_native_ocr_retry_uses_current_ir_pages(session, monkeypatch, tmp_path):
+    from app.services.asset_processing import request_material_ocr
+
     monkeypatch.setenv("NOTEBOOK_DOCUMENT_PARSER", "native")
     monkeypatch.setattr(settings, "data_dir", tmp_path)
-    monkeypatch.setattr(materials, "ocr_status", lambda: {"status": "ready"})
+    monkeypatch.setattr("app.services.asset_processing.ocr_status", lambda: {"status": "ready"})
     book = make_notebook(session, None)
     asset = make_asset(session, book)
     material = make_material(session, book, asset)
@@ -448,20 +452,22 @@ def test_native_ocr_retry_uses_current_ir_pages(session, monkeypatch, tmp_path):
     page.status = "needs_ocr"
     session.commit()
     assert session.query(MaterialPage).count() == 0
-    job = materials.request_material_ocr(material.id, session)
+    job = request_material_ocr(session, material.id)
     assert job.kind == "ocr_material"
     assert job.status == "pending"
 
 
 def test_pdf_preview_is_available_before_render_is_cached(monkeypatch):
+    from app.api.v1.material_routes import documents
+
     page = SimpleNamespace(
         page_number=1, status="needs_ocr", extraction="none", width=600,
         height=800, rotation=0, confidence=None, warnings=[], text="", render_key=None,
     )
-    monkeypatch.setattr(materials, "load_ir", lambda *_: SimpleNamespace(pages=[page], sections=[]))
-    monkeypatch.setattr(materials, "_run_payload", lambda _: {})
+    monkeypatch.setattr(documents, "load_ir", lambda *_: SimpleNamespace(pages=[page], sections=[]))
+    monkeypatch.setattr(documents, "_run_payload", lambda _: {})
     run = SimpleNamespace(asset_id="asset-1", doc_type="pdf")
-    payload = materials._document_payload(None, run)
+    payload = documents._document_payload(None, run)
     assert payload["pages"][0]["render_url"] == (
         "/api/v1/assets/asset-1/document/pages/1/render"
     )

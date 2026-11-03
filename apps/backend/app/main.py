@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.v1.routes import router
 from app.db.migrate import migrate_database
+from app.services.errors import ApplicationError
 
 
 @asynccontextmanager
@@ -21,6 +23,13 @@ app = FastAPI(
     description="Local course materials, page parsing, and retrieval preview API.",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(ApplicationError)
+async def application_error_response(_: Request, exc: ApplicationError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

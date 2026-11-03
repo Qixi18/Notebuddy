@@ -261,7 +261,7 @@ def test_notebook_sse_sends_status_before_persisted_final_answer(session, monkey
             model_version="notebook-verified:test", process={"verification": {"notebook_revision": 0}},
         )}
 
-    monkeypatch.setattr("app.api.v1.agent.run_notebook_answer", fake_pipeline)
+    monkeypatch.setattr("app.services.agent_execution.run_notebook_answer", fake_pipeline)
     response = send_agent_message(
         conversation.id,
         AgentMessageCreate(

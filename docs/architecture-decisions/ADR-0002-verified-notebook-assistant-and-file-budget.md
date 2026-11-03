@@ -198,3 +198,7 @@ Notebook/森林/答疑路由加错误页，侧栏、脏正文导航保护和助�
 助手坞改为按需加载。PPTX/DOCX 明确为受限兼容格式，避免接口接收被误解为解析质量保证。整体状态待
 用户评估；本轮仅做必要的轻量检查，ADR 仍为 Proposed。
 
+**S8 分层续改（2026-11-03，Proposed，未提交）：** 关系 Service 统一 Notebook 普通关系、Forest 锚点关系、删除 suppression 与锚点刷新；Notebook 生命周期变更时，在事务内为受影响课程登记关系重算。关系展示仍要求两个端点属于不同有效课程，锚点指纹只依赖正文；解绑/同课程移动会隐藏记录，恢复跨课程归属后可再次展示。Generation 重试和取消由 `generation_jobs.py` 承担，输入登记改为传递普通 asset ID 列表。生命周期、资源、建议、关系和 Generation 用例使用框架无关异常，新建议审核 Service 不依赖 FastAPI Schema。前端 RouteErrorPage 隐藏原始异常；旧 Notebook Redirect 独立组件按课程归属检查目标并优先选择默认 Notebook。新增关系迁移和架构边界测试。针对性测试已运行；Materials/Agent 分层、完整回归及人工验收尚未完成。此续改不得视为 ADR 已 Accepted。
+
+Materials 路由已按 assets、documents、materials、processing、uploads 拆分到 `app/api/v1/material_routes/`；聚合入口和 API URL 保持不变。上传 Service `app/services/asset_uploads.py` 组合既有文件接入流程、Upload Batch 与 Generation Input 登记，并复用 staged Asset 的恢复机制。解析重试、重新解析、OCR、图片重试、处理路线切换和取消由 `app/services/asset_processing.py` 负责。Agent 会话校验、执行、验证、消息持久化以及失败/中断处理迁入 `app/services/agent_execution.py`；`agent.py` 仅保留请求命令映射、HTTP 错误映射和 SSE 编码。已执行 Agent 相关定向回归；Materials 相关回归及完整验收仍未完成。
+

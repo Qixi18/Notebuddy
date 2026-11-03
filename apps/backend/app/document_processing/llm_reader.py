@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.models import ProcessingStep
 from app.document_processing.checkpoints import fingerprint, put_step, structured_call
+from app.document_processing.config import asset_config, route_limits, vision_client
 from app.document_processing.engines.vision import (
     VisionCapabilityError,
     config_fingerprint,
@@ -31,7 +32,6 @@ from app.document_processing.ir import (
     TableData,
 )
 from app.document_processing.rendering import page_images
-from app.document_processing.config import asset_config, route_limits, vision_client
 from app.services.processing_budget import processing_budget_scope
 
 

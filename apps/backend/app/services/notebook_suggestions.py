@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 
-from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -15,22 +15,29 @@ from app.notes.document import (
 )
 from app.notes.edits import EditRejected, apply_edits
 from app.notes.store import DocumentConflict, write_document
-from app.schemas.notebook import NotebookEditSuggestionBatchReview, NotebookEditSuggestionReview
+from app.services.errors import ApplicationError
 from app.services.notebook_document import validate_document_image_ownership
+
+
+@dataclass(frozen=True)
+class SuggestionReview:
+    decision: str
+    expected_revision: int
+    selected_operation_indices: list[int] | None = None
 
 
 def review_edit_suggestion(
     db: Session, notebook_id: str, suggestion_id: str,
-    payload: NotebookEditSuggestionReview,
+    payload: SuggestionReview,
 ) -> dict:
     book = db.get(Notebook, notebook_id)
     if book is None or book.deleted_at is not None:
-        raise HTTPException(404, "笔记不存在")
+        raise ApplicationError(404, "笔记不存在")
     suggestion = db.get(NotebookEditSuggestion, suggestion_id)
     if suggestion is None or suggestion.notebook_id != notebook_id:
-        raise HTTPException(404, "修改建议不存在")
+        raise ApplicationError(404, "修改建议不存在")
     if suggestion.status != "pending":
-        raise HTTPException(409, "该建议已处理")
+        raise ApplicationError(409, "该建议已处理")
     now = utc_now()
     if payload.decision == "reject":
         changed = db.execute(update(NotebookEditSuggestion).where(
@@ -40,16 +47,16 @@ def review_edit_suggestion(
         ).values(status="rejected", reviewed_at=now))
         if changed.rowcount != 1:
             db.rollback()
-            raise HTTPException(409, "该建议已处理")
+            raise ApplicationError(409, "该建议已处理")
         db.commit()
         return _document_response(book.document_json, book.document_revision, book.updated_at)
     if book.document_revision != suggestion.base_revision:
         suggestion.status = "stale"
         suggestion.reviewed_at = now
         db.commit()
-        raise HTTPException(409, "笔记正文已变化，该建议已失效；请重新生成修改建议")
+        raise ApplicationError(409, "笔记正文已变化，该建议已失效；请重新生成修改建议")
     if payload.expected_revision != book.document_revision:
-        raise HTTPException(409, "笔记正文版本已变化，请刷新后重试")
+        raise ApplicationError(409, "笔记正文版本已变化，请刷新后重试")
     try:
         operations = json.loads(suggestion.ops_json)
         if not isinstance(operations, list) or not operations:
@@ -65,9 +72,9 @@ def review_edit_suggestion(
             load_document(book.document_json).content, operations,
         )
     except (TypeError, ValueError, EditRejected) as exc:
-        raise HTTPException(422, f"修改建议内容无效：{exc}") from exc
+        raise ApplicationError(422, f"修改建议内容无效：{exc}") from exc
     if proposed is not None and proposed.warning:
-        raise HTTPException(422, proposed.warning)
+        raise ApplicationError(422, proposed.warning)
     validate_document_image_ownership(db, notebook_id, proposed_content)
     changed = db.execute(update(NotebookEditSuggestion).where(
         NotebookEditSuggestion.id == suggestion_id,
@@ -76,7 +83,7 @@ def review_edit_suggestion(
     ).values(status="applying"))
     if changed.rowcount != 1:
         db.rollback()
-        raise HTTPException(409, "该建议已处理")
+        raise ApplicationError(409, "该建议已处理")
     try:
         next_revision, content = write_document(
             db, book, proposed_content, expected_revision=payload.expected_revision,
@@ -84,7 +91,7 @@ def review_edit_suggestion(
         )
     except DocumentConflict as exc:
         db.rollback()
-        raise HTTPException(409, str(exc)) from exc
+        raise ApplicationError(409, str(exc)) from exc
     suggestion.status = "accepted" if payload.selected_operation_indices is None else "partially_accepted"
     suggestion.reviewed_at = now
     db.commit()
@@ -92,19 +99,19 @@ def review_edit_suggestion(
 
 
 def apply_course_edit_suggestions(
-    db: Session, course_id: str, payload: NotebookEditSuggestionBatchReview,
+    db: Session, course_id: str, suggestion_ids: list[str],
 ) -> dict:
-    if len(set(payload.suggestion_ids)) != len(payload.suggestion_ids):
-        raise HTTPException(422, "修改建议编号不能重复")
+    if len(set(suggestion_ids)) != len(suggestion_ids):
+        raise ApplicationError(422, "修改建议编号不能重复")
     rows = db.execute(
         select(NotebookEditSuggestion, Notebook)
         .join(Notebook, Notebook.id == NotebookEditSuggestion.notebook_id)
-        .where(NotebookEditSuggestion.id.in_(payload.suggestion_ids),
+        .where(NotebookEditSuggestion.id.in_(suggestion_ids),
                Notebook.course_id == course_id, Notebook.deleted_at.is_(None))
         .order_by(NotebookEditSuggestion.created_at, NotebookEditSuggestion.id)
     ).all()
-    if len(rows) != len(payload.suggestion_ids):
-        raise HTTPException(404, "部分修改建议不存在或不属于当前课程")
+    if len(rows) != len(suggestion_ids):
+        raise ApplicationError(404, "部分修改建议不存在或不属于当前课程")
     grouped: dict[str, tuple[Notebook, list[NotebookEditSuggestion]]] = {}
     for suggestion, book in rows:
         grouped.setdefault(book.id, (book, []))[1].append(suggestion)
@@ -113,7 +120,7 @@ def apply_course_edit_suggestions(
         stale = [suggestion for _, suggestions in grouped.values() for suggestion in suggestions
                  if suggestion.status != "pending"]
         if stale:
-            raise HTTPException(409, "部分修改建议已处理，请刷新列表")
+            raise ApplicationError(409, "部分修改建议已处理，请刷新列表")
         mismatched = [suggestion for book, suggestions in grouped.values() for suggestion in suggestions
                       if suggestion.base_revision != book.document_revision]
         if mismatched:
@@ -121,14 +128,14 @@ def apply_course_edit_suggestions(
                 suggestion.status = "stale"
                 suggestion.reviewed_at = now
             db.commit()
-            raise HTTPException(409, "部分笔记正文已变化，对应建议已失效；请刷新后重新生成")
+            raise ApplicationError(409, "部分笔记正文已变化，对应建议已失效；请刷新后重新生成")
         claimed = db.execute(update(NotebookEditSuggestion).where(
-            NotebookEditSuggestion.id.in_(payload.suggestion_ids),
+            NotebookEditSuggestion.id.in_(suggestion_ids),
             NotebookEditSuggestion.status == "pending",
         ).values(status="applying"))
-        if claimed.rowcount != len(payload.suggestion_ids):
+        if claimed.rowcount != len(suggestion_ids):
             db.rollback()
-            raise HTTPException(409, "部分修改建议刚被其他请求处理，请刷新列表")
+            raise ApplicationError(409, "部分修改建议刚被其他请求处理，请刷新列表")
         results = []
         for book, suggestions in grouped.values():
             stored = load_document(book.document_json)
@@ -155,14 +162,14 @@ def apply_course_edit_suggestions(
         enqueue_notebook_relations(db, course_id)
         db.commit()
         return {"updated": sum(item["suggestion_count"] for item in results), "notebooks": results}
-    except HTTPException:
+    except ApplicationError:
         raise
     except (TypeError, ValueError, EditRejected, DocumentValidationError) as exc:
         db.rollback()
-        raise HTTPException(422, f"修改建议无法合并：{exc}") from exc
+        raise ApplicationError(422, f"修改建议无法合并：{exc}") from exc
     except DocumentConflict as exc:
         db.rollback()
-        raise HTTPException(409, str(exc)) from exc
+        raise ApplicationError(409, str(exc)) from exc
 
 
 def _document_response(content_json: str, revision: int, updated_at) -> dict:

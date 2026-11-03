@@ -6,12 +6,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.db.models import Notebook, NotebookRelation
 from app.schemas.notebook import NotebookRelationCreate, NotebookRelationRead
+from app.services.notebook_relations import (
+    create_notebook_relation as create_notebook_relation_service,
+)
+from app.services.notebook_relations import (
+    delete_notebook_relation as delete_notebook_relation_service,
+)
 
 router = APIRouter()
 
@@ -50,40 +55,12 @@ def list_notebook_relations(notebook_id: str, db: Session = Depends(get_db)):
              status_code=201)
 def create_notebook_relation(notebook_id: str, payload: NotebookRelationCreate,
                              db: Session = Depends(get_db)):
-    source = db.get(Notebook, notebook_id)
-    target = db.get(Notebook, payload.target_notebook_id)
-    if source is None or source.deleted_at is not None:
-        raise HTTPException(404, "源笔记不存在")
-    if target is None or target.deleted_at is not None:
-        raise HTTPException(404, "目标笔记不存在")
-    if source.id == target.id:
-        raise HTTPException(422, "笔记不能关联到自身")
-    relation = NotebookRelation(
-        source_notebook_id=source.id, target_notebook_id=target.id,
-        relation_type=payload.relation_type.strip(), description=payload.description,
+    return create_notebook_relation_service(
+        db, source_id=notebook_id, target_id=payload.target_notebook_id,
+        relation_type=payload.relation_type, description=payload.description,
     )
-    db.add(relation)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(409, "该关系已存在") from exc
-    db.refresh(relation)
-    return {"id": relation.id, "source_notebook_id": source.id,
-            "target_notebook_id": target.id, "related_notebook_id": target.id,
-            "related_notebook_title": target.title, "direction": "outgoing",
-            "relation_type": relation.relation_type, "description": relation.description,
-            "created_at": relation.created_at}
 
 @router.delete("/notebooks/{notebook_id}/relations/{relation_id}", status_code=204)
 def delete_notebook_relation(notebook_id: str, relation_id: str,
                              db: Session = Depends(get_db)):
-    relation = db.get(NotebookRelation, relation_id)
-    if relation is None or notebook_id not in (
-        relation.source_notebook_id, relation.target_notebook_id,
-    ):
-        raise HTTPException(404, "笔记关系不存在")
-    from app.forest.suppressions import suppress
-    suppress(db, relation)
-    db.delete(relation)
-    db.commit()
+    delete_notebook_relation_service(db, relation_id, notebook_id=notebook_id)

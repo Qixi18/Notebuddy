@@ -10,12 +10,13 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1 import agent, conversations
+from app.api.v1 import conversations
 from app.db.database import Base, get_db
 from app.db.models import Conversation, Course
 from app.main import app
 from app.schemas.assistant import AssistantRequest
 from app.schemas.conversations import AgentMessageCreate, ConversationMessageCreate
+from app.services import agent_execution
 
 
 @pytest.mark.parametrize("schema", [AssistantRequest, ConversationMessageCreate, AgentMessageCreate])
@@ -80,7 +81,7 @@ def test_current_persona_can_send_and_read_back_messages(tmp_path, monkeypatch, 
         yield {"type": "final", **answer(*args, **kwargs), "suggestions": []}
 
     monkeypatch.setattr(conversations, "run_answer", answer)
-    monkeypatch.setattr(agent, "run_agent", stream)
+    monkeypatch.setattr(agent_execution, "run_agent", stream)
     app.dependency_overrides[get_db] = test_db
     try:
         with factory() as db:

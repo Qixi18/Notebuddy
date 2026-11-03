@@ -11,6 +11,7 @@ from app.api.v1.shared import ensure_course
 from app.db.models import Course, Notebook
 from app.notes.notebook import default_notebook
 
+
 def _cover_url(book: Notebook) -> str | None:
     return f"/api/v1/notebooks/{book.id}/cover" if book.cover_filename else None
 

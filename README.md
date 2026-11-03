@@ -12,6 +12,8 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 **本轮 S8 实施（2026-11-03，待评估）**：Document Processing 配置实现位于 `app/document_processing/config.py`，解析 Service 和调用端依赖配置模块，旧 `routes.py` 仅保留兼容重导出；Notebook 生命周期变更、建议审核、附件/封面资源写入和删除保护规则下沉至 application services。Notebook 删除统一检查资料、图片和生成任务；图片 Worker 只在终态记录 `finished_at`。前端修复旧 Notebook 路径映射，补充全局及关键页面错误边界，拆分侧栏/导航保护/助手坞控制器，并延迟加载 Notebook、森林、答疑和助手坞及重型编辑器。PPTX/DOCX 标为受限兼容格式，PDF 与独立图片资源按现有质量契约处理。整体改动待用户评估，ADR-0002 仍为 Proposed。
 
+**S8 分层续改（2026-11-03，Proposed，未提交）**：统一 Notebook 与 Forest 关系用例至 `app/services/notebook_relations.py`；关系记录按课程归属过滤展示，锚点指纹仍由正文决定，绑定/移动/解绑时在同一事务内登记受影响课程的重算任务。Generation 重试/取消移入 `generation_jobs.py`，生命周期、资源、建议、上传与 Generation Input 用例改用框架无关异常；建议审核 Service 接收普通命令对象。Materials 路由拆分至 assets/documents/materials/processing/uploads 子模块，兼容聚合入口保持不变；上传和批次登记由 `asset_uploads.py` 编排，解析重试、OCR、图片重试、路线切换和取消由 `asset_processing.py` 编排。Agent 执行、验证、持久化和中断处理移入 `agent_execution.py`，`agent.py` 仅保留 HTTP 命令映射及 SSE 适配。前端路由错误页固定显示安全文案，旧 Notebook 路由独立组件按课程校验目标、优先选择默认本并保留章节定位参数。全量回归和人工验收仍未完成；ADR-0002 保持 Proposed。
+
 ## 当前能力与边界
 
 - 一门课程可有多本笔记本；笔记按讲次、章节和小节组织，知识树叶子定位到具体笔记小节。课程、资料、笔记、会话及修改记录保存在本地 SQLite。
@@ -20,7 +22,7 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 - 课程答疑支持持久会话、资料检索、来源展示与可选的网络搜索。未配置外部模型时存在本地降级路径；降级结果不代表真实模型质量。
 - 首页展示近期课程知识树，森林页浏览全部课程。培养方案先预览再确认导入。
 
-产品和验证状态会随开发变化。功能细节见 [架构说明](docs/architecture.md)、[API](docs/api.md) 和 [范围变化](docs/scope-changes.md)；已执行的检查及尚待验收项见 [验收矩阵](docs/acceptance.md)。历史设计和交接记录位于 [docs/superpowers](docs/superpowers) 与 [docs/handoffs](docs/handoffs)，其中的旧方案不自动代表当前行为。
+产品和验证状态会随开发变化。功能细节见 [架构说明](docs/architecture.md)、[API](docs/api.md) 和 [范围变化](docs/scope-changes.md)；已执行的检查及尚待验收项见 [验收矩阵](docs/acceptance.md)。已删除的历史设计与交接材料可从 Git 历史查看；当前权威文档入口见 [文档导航](docs/index.md)。
 
 ## 目录
 
