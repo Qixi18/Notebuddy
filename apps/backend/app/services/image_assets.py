@@ -125,13 +125,13 @@ def ingest_source_image(
     processing_route: str | None = None,
 ) -> tuple[Asset, AssetProcessingJob | None]:
     notebook = db.get(Notebook, notebook_id)
-    from app.document_processing.routes import provider_snapshot, resolve_route
+    from app.document_processing.config import provider_snapshot, resolve_route
     try:
         route = resolve_route(processing_route)
     except ValueError as exc:
         raise ImageUploadRejected(str(exc)) from exc
     if route == "llm":
-        from app.document_processing.routes import ensure_vision_preflight
+        from app.document_processing.config import ensure_vision_preflight
         try:
             ensure_vision_preflight()
         except ValueError as exc:

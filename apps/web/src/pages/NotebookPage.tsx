@@ -1,13 +1,11 @@
-﻿import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useWorkspace } from '../components/AppLayout'
 import type { AssetResource, Material } from '../types'
 import { ProcessingRouteControl, useProcessingRoute } from '../features/notebook/useProcessingRoute'
-import {
-  NotebookEditor, type AIAction, type NotebookEditorHandle, type SelectionAnchor,
-} from '../features/notebook-editor/NotebookEditor'
+import type { AIAction, NotebookEditorHandle, SelectionAnchor } from '../features/notebook-editor/NotebookEditor'
 import {
   countText, docToMarkdown, excerptAroundSelection, extractOutline, normalizeDocument, type DocNode,
 } from '../features/notebook-editor/document'
@@ -21,6 +19,10 @@ import { useNotebookGeneration } from '../features/notebook-workspace/hooks/useN
 import { useNotebookResources } from '../features/notebook-workspace/hooks/useNotebookResources'
 import { SourceUploadPanel } from '../features/notebook-workspace/SourceUploadPanel'
 import './NotebookPage.css'
+
+const NotebookEditor = lazy(() => import('../features/notebook-editor/NotebookEditor').then(
+  (module) => ({ default: module.NotebookEditor }),
+))
 
 function serverDate(value: string): Date {
   return new Date(/(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`)
@@ -441,6 +443,7 @@ function NotebookPageBody() {
             {lastEditedAt && <span title={serverDate(lastEditedAt).toLocaleString('zh-CN')}>最后编辑 {clock(lastEditedAt)}</span>}
           </div>
           {titleError && <p className="notebook-document-error" role="alert">{titleError}</p>}
+          <Suspense fallback={<div className="notebook-document-loading" role="status">正在打开编辑器…</div>}>
           <NotebookEditor
             ref={editorRef}
             initialContent={content}
@@ -455,6 +458,7 @@ function NotebookPageBody() {
               save.reset(editor.getJSON() as DocNode, save.revision, save.lastSavedAt)
             }}
           />
+          </Suspense>
         </article>}
       </main>
       {linkedAssetId && assetResourcesLoaded && notebookId && (() => {

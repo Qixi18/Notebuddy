@@ -15,6 +15,7 @@ from app.main import app
 
 ROUTES_DIR = Path(__file__).resolve().parents[1] / "app" / "api" / "v1" / "notebook_routes"
 AGGREGATOR = ROUTES_DIR.parent / "notebook.py"
+APP_DIR = ROUTES_DIR.parents[2]
 
 
 def _imports(path: Path) -> set[str]:
@@ -69,3 +70,44 @@ def test_notebook_group_files_exist():
     for name in ("common", "lifecycle", "documents", "revisions", "resources",
                  "suggestions", "relations", "reading_position"):
         assert (ROUTES_DIR / f"{name}.py").is_file(), f"缺少 {name}.py"
+
+
+def test_application_and_document_processing_modules_do_not_import_api_routes():
+    protected = [*(APP_DIR / "services").rglob("*.py"),
+                 *(APP_DIR / "document_processing").rglob("*.py")]
+    for file in protected:
+        imported = _imports(file)
+        assert not any(name.startswith("app.api") for name in imported), (
+            f"{file.relative_to(APP_DIR)} 不得依赖 API 层"
+        )
+        if file.name == "service.py" and file.parent.name == "document_processing":
+            assert "app.document_processing.routes" not in imported, (
+                "Document Processing service 应依赖 config 模块，而不是 routes 兼容入口"
+            )
+
+
+def test_notebook_document_writes_stay_on_the_shared_store_gateway():
+    allowed = {
+        "notes/store.py",
+        "services/notebook_document.py",
+        "services/notebook_suggestions.py",
+        "workers/notebook_generation_worker.py",
+        "migration/legacy_notes.py",
+    }
+    offenders = []
+    for file in APP_DIR.rglob("*.py"):
+        if "write_document" not in file.read_text(encoding="utf-8"):
+            continue
+        relative = file.relative_to(APP_DIR).as_posix()
+        if relative not in allowed:
+            offenders.append(relative)
+    assert offenders == [], f"正文写入调用应经核准的 write_document 用例：{offenders}"
+
+
+def test_notebook_mutation_routes_delegate_transaction_boundaries():
+    for name in ("lifecycle.py", "resources.py", "suggestions.py"):
+        tree = ast.parse((ROUTES_DIR / name).read_text(encoding="utf-8"))
+        commits = [node for node in ast.walk(tree)
+                   if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                   and node.func.attr in {"commit", "rollback"}]
+        assert commits == [], f"{name} 应将写事务交给应用服务"

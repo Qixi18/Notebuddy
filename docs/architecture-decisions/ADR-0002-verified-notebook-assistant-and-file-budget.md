@@ -181,3 +181,20 @@ API handler 保留 Notebook 路由身份解析及响应组装；普通编辑和�
 不是独立 domain/repository 架构。按用户本轮要求，本批未运行测试或启动服务；实现尚未
 经过本轮验证，ADR 仍为 Proposed。
 
+**S8 本轮代码修改（2026-11-03）：** 将处理路线及 Provider 配置实现迁至
+`document_processing/config.py`，`service.py` 改为依赖配置模块，旧 `routes.py` 保留兼容重导出。
+Notebook 建议单条/批量审核编排迁至 `app/services/notebook_suggestions.py`，继续经
+`notes/store.py::write_document` 执行唯一正文 CAS 写入。Notebook 生命周期服务统一检查普通资料、
+图片处理和生成任务，供批量、课程内和未分类删除共用。图片 Worker 仅在终态写入
+`finished_at`，任务重新认领或回到 pending 时清空该值。以上修改保持既有 API 路径、响应契约和
+正文存储机制；针对性测试与静态检查待执行，ADR 状态仍为 Proposed。
+
+随后继续完成：所有应用内调用端迁至 `document_processing.config`；章节重排 Service 只返回业务结果，
+由 Route 组装 Notebook API 响应；Notebook 生命周期的批量管理、创建、重命名、绑定、解绑、移动、
+恢复与删除事务下沉至生命周期 Service，Notebook 附件/封面变更下沉至资源 Service；路由边界测试增加
+Service/Document Processing 不反向依赖 API、正文写入调用入口约束。Web 移除 Workspace 中未使用的
+旧 Note 正文编辑状态，修复课程旧 Notebook URL 到具体 Notebook 的解析并保留查询参数；全局与关键
+Notebook/森林/答疑路由加错误页，侧栏、脏正文导航保护和助手坞控制分别抽离，Notebook/答疑/森林及
+助手坞改为按需加载。PPTX/DOCX 明确为受限兼容格式，避免接口接收被误解为解析质量保证。整体状态待
+用户评估；本轮仅做必要的轻量检查，ADR 仍为 Proposed。
+

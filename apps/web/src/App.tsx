@@ -1,18 +1,18 @@
-import { Link, Navigate, Outlet, useLocation, useParams, type RouteObject } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation, useParams, useRouteError, type RouteObject } from 'react-router-dom'
 import { lazy, Suspense, useEffect, useState } from 'react'
 
 import { AppLayout, WorkspaceProvider } from './components/AppLayout'
 import { CourseRouteGuard } from './components/CourseGate'
 import { useWorkspaceState } from './features/workspace/useWorkspaceState'
 import { api } from './api'
-import { AssistantPage } from './pages/AssistantPage'
 import { CourseOverviewPage } from './pages/CourseOverviewPage'
 import { CourseLibraryPage } from './pages/CourseLibraryPage'
 import { HomePage } from './pages/HomePage'
-import { NotebookPage } from './pages/NotebookPage'
 import { RecycleBinPage } from './pages/RecycleBinPage'
 
 const ForestPage = lazy(() => import('./pages/ForestPage').then((module) => ({ default: module.ForestPage })))
+const AssistantPage = lazy(() => import('./pages/AssistantPage').then((module) => ({ default: module.AssistantPage })))
+const NotebookPage = lazy(() => import('./pages/NotebookPage').then((module) => ({ default: module.NotebookPage })))
 
 export function LegacyMaterialsRedirect() {
   const { courseId } = useParams<{ courseId: string }>()
@@ -32,6 +32,41 @@ export function LegacyMaterialsRedirect() {
     return () => { active = false }
   }, [courseId, requestedNotebook])
   return target ? <Navigate to={target} replace /> : <p role="status">正在打开课程笔记本…</p>
+}
+
+function LegacyNotebookRedirect() {
+  const { courseId } = useParams<{ courseId: string }>()
+  const location = useLocation()
+  const requestedNotebook = new URLSearchParams(location.search).get('notebook')
+  const [target, setTarget] = useState<string>()
+  useEffect(() => {
+    if (!courseId) { setTarget('/courses'); return }
+    let active = true
+    void api.listNotebooks(courseId).then((notebooks) => {
+      if (!active) return
+      const notebook = requestedNotebook
+        ? notebooks.find((item) => item.id === requestedNotebook)
+        : notebooks[0]
+      setTarget(notebook
+        ? `/courses/${courseId}/notebooks/${notebook.id}${location.search}`
+        : `/courses/${courseId}`)
+    }).catch(() => { if (active) setTarget(`/courses/${courseId}`) })
+    return () => { active = false }
+  }, [courseId, location.search, requestedNotebook])
+  return target ? <Navigate to={target} replace /> : <p role="status">正在打开课程笔记本…</p>
+}
+
+function RouteErrorPage() {
+  const error = useRouteError()
+  const message = error instanceof Error ? error.message : '页面加载失败，请返回后重试。'
+  return (
+    <section className="route-state-card" role="alert">
+      <span className="route-state-symbol">!</span>
+      <h1>页面暂时无法打开</h1>
+      <p>{message}</p>
+      <Link className="primary-button link-button" to="/">返回首页</Link>
+    </section>
+  )
 }
 
 function NotFoundPage() {
@@ -57,22 +92,23 @@ export function AppRoot() {
 
 export const appRoutes: RouteObject[] = [{
   element: <AppRoot />,
+  errorElement: <RouteErrorPage />,
   children: [{
     element: <AppLayout />,
     children: [
       { index: true, element: <HomePage /> },
       { path: '/courses', element: <CourseLibraryPage /> },
-      { path: '/notebooks/unbound/:notebookId', element: <NotebookPage /> },
+      { path: '/notebooks/unbound/:notebookId', element: <Suspense fallback={<p role="status">正在打开笔记本…</p>}><NotebookPage /></Suspense>, errorElement: <RouteErrorPage /> },
       { path: '/recycle', element: <RecycleBinPage /> },
-      { path: '/forest', element: <Suspense fallback={<p role="status">正在打开知识森林…</p>}><ForestPage /></Suspense> },
+      { path: '/forest', element: <Suspense fallback={<p role="status">正在打开知识森林…</p>}><ForestPage /></Suspense>, errorElement: <RouteErrorPage /> },
       { path: '/courses/:courseId', element: <CourseRouteGuard><CourseOverviewPage /></CourseRouteGuard> },
       { path: '/notes', element: <Navigate to="/courses" replace /> },
-      { path: '/courses/:courseId/notebook', element: <Navigate to="/courses" replace /> },
-      { path: '/courses/:courseId/notebooks/:notebookId', element: <CourseRouteGuard><NotebookPage /></CourseRouteGuard> },
+      { path: '/courses/:courseId/notebook', element: <CourseRouteGuard><LegacyNotebookRedirect /></CourseRouteGuard> },
+      { path: '/courses/:courseId/notebooks/:notebookId', element: <CourseRouteGuard><Suspense fallback={<p role="status">正在打开笔记本…</p>}><NotebookPage /></Suspense></CourseRouteGuard>, errorElement: <RouteErrorPage /> },
       { path: '/courses/:courseId/notes', element: <Navigate to="/courses" replace /> },
       { path: '/courses/:courseId/notes/:noteId', element: <Navigate to="/courses" replace /> },
       { path: '/courses/:courseId/materials', element: <CourseRouteGuard><LegacyMaterialsRedirect /></CourseRouteGuard> },
-      { path: '/courses/:courseId/assistant', element: <CourseRouteGuard><AssistantPage /></CourseRouteGuard> },
+      { path: '/courses/:courseId/assistant', element: <CourseRouteGuard><Suspense fallback={<p role="status">正在打开 AI 答疑…</p>}><AssistantPage /></Suspense></CourseRouteGuard>, errorElement: <RouteErrorPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   }],

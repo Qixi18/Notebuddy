@@ -681,7 +681,7 @@ class ProcessingRouteSelection(BaseModel):
 @router.post('/assets/{asset_id}/processing-route', status_code=202)
 def switch_asset_processing_route(asset_id: str, payload: ProcessingRouteSelection,
                                   db: Session = Depends(get_db)):
-    from app.document_processing.routes import (
+    from app.document_processing.config import (
         ensure_vision_preflight,
         provider_snapshot,
         resolve_route,

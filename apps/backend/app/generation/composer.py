@@ -340,7 +340,7 @@ FORMAT_REPAIR_PROMPT = (
 def compose_deepseek(
     snapshot: dict[str, Any], plan: dict[str, Any], unit_ids: list[str],
 ) -> Composition:
-    from app.document_processing.routes import provider_client
+    from app.document_processing.config import provider_client
     client = provider_client(snapshot.get('provider', {})) if snapshot.get('processing_route') == 'llm' else DeepSeekClient()
     def call_json(messages, *, max_tokens):
         if snapshot.get('processing_route') == 'llm':

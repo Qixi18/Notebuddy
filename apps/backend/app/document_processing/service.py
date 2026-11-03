@@ -91,7 +91,7 @@ def create_parse_run(
 ) -> DocumentParseRun:
     """Create a new pending parse version.  The previous current run is kept."""
 
-    from app.document_processing.routes import asset_config
+    from app.document_processing.config import asset_config
     route = asset.processing_route or 'standard'
     provider = asset_config(asset) if route == 'llm' else {}
     expected_config = {'processing_route': route, 'provider': provider}

@@ -24,7 +24,7 @@ from app.db.models import (
     new_id,
     utc_now,
 )
-from app.document_processing.routes import provider_snapshot, resolve_route, route_limits
+from app.document_processing.config import provider_snapshot, resolve_route, route_limits
 from app.notes.assets import AssetUnavailable
 from app.notes.notebook import bump_order_revision
 
@@ -216,7 +216,7 @@ def ingest_document(
     except ValueError as exc:
         raise UploadRejected(str(exc), 422) from exc
     if route == "llm":
-        from app.document_processing.routes import ensure_vision_preflight
+        from app.document_processing.config import ensure_vision_preflight
         try:
             ensure_vision_preflight()
         except ValueError as exc:

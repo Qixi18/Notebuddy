@@ -31,7 +31,7 @@ from app.document_processing.ir import (
     TableData,
 )
 from app.document_processing.rendering import page_images
-from app.document_processing.routes import asset_config, route_limits, vision_client
+from app.document_processing.config import asset_config, route_limits, vision_client
 from app.services.processing_budget import processing_budget_scope
 
 

@@ -10,6 +10,8 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 **实施进度（2026-11-03 复核）**：此前 A1/A2、B1/B2、C1/C2 与 D 第一阶段完成情况见 ADR-0002 的实施记录。后续 S1–S7 在工作树记录了 QA 隔离、预算验收、Notebook hook 拆分及 `notebook_routes/*` 路由文件拆分；当前代码已有 Notebook OpenAPI 契约快照与路由重复/反向依赖检查。该拆分不代表 handler 已与数据库事务/业务编排分层。Notebook 正文保存、历史恢复及图片所有权规则现统一由 `app/services/notebook_document.py` 编排，并继续通过 `notes/store.py` 的唯一 CAS 写入路径落库；章节重排与阅读位置 CAS 也有独立 application service。Web `appRoutes` 现由 `main.tsx` 直接交给 `createBrowserRouter`，嵌套 `<Routes>` 通配包装已移除，旧路径与重定向保留并有路由匹配回归。当前分支含未提交改动；本轮按要求未启动服务或运行测试。ADR-0002 保持 Proposed。
 
+**本轮 S8 实施（2026-11-03，待评估）**：Document Processing 配置实现位于 `app/document_processing/config.py`，解析 Service 和调用端依赖配置模块，旧 `routes.py` 仅保留兼容重导出；Notebook 生命周期变更、建议审核、附件/封面资源写入和删除保护规则下沉至 application services。Notebook 删除统一检查资料、图片和生成任务；图片 Worker 只在终态记录 `finished_at`。前端修复旧 Notebook 路径映射，补充全局及关键页面错误边界，拆分侧栏/导航保护/助手坞控制器，并延迟加载 Notebook、森林、答疑和助手坞及重型编辑器。PPTX/DOCX 标为受限兼容格式，PDF 与独立图片资源按现有质量契约处理。整体改动待用户评估，ADR-0002 仍为 Proposed。
+
 ## 当前能力与边界
 
 - 一门课程可有多本笔记本；笔记按讲次、章节和小节组织，知识树叶子定位到具体笔记小节。课程、资料、笔记、会话及修改记录保存在本地 SQLite。

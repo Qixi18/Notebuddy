@@ -36,7 +36,7 @@ from app.document_processing.checkpoints import (
     put_step,
     structured_call,
 )
-from app.document_processing.routes import provider_client
+from app.document_processing.config import provider_client
 from app.generation.composer import (
     CompositionError,
     combine_compositions,

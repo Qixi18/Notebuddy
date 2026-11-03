@@ -3,12 +3,8 @@ import { matchPath, useLocation } from 'react-router-dom'
 
 import { api } from '../../api'
 import { useConversation } from '../conversation/useConversation'
-import { useNoteEditor } from '../notes/useNoteEditor'
-import { mergeNotebookNotes } from '../notebook/navigation'
 import { resolveConversationCourseId } from './currentCourse'
-import type { Course, Job, KnowledgeGraph, Material, Note, Page } from '../../types'
-
-const isNotebookRoute = (path: string) => /\/notebooks?($|\/)/.test(path)
+import type { Course, Job, KnowledgeGraph, Material, Page } from '../../types'
 
 const emptyGraph: KnowledgeGraph = { nodes: [], edges: [] }
 
@@ -34,11 +30,6 @@ export function useWorkspaceState() {
     setSelectedMaterialId(materialId)
     setSelectedPageNumber(page)
   }, [])
-  const [notes, setNotes] = useState<Note[]>([])
-  const upsertNotes = useCallback((incoming: Note[]) => {
-    setNotes((current) => mergeNotebookNotes(current, incoming))
-  }, [])
-  const [selectedNoteId, setSelectedNoteId] = useState<string>()
   const [graph, setGraph] = useState<KnowledgeGraph>(emptyGraph)
   const [job, setJob] = useState<Job>()
   const [busy, setBusy] = useState(false)
@@ -46,8 +37,6 @@ export function useWorkspaceState() {
   const [documentDirty, setDocumentDirty] = useState(false)
 
   const course = courses.find((item) => item.id === courseId)
-  const selectedNote = notes.find((note) => note.id === selectedNoteId)
-  const { noteDraft, setNoteDraft, editingNote, setEditingNote, noteSaving, noteDirty, saveNote, reloadNote } = useNoteEditor(selectedNote, setNotes, setError)
   /* 悬浮球要在任何页面都能提问，所以要有一个课程落点：URL 课程优先，
      否则落到最近访问过的课程（详见 features/workspace/currentCourse.ts） */
   const conversationCourseId = useMemo(
@@ -103,12 +92,6 @@ export function useWorkspaceState() {
     if (requestedSourcePage.current?.materialId === id) requestedSourcePage.current = undefined
   }, [])
 
-  const refreshNotes = useCallback(async (_id: string) => {
-    // Legacy Note body listing is retired; the Notebook document is the body.
-    setNotes([])
-    setSelectedNoteId(undefined)
-  }, [])
-
   const refreshGraph = useCallback(async (id: string) => {
     const next = await api.getKnowledgeGraph(id)
     if (currentCourseId.current === id) setGraph(next)
@@ -117,18 +100,12 @@ export function useWorkspaceState() {
   useEffect(() => { void refreshCourses() }, [refreshCourses])
 
   useEffect(() => {
-    if (courseId) setNotes([])
-  }, [courseId])
-
-  useEffect(() => {
     let active = true
     setMaterials([])
     setPages([])
-    setNotes([])
     setGraph(emptyGraph)
     setSelectedMaterialId(undefined)
     setSelectedPageNumber(undefined)
-    setSelectedNoteId(undefined)
     requestedSourcePage.current = undefined
     setJob(undefined)
     setCourseContentLoading(Boolean(courseId))
@@ -137,14 +114,11 @@ export function useWorkspaceState() {
 
     void Promise.all([
       api.listMaterials(courseId),
-      Promise.resolve([] as Note[]),
       api.getKnowledgeGraph(courseId),
-    ]).then(([nextMaterials, nextNotes, nextGraph]) => {
+    ]).then(([nextMaterials, nextGraph]) => {
       if (!active) return
       setMaterials(nextMaterials)
       setSelectedMaterialId(nextMaterials[0]?.id)
-      setNotes(nextNotes)
-      setSelectedNoteId(nextNotes[0]?.id)
       setGraph(nextGraph)
       setError(undefined)
       setCourseContentLoading(false)
@@ -192,7 +166,7 @@ export function useWorkspaceState() {
       })
     }, 1000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [job, courseId, refreshMaterials, refreshNotes, refreshGraph])
+  }, [job, courseId, refreshMaterials, refreshGraph])
 
   async function createCourse(name: string): Promise<Course> {
     const created = await api.createCourse(name)
@@ -270,23 +244,12 @@ export function useWorkspaceState() {
     selectedPageNumber,
     setSelectedPageNumber,
     openMaterialSource,
-    notes,
-    upsertNotes,
-    selectedNote,
-    setSelectedNoteId,
-    noteDraft,
-    setNoteDraft,
-    editingNote,
-    setEditingNote,
     graph,
     job,
     conversation,
     busy: busy || conversation.busy,
-    noteSaving,
-    noteDirty,
     documentDirty,
     setDocumentDirty,
-    reloadNote,
     error,
     setError,
     createCourse,
@@ -294,11 +257,9 @@ export function useWorkspaceState() {
     retryMaterial,
     reparseMaterial,
     requestOCR,
-    saveNote,
     refreshCourses,
     refreshCurrentMaterials: () => courseId ? refreshMaterials(courseId) : Promise.resolve(),
-    refreshCurrentNotes: () => courseId ? refreshNotes(courseId) : Promise.resolve(),
-  }), [courses, courseId, conversationCourseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, notes, selectedNote, noteDraft, editingNote, graph, job, conversation, busy, noteSaving, noteDirty, documentDirty, reloadNote, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, saveNote, refreshCourses])
+  }), [courses, courseId, conversationCourseId, course, coursesLoading, courseContentLoading, materials, selectedMaterialId, pages, selectedPageNumber, graph, job, conversation, busy, documentDirty, error, createCourse, uploadMaterial, retryMaterial, reparseMaterial, requestOCR, refreshCourses])
 
   return workspace
 }

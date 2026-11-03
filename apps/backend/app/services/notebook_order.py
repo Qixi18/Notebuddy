@@ -10,17 +10,15 @@ from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.db.models import Course, Material, Notebook
-from app.notes.notebook import notebook_outline
+from app.db.models import Material, Notebook
 from app.schemas.notebook import NotebookOrderUpdate
 
 
 def reorder_notebook(
     db: Session,
-    course_id: str,
     notebook: Notebook,
     payload: NotebookOrderUpdate,
-) -> dict:
+) -> None:
     """Atomically reorder every active chapter using the expected revision."""
     result = db.execute(update(Notebook).where(
         Notebook.id == notebook.id,
@@ -45,5 +43,3 @@ def reorder_notebook(
 
     db.commit()
     db.refresh(notebook)
-    course = db.get(Course, course_id)
-    return notebook_outline(db, course, notebook)

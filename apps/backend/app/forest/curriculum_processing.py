@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.db.models import ForestJob
 from app.document_processing.checkpoints import WorkPending, fingerprint, get_step, put_step
-from app.document_processing.routes import provider_client, provider_snapshot
+from app.document_processing.config import provider_client, provider_snapshot
 from app.services.provider_audit import (
     begin_call,
     estimate_token_cost,

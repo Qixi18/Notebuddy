@@ -16,7 +16,7 @@ from app.ai.deepseek import DeepSeekClient, DeepSeekError
 from app.core.config import settings
 from app.db.models import Course, CurriculumImport, ForestCourseProfile, ForestJob, new_id
 from app.document_processing.checkpoints import structured_call
-from app.document_processing.routes import resolve_route, route_limits
+from app.document_processing.config import resolve_route, route_limits
 from app.forest.curriculum_confirmation import confirm_import
 from app.forest.curriculum_processing import (
     CurriculumProcessingError,

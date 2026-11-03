@@ -29,7 +29,8 @@ def claim_next_asset_job() -> str | None:
         result = db.execute(update(AssetProcessingJob).where(
             AssetProcessingJob.id == job_id,
             AssetProcessingJob.status == "pending",
-        ).values(status="processing", attempt_count=AssetProcessingJob.attempt_count + 1,
+        ).values(status="processing", finished_at=None,
+                 attempt_count=AssetProcessingJob.attempt_count + 1,
                  updated_at=datetime.now(UTC)))
         db.commit()
         return job_id if result.rowcount == 1 else None
@@ -112,7 +113,13 @@ def process_asset_job(job_id: str) -> None:
             db.commit()
         finally:
             job = db.get(AssetProcessingJob, job_id)
-            if job is not None:
+            if job is not None and job.status in {
+                "completed", "completed_with_warnings", "failed", "cancelled",
+            }:
                 job.finished_at = datetime.now(UTC)
                 job.updated_at = job.finished_at
+                db.commit()
+            elif job is not None and job.status == "pending":
+                job.finished_at = None
+                job.updated_at = datetime.now(UTC)
                 db.commit()

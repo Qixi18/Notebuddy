@@ -57,7 +57,7 @@ def ensure_upload_batch(
             raise HTTPException(409, "同一上传批次必须使用同一处理路线")
         batch.updated_at = now
         return batch
-    from app.document_processing.routes import resolve_route
+    from app.document_processing.config import resolve_route
     try:
         route = resolve_route(processing_route)
     except ValueError as exc:

@@ -27,6 +27,12 @@ from app.api.v1.notebook import (
     restore_deleted_notebook,
     review_edit_suggestion,
 )
+from app.api.v1.notebook_routes.suggestions import (
+    apply_course_edit_suggestions as apply_course_edit_suggestions_route,
+)
+from app.api.v1.notebook_routes.suggestions import (
+    review_edit_suggestion as review_edit_suggestion_route,
+)
 from app.core.config import settings
 from app.db.forest_models import ForestJob
 from app.db.models import NotebookEditSuggestion
@@ -337,6 +343,25 @@ def test_restored_notebook_can_still_reject_its_pending_suggestion(session, chec
     assert result["revision"] == before_revision
     assert _body(session, book) == (before_json, before_revision)
     assert session.get(NotebookEditSuggestion, suggestion_id).status == "rejected"
+
+
+def test_suggestion_route_adapters_preserve_service_contract(session):
+    course, book = _setup(session)
+    suggestion_id = _propose(session, course, book, "经 API 适配器审核。")
+    result = review_edit_suggestion_route(
+        book.id, suggestion_id,
+        NotebookEditSuggestionReview(decision="accept", expected_revision=book.document_revision),
+        session,
+    )
+    assert result["revision"] == book.document_revision
+    assert "经 API 适配器审核" in json.dumps(result["content"], ensure_ascii=False)
+
+    first = _propose(session, course, book, "批量一。")
+    second = _propose(session, course, book, "批量二。")
+    batch = apply_course_edit_suggestions_route(
+        course.id, NotebookEditSuggestionBatchReview(suggestion_ids=[first, second]), session,
+    )
+    assert batch["updated"] == 2
 
 
 def _other_course_with_body(session, name: str = "另一门课"):

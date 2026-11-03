@@ -132,6 +132,8 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 
 扫描型 PDF 没有文字层时只记录 OCR 候选和待检查告警，不生成伪造的文本或来源。OCR 是独立的可选适配器，受 `NOTEBOOK_OCR_ENABLED`、`NOTEBOOK_OCR_MAX_PAGES` 和 `NOTEBOOK_OCR_LANGUAGE` 控制。
 
+课程资料上传正式接收 PDF、PPTX、DOCX；独立 Notebook 图片资源上传接收 PNG、JPEG、WebP、GIF。PDF 与图片走当前 Document Processing 质量门禁。PPTX/DOCX 为保留格式兼容，现由旧解析器转换为 DocumentIR，功能受限：嵌入图片、公式、图表和表格结构不保证完整；接口接收成功不代表这些内容达到与 PDF 相同的解析质量。生成仍须通过 IR 质量门禁。
+
 ## 知识森林接口
 
 以下地址均加 `/api/v1` 前缀。固定类型和请求字段见 [知识森林契约](superpowers/specs/2026-10-11-knowledge-forest-design.md)。
