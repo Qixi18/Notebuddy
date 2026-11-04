@@ -72,7 +72,7 @@
 
 ## 本地运行与测试
 
-Windows 官方准备/运行入口是 PowerShell 7（`pwsh`）和仓库脚本；环境要求 Node.js ≥22.12、uv、Python ≥3.12。`setup.ps1` 管理项目内 `.runtime` 与 `apps/backend/.venv-document`，按锁定文件安装。不要用裸 `uv run` 意外创建另一套 `.venv`；需单项运行时显式指向项目环境。
+Windows 官方准备/运行入口是 PowerShell 7（`pwsh`）和仓库脚本；环境要求 Node.js ≥22.22.2、uv、Python ≥3.12。`setup.ps1` 管理项目内 `.runtime` 与 `apps/backend/.venv-document`，按锁定文件安装。不要用裸 `uv run` 意外创建另一套 `.venv`；需单项运行时显式指向项目环境。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\setup.ps1

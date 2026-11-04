@@ -42,7 +42,7 @@ $env:npm_config_cache = Join-Path $runtime 'cache\npm'
 $env:ELECTRON_CACHE = Join-Path $runtime 'cache\electron'
 $env:ELECTRON_BUILDER_CACHE = Join-Path $runtime 'cache\electron-builder'
 $nodeVersion = & $node --version
-if ($LASTEXITCODE -ne 0 -or [version] ([string] $nodeVersion).Trim().TrimStart('v') -lt [version] '22.12.0') { throw 'Node.js 22.12 or newer is required. Run scripts/setup.ps1 with a supported Node installation.' }
+if ($LASTEXITCODE -ne 0 -or [version] ([string] $nodeVersion).Trim().TrimStart('v') -lt [version] '22.22.2') { throw 'Node.js 22.22.2 or newer is required. Run scripts/setup.ps1 with a supported Node installation.' }
 Write-Host "Using backend Python: $backendPython"
 Write-Host "Using Node.js: $node"
 Push-Location $backendDir

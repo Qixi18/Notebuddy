@@ -51,4 +51,3 @@ def mark_asset_inline(notebook_id: str, asset_id: str, db: Session = Depends(get
 def delete_notebook_asset(notebook_id: str, asset_id: str, db: Session = Depends(get_db)):
     state = delete_notebook_asset_service(db, notebook_id, asset_id)
     return {"asset_id": asset_id, "state": state}
-

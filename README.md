@@ -31,7 +31,7 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 ## 本地启动
 
-Windows 下在仓库根目录执行以下两步。首次准备需要本机已有 `uv`、Node.js 22.12+（含 npm），或已经放好项目内的 `.runtime/bin/uv.exe` 和 `.runtime/node`。Python 会安装在项目内，不要求预先安装到系统。
+Windows 下在仓库根目录执行以下两步。首次准备需要本机已有 `uv`、Node.js 22.22.2+（含 npm；锁定的 Web 测试依赖最低要求），或已经放好项目内的 `.runtime/bin/uv.exe` 和 `.runtime/node`。Python 会安装在项目内，不要求预先安装到系统。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\setup.ps1

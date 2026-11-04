@@ -66,13 +66,16 @@ const workspace = {
   setEditingNote: () => {},
 } as never
 
-function renderShell(initialEntry: string, overrides: Record<string, unknown> = {}) {
+async function renderShell(initialEntry: string, overrides: Record<string, unknown> = {}) {
   const value = { ...(workspace as Record<string, unknown>), ...overrides }
   const router = createMemoryRouter(
     [{ path: '*', element: <WorkspaceProvider value={value as never}><AppLayout /></WorkspaceProvider> }],
     { initialEntries: [initialEntry] },
   )
   render(<RouterProvider router={router} />)
+  if (initialEntry.endsWith('/assistant') === false && localStorage.getItem(DOCK_STORAGE.open) === 'true') {
+    await screen.findByRole('complementary', { name: '课程学习助手' })
+  }
   return router
 }
 
@@ -93,20 +96,21 @@ function grip() {
   return screen.getByRole('separator', { name: /拖拽调整答疑坞宽度/ })
 }
 
-test('抽屉收起时，右下角悬浮球是唯一入口；点开后悬浮球让位给抽屉', () => {
-  renderShell('/courses/c1/notebook')
+test('抽屉收起时，右下角悬浮球是唯一入口；点开后悬浮球让位给抽屉', async () => {
+  await renderShell('/courses/c1/notebook')
   const fab = screen.getByRole('button', { name: '打开课程学习助手' })
   expect(document.querySelector('.assistant-dock')).toBeNull()
 
   fireEvent.click(fab)
+  await screen.findByRole('complementary', { name: '课程学习助手' })
   expect(document.querySelector('.assistant-dock')).toBeTruthy()
   expect(screen.queryByRole('button', { name: '打开课程学习助手' })).toBeNull()
   expect(localStorage.getItem(DOCK_STORAGE.open)).toBe('true')
 })
 
-test('抽屉里的收起按钮把入口还给悬浮球，并记住收起状态', () => {
+test('抽屉里的收起按钮把入口还给悬浮球，并记住收起状态', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook')
+  await renderShell('/courses/c1/notebook')
   expect(document.querySelector('.assistant-dock')).toBeTruthy()
 
   fireEvent.click(screen.getByRole('button', { name: '收起答疑坞' }))
@@ -115,44 +119,45 @@ test('抽屉里的收起按钮把入口还给悬浮球，并记住收起状态',
   expect(localStorage.getItem(DOCK_STORAGE.open)).toBe('false')
 })
 
-test('悬浮球全局常驻：首页、知识森林、课程页、回收站都能唤起抽屉', () => {
+test('悬浮球全局常驻：首页、知识森林、课程页、回收站都能唤起抽屉', async () => {
   for (const pathname of ['/', '/forest', '/courses/c1/notebook', '/recycle']) {
     localStorage.clear() // 每轮都从「收起」起步，否则上一轮的展开状态会让悬浮球不再渲染
-    renderShell(pathname)
+    await renderShell(pathname)
     fireEvent.click(screen.getByRole('button', { name: '打开课程学习助手' }))
+    await screen.findByRole('complementary', { name: '课程学习助手' })
     expect(document.querySelector('.assistant-dock'), pathname).toBeTruthy()
     expect(localStorage.getItem(DOCK_STORAGE.open), pathname).toBe('true')
     cleanup()
   }
 })
 
-test('答疑页整页不提供悬浮球与抽屉（那一页本身就是完整助手）', () => {
-  renderShell('/courses/c1/assistant')
+test('答疑页整页不提供悬浮球与抽屉（那一页本身就是完整助手）', async () => {
+  await renderShell('/courses/c1/assistant')
   expect(screen.queryByRole('button', { name: '打开课程学习助手' })).toBeNull()
   expect(document.querySelector('.assistant-dock')).toBeNull()
   cleanup()
 
   // 已记录为展开态时也不能在该页弹出抽屉
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/assistant')
+  await renderShell('/courses/c1/assistant')
   expect(document.querySelector('.assistant-dock')).toBeNull()
 })
 
-test('非课程页（首页）打开的悬浮坞照样能提问，并说明课程落点', () => {
+test('非课程页（首页）打开的悬浮坞照样能提问，并说明课程落点', async () => {
   localStorage.clear()
-  renderShell('/', { courseId: undefined, course: undefined })
+  await renderShell('/', { courseId: undefined, course: undefined })
   fireEvent.click(screen.getByRole('button', { name: '打开课程学习助手' }))
 
-  expect(screen.getByRole('textbox', { name: '快速提问' })).toBeTruthy()
+  expect(await screen.findByRole('textbox', { name: '快速提问' })).toBeTruthy()
   const context = document.querySelector('.assistant-dock-context')
   expect(context?.textContent).toContain('软件工程')
   // 回落要讲清原因，而不是让用户以为自己在某门课里
   expect(context?.textContent).toContain('最近访问')
 })
 
-test('快捷提示只把提示词填进输入框，不直接发送', () => {
+test('快捷提示只把提示词填进输入框，不直接发送', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook')
+  await renderShell('/courses/c1/notebook')
   const input = screen.getByRole('textbox', { name: '快速提问' }) as HTMLTextAreaElement
   expect(input.value).toBe('')
 
@@ -160,9 +165,9 @@ test('快捷提示只把提示词填进输入框，不直接发送', () => {
   expect(input.value).toContain('解释')
 })
 
-test('回答后展示来源清单与回答模式，检索结果显性化', () => {
+test('回答后展示来源清单与回答模式，检索结果显性化', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook', { conversation: answeredConversation })
+  await renderShell('/courses/c1/notebook', { conversation: answeredConversation })
 
   expect(screen.getByText('回答依据 · 2 条')).toBeTruthy()
   const sources = document.querySelector('.assistant-dock-sources')
@@ -174,7 +179,7 @@ test('回答后展示来源清单与回答模式，检索结果显性化', () =>
 test('作用范围可收窄到某份课件，并随提问一起带给后端', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
   const askAgent = vi.fn(async () => true)
-  renderShell('/courses/c1/notebook', {
+  await renderShell('/courses/c1', {
     conversation: { ...idleConversation, askAgent },
     materials: [{ id: 'm1', course_id: 'c1', lecture_title: '第 3 讲 · 设计模式' }],
   })
@@ -189,20 +194,20 @@ test('作用范围可收窄到某份课件，并随提问一起带给后端', as
   }))
 })
 
-test('资料页与 Notebook 页都不显示旧 Note/正文写回入口', () => {
+test('资料页与 Notebook 页都不显示旧 Note/正文写回入口', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/materials', { conversation: answeredConversation, selectedNote: note })
+  await renderShell('/courses/c1/materials', { conversation: answeredConversation, selectedNote: note })
   expect(screen.queryByRole('button', { name: '写入当前笔记' })).toBeNull()
   cleanup()
 
-  renderShell('/courses/c1/notebook', { conversation: answeredConversation, selectedNote: note })
+  await renderShell('/courses/c1/notebook', { conversation: answeredConversation, selectedNote: note })
   expect(screen.queryByRole('button', { name: '写入当前笔记' })).toBeNull()
   expect(screen.queryByRole('button', { name: '插入到选区后' })).toBeNull()
 })
 
-test('拖分界条实时改宽：往左拖变宽，宽度写进 CSS 变量并落进 localStorage', () => {
+test('拖分界条实时改宽：往左拖变宽，宽度写进 CSS 变量并落进 localStorage', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook')
+  await renderShell('/courses/c1/notebook')
   stubShellWidth(1400)
 
   fireEvent.pointerDown(grip(), { clientX: 300, pointerId: 1 })
@@ -215,9 +220,9 @@ test('拖分界条实时改宽：往左拖变宽，宽度写进 CSS 变量并落
   expect(localStorage.getItem(DOCK_STORAGE.width)).toBe('460')
 })
 
-test('宽度上限是外壳总宽的 72%，拖过头只停在边界', () => {
+test('宽度上限是外壳总宽的 72%，拖过头只停在边界', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook')
+  await renderShell('/courses/c1/notebook')
   stubShellWidth(1000)
 
   fireEvent.pointerDown(grip(), { clientX: 300, pointerId: 1 })
@@ -226,9 +231,9 @@ test('宽度上限是外壳总宽的 72%，拖过头只停在边界', () => {
   fireEvent.pointerUp(window)
 })
 
-test('拖得太窄松手视为「我要关掉」：抽屉收合，宽度记回默认值', () => {
+test('拖得太窄松手视为「我要关掉」：抽屉收合，宽度记回默认值', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook')
+  await renderShell('/courses/c1/notebook')
   stubShellWidth(1400)
 
   fireEvent.pointerDown(grip(), { clientX: 300, pointerId: 1 })
@@ -240,10 +245,10 @@ test('拖得太窄松手视为「我要关掉」：抽屉收合，宽度记回�
   expect(localStorage.getItem(DOCK_STORAGE.width)).toBe(String(DOCK_WIDTH_DEFAULT))
 })
 
-test('双击分界条复位到默认宽度', () => {
+test('双击分界条复位到默认宽度', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
   localStorage.setItem(DOCK_STORAGE.width, '520')
-  renderShell('/courses/c1/notebook')
+  await renderShell('/courses/c1/notebook')
   stubShellWidth(1400)
   expect(dockWidthVar()).toBe('520px')
 
@@ -251,9 +256,9 @@ test('双击分界条复位到默认宽度', () => {
   expect(dockWidthVar()).toBe(`${DOCK_WIDTH_DEFAULT}px`)
 })
 
-test('方向键可以微调宽度，外壳宽度变量随之更新', () => {
+test('方向键可以微调宽度，外壳宽度变量随之更新', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook')
+  await renderShell('/courses/c1/notebook')
   stubShellWidth(1400)
 
   fireEvent.keyDown(grip(), { key: 'ArrowLeft' })
@@ -264,10 +269,10 @@ test('方向键可以微调宽度，外壳宽度变量随之更新', () => {
 
 /* ---- P1 中断：坞内也有停止入口 ---- */
 
-test('回答进行中：坞里的发送键变「停止」，点它就中断', () => {
+test('回答进行中：坞里的发送键变「停止」，点它就中断', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
   const stopAgent = vi.fn()
-  renderShell('/courses/c1/notebook', {
+  await renderShell('/courses/c1/notebook', {
     conversation: { ...idleConversation, busy: true, stopAgent },
   })
 
@@ -278,9 +283,9 @@ test('回答进行中：坞里的发送键变「停止」，点它就中断', ()
 
 /* ---- P5b 悬浮坞锁定对齐 ---- */
 
-test('会话已提问后：范围三档禁用（后端不再改 scope），课件收窄仍可选', () => {
+test('会话已提问后：范围三档禁用（后端不再改 scope），课件收窄仍可选', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook', {
+  await renderShell('/courses/c1', {
     conversation: { ...idleConversation, hasMessages: true, messages: [
       { id: 'u1', conversation_id: 'v1', role: 'user', content: '什么是依赖注入？', evidence: [], status: 'completed', created_at: '' },
     ] },
@@ -297,9 +302,9 @@ test('会话已提问后：范围三档禁用（后端不再改 scope），课�
   expect(screen.getByText(/范围已锁定/)).toBeTruthy()
 })
 
-test('还没提问时：范围三档都能选', () => {
+test('还没提问时：范围三档都能选', async () => {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
-  renderShell('/courses/c1/notebook', {
+  await renderShell('/courses/c1', {
     conversation: { ...idleConversation, hasMessages: false },
     materials: [{ id: 'm1', course_id: 'c1', lecture_title: '第 3 讲 · 设计模式' }],
   })

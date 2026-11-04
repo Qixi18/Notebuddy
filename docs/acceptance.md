@@ -1,6 +1,20 @@
 # 验收记录与待验收矩阵
 
-以下 2026-11-03 与 2026-10-30 的快照均为历史执行记录，只适用于各自注明的代码基线。当前提交尚未重跑完整产品测试；下方矩阵中的“自动通过”指历史基线的对应检查，不能作为当前提交的最新验收结论。
+## 本地自动验收快照（2026-11-04 13:22，未提交工作区）
+
+- 基线提交 `db2e2dcddf9887394698b5c58f2c88ecf76f6083` 加本轮未提交的 CI/Node/测试夹具修订。Windows、Python 3.12.14、项目内 Node.js 24.20.0。根目录 `pwsh -NoProfile -File .\scripts\test.ps1` **退出码 0**，日志 `.runtime/logs/test-20261104-132257-44988.log`：Ruff 通过，pytest **577 passed / 4 skipped / 2 warnings**，Web navigation **52 passed**，Vitest **85 文件 / 426 测试通过**，Web TypeScript/Vite 与 Desktop 主进程构建通过。Vite 仍有 NotebookEditor chunk >500 KB 警告。
+- 用官方 Node.js **22.23.4** 的独立本地二进制复核 Web `npm test`（navigation 52、Vitest 426）、Web `npm run build` 和 Desktop `npm run build:main`，退出码均为 0。`python scripts/check_architecture_boundaries.py --base-ref origin/main`、`git diff --check origin/main` 与工作区 `git diff --check` 均通过。
+- 先前 25 项 Vitest 失败来自测试在懒加载坞/编辑器出现前断言，以及旧 `noteDirty` 夹具与现行 `documentDirty` 契约不一致；保留原有行为断言后定向 5 文件 35/35 通过，再经完整回归通过。409 冲突与离开确认得到组件测试覆盖，但仍未做真实浏览器、真实 PDF/图片、外部模型、账单或真实数据库恢复验收。本次没有 GitHub Actions 通过记录。
+
+## 本地失败快照（2026-11-04 12:51，修订前）
+
+- 起始代码基线：`fix/overall-debug-integration` `db2e2dcddf9887394698b5c58f2c88ecf76f6083`；本次 CI/Node/末尾空行修改在未提交工作区。执行环境：Windows、Python 3.12.14、pytest 9.1.1、项目内 Node.js 24.20.0。CI 计划使用 Node.js 22.23.4，尚未通过 GitHub Actions 验证。
+- 根目录执行 `pwsh -NoProfile -File .\scripts\test.ps1`，退出码 **1**，日志 `.runtime/logs/test-20261104-125125-36548.log`：Ruff 通过；后端 pytest **577 passed、4 skipped、2 warnings**；Web navigation **52 passed、0 failed**；Vitest **80 files passed、5 failed，401 passed、25 failed**。5 个失败文件为 `agent-dock.test.tsx`（6）、`dock-interaction.test.tsx`（15）、`multi-book-dirty-navigation.test.tsx`（1）、`notebook-document.test.tsx`（2）、`notebook-workspace-save-conflict.test.tsx`（1）。警告为 pytest 插件重复导入及本机缺少 ccache；详细失败名称和分类见仓库外本轮报告。
+- 官方脚本在 Vitest 后停止。随后分别执行 Web `npm run build`（TypeScript 与 Vite）及 Desktop `npm run build:main`，退出码均为 **0**；Vite 仍提示 NotebookEditor chunk 大于 500 KB。单独运行架构边界脚本（`--base-ref origin/main`）通过；后端 `test_backend_architecture_boundaries.py` **12 passed**。这些检查均为本地执行，不是 GitHub Actions 通过记录。
+- `git diff --check` 与对 `origin/main` 的提交差异检查通过。历史 CI 指出的 5 个文件在当前树中仍有多余末尾空行，本轮仅删除这些空行；未改函数逻辑、断言、数据结构或 API。
+- 失败集中在旧助手坞交互和 Notebook 编辑相关 UI 测试。尤其正文离开确认与 409 冲突面板未通过当前测试，尚不能据后端通过推断浏览器中的数据保护行为已验收。未运行真实浏览器、真实 PDF/图片、模型、付费 API 或真实数据库迁移/恢复。
+
+以下失败快照及 2026-11-03、2026-10-30 快照均为历史执行记录，只适用于各自注明的代码基线。当前本地自动验收结果以上方 13:22 快照为准；仍不能据此声称 GitHub Actions 或真实浏览器/资料/模型验收通过。
 
 ## 历史快照（2026-11-03）
 

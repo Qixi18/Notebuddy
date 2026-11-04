@@ -38,7 +38,7 @@ try {
     if (-not (Test-Path -LiteralPath $npmCli)) { throw 'npm is missing from the selected Node installation. Run scripts/setup.ps1 first.' }
     $env:Path = "$nodeDir;$env:Path"
     $nodeVersion = & $node --version
-    if ($LASTEXITCODE -ne 0 -or [version] ([string] $nodeVersion).Trim().TrimStart('v') -lt [version] '22.12.0') { throw 'Node.js 22.12 or newer is required. Run scripts/setup.ps1 with a supported Node installation.' }
+    if ($LASTEXITCODE -ne 0 -or [version] ([string] $nodeVersion).Trim().TrimStart('v') -lt [version] '22.22.2') { throw 'Node.js 22.22.2 or newer is required. Run scripts/setup.ps1 with a supported Node installation.' }
     Write-Host "Using backend Python: $python"
     Write-Host "Using Node.js: $node"
     Invoke-CheckStep 'Checking backend test dependencies' $python @('-c', 'import pytest, ruff') $backend
