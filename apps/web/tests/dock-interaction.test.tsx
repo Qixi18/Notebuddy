@@ -74,7 +74,7 @@ async function renderShell(initialEntry: string, overrides: Record<string, unkno
   )
   render(<RouterProvider router={router} />)
   if (initialEntry.endsWith('/assistant') === false && localStorage.getItem(DOCK_STORAGE.open) === 'true') {
-    await screen.findByRole('complementary', { name: '课程学习助手' })
+    await screen.findByRole('complementary', { name: '课程学习助手' }, { timeout: 5000 })
   }
   return router
 }
@@ -102,7 +102,7 @@ test('抽屉收起时，右下角悬浮球是唯一入口；点开后悬浮球�
   expect(document.querySelector('.assistant-dock')).toBeNull()
 
   fireEvent.click(fab)
-  await screen.findByRole('complementary', { name: '课程学习助手' })
+  await screen.findByRole('complementary', { name: '课程学习助手' }, { timeout: 5000 })
   expect(document.querySelector('.assistant-dock')).toBeTruthy()
   expect(screen.queryByRole('button', { name: '打开课程学习助手' })).toBeNull()
   expect(localStorage.getItem(DOCK_STORAGE.open)).toBe('true')
@@ -124,7 +124,7 @@ test('悬浮球全局常驻：首页、知识森林、课程页、回收站都�
     localStorage.clear() // 每轮都从「收起」起步，否则上一轮的展开状态会让悬浮球不再渲染
     await renderShell(pathname)
     fireEvent.click(screen.getByRole('button', { name: '打开课程学习助手' }))
-    await screen.findByRole('complementary', { name: '课程学习助手' })
+    await screen.findByRole('complementary', { name: '课程学习助手' }, { timeout: 5000 })
     expect(document.querySelector('.assistant-dock'), pathname).toBeTruthy()
     expect(localStorage.getItem(DOCK_STORAGE.open), pathname).toBe('true')
     cleanup()

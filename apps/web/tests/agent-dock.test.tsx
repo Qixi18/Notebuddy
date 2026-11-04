@@ -70,7 +70,7 @@ async function renderShell(overrides: Record<string, unknown> = {}) {
     { initialEntries: ['/courses/c1/notebook'] },
   )
   render(<RouterProvider router={router} />)
-  await screen.findByRole('complementary', { name: '课程学习助手' })
+  await screen.findByRole('complementary', { name: '课程学习助手' }, { timeout: 5000 })
 }
 
 function scopeSelect() {

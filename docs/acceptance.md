@@ -1,5 +1,11 @@
 # 验收记录与待验收矩阵
 
+## CI 故障复核与本地修复（2026-11-04，未提交）
+
+- GitHub Actions [Run 41789300953](https://github.com/Qixi18/Notebuddy/actions/runs/41789300953) 在 `fix/overall-debug-integration` 提交 `129ed4e3035a8ce5475d4a0ea5f6af3519c2e33a` 上失败：Ruff 通过、后端 pytest **577 passed / 4 skipped / 2 warnings**；Web navigation **51 passed / 1 failed**，因此 Vitest 和后续构建未执行。失败位于 `apps/web/tests/conversation-groups.test.ts` 的 `created_at` 回退时间断言。
+- 原测试用本地时区的 `new Date(2026, 9, 20, 10, 0)` 构造输入，却用固定 `+08:00` 时间作为期望；GitHub runner 的 UTC 时区使断言相差 8 小时。本地仅将期望改为同一 `Date` 的 `getTime()`，未修改时间分组生产逻辑。
+- 用 Node.js **22.23.4** 显式设置 `TZ=UTC` 复现修订前的 4/5 通过，修订后 Web `npm test` 两次均为 navigation **52/52**、Vitest **426/426**；`TZ=Asia/Shanghai` 下该文件 **5/5**。复核时一次完整 Web 测试曾遇助手坞懒加载等待的偶发超时，已将测试 helper 的等待上限调整为 5 秒，随后两次 UTC 完整复测通过。`git diff --check` 通过。远端 GitHub Actions 复测结果须单独追加，不能从本地结果推定。
+
 ## 本地自动验收快照（2026-11-04 13:22，未提交工作区）
 
 - 基线提交 `db2e2dcddf9887394698b5c58f2c88ecf76f6083` 加本轮未提交的 CI/Node/测试夹具修订。Windows、Python 3.12.14、项目内 Node.js 24.20.0。根目录 `pwsh -NoProfile -File .\scripts\test.ps1` **退出码 0**，日志 `.runtime/logs/test-20261104-132257-44988.log`：Ruff 通过，pytest **577 passed / 4 skipped / 2 warnings**，Web navigation **52 passed**，Vitest **85 文件 / 426 测试通过**，Web TypeScript/Vite 与 Desktop 主进程构建通过。Vite 仍有 NotebookEditor chunk >500 KB 警告。

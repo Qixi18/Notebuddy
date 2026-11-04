@@ -44,8 +44,9 @@ test('时间标签：今天给时钟、昨天给「昨天」、更早给 MM-DD�
 })
 
 test('updated_at 缺失时退回 created_at；都无效时时间为 0、标签为空', () => {
-  const item = { updated_at: '', created_at: new Date(2026, 9, 20, 10, 0).toISOString() }
-  assert.equal(conversationTime(item), Date.parse('2026-10-20T10:00:00+08:00'))
+  const createdAt = new Date(2026, 9, 20, 10, 0)
+  const item = { updated_at: '', created_at: createdAt.toISOString() }
+  assert.equal(conversationTime(item), createdAt.getTime())
   assert.equal(conversationTimeLabel({ updated_at: '', created_at: 'not-a-date' }, now), '')
   assert.equal(conversationTime({ updated_at: '', created_at: '' }), 0)
 })
