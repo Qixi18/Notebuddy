@@ -86,7 +86,7 @@ README 是官方一键准备/启动说明。浏览器访问 `http://localhost:51
 
 完整脚本负责 Ruff、pytest、Web 测试/构建与 Desktop 主进程构建；实际步骤以 `scripts/test.ps1` 为准。使用独立 `NOTEBOOK_DATA_DIR`/测试临时目录，禁止将用户真实 SQLite 用作测试或迁移对象。真实资料/OCR/模型联调需明确材料、保密和费用授权；自动测试通过不代表真实材料验收。
 
-Pull Request 与目标分支推送会触发 `.github/workflows/ci.yml` 的 `CI / quality` 检查。该工作流在 Windows runner 执行完整 `scripts/test.ps1`，并运行架构边界与差异空白检查。CI 配置存在不代表远端分支保护已启用；只有管理员确认当前 Ruleset/branch protection 且 Required status check 指向实际成功的检查后，才可认为服务端门禁生效。PR 填写要求见 `.github/pull_request_template.md`。
+Pull Request 与目标分支推送会触发 `.github/workflows/ci.yml` 的 `CI / quality` 检查。工作流在 Windows runner 安装锁定依赖，运行架构边界与差异空白检查，并以 `scripts/test.ps1 -Ci` 核对关键路径：后端 Ruff、健康检查、Notebook 正文读写与生命周期、资料上传；Web 导航契约、多 Notebook 未保存离开保护、Notebook 正文编辑和资料上传；以及 Web 生产构建和 Desktop 主进程构建。完整后端与 Web 测试仍由不带 `-Ci` 的 `scripts/test.ps1` 执行，CI 关键路径通过不代表所有功能已验收。CI 配置存在不代表远端分支保护已启用；只有管理员确认当前 Ruleset/branch protection 且 Required status check 指向实际成功的检查后，才可认为服务端门禁生效。PR 填写要求见 `.github/pull_request_template.md`。
 
 ## Git 同步、合并和推送
 

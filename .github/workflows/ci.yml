@@ -76,4 +76,4 @@ jobs:
 
       - name: Run lint, backend and frontend checks, and builds
         shell: pwsh
-        run: ./scripts/test.ps1
+        run: ./scripts/test.ps1 -Ci
