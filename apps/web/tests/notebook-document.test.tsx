@@ -64,7 +64,11 @@ test('shows course ownership, rich document and generated outline', async () => 
   expect(await screen.findByRole('textbox', { name: '笔记名称' })).toHaveProperty('value', '一元微积分')
   expect(screen.getAllByText('数学分析（上）').length).toBeGreaterThan(0)
   await waitFor(() => expect(screen.getByRole('navigation', { name: '笔记目录' }).textContent).toContain('极限与连续'))
-  const editor = document.querySelector('.nb-prosemirror') as HTMLElement
+  const editor = await waitFor(() => {
+    const element = document.querySelector('.nb-prosemirror') as HTMLElement | null
+    expect(element).toBeTruthy()
+    return element!
+  })
   expect(editor.textContent).toContain('原来的正文')
   expect(editor.querySelector('strong')?.textContent).toBe('加粗内容')
   expect(screen.getByRole('button', { name: /课程资料/ }).getAttribute('aria-expanded')).toBe('true')
@@ -124,7 +128,7 @@ test('an edited title is not reported as saved', async () => {
   mount()
   const title = await screen.findByRole('textbox', { name: '笔记名称' })
   fireEvent.change(title, { target: { value: '新的笔记名称' } })
-  expect(screen.getByRole('status').textContent).toContain('名称待保存')
+  expect(document.querySelector('.notebook-document-save-status')?.textContent).toContain('名称待保存')
 })
 
 test('existing sections cannot overwrite a document that already has body text', async () => {

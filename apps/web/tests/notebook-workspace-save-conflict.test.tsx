@@ -86,7 +86,7 @@ test('保存遇到 409 时进入冲突态，弹出冲突面板且不静默覆盖
 
   mount()
   await screen.findByRole('textbox', { name: '笔记名称' })
-  fireEvent.click(screen.getByRole('button', { name: '模拟编辑正文' }))
+  fireEvent.click(await screen.findByRole('button', { name: '模拟编辑正文' }))
   /* 等保存状态真的变成「待保存」再点保存：避免编辑事件与按钮点击挤在同一帧里 */
   await waitFor(() => expect(screen.getByText(/待保存/)).toBeTruthy())
   fireEvent.click(screen.getByRole('button', { name: '立即保存' }))
@@ -103,7 +103,7 @@ test('冲突里选择「保留本地草稿，暂停自动保存」不会继续�
 
   mount()
   await screen.findByRole('textbox', { name: '笔记名称' })
-  fireEvent.click(screen.getByRole('button', { name: '模拟编辑正文' }))
+  fireEvent.click(await screen.findByRole('button', { name: '模拟编辑正文' }))
   /* 等保存状态真的变成「待保存」再点保存：避免编辑事件与按钮点击挤在同一帧里 */
   await waitFor(() => expect(screen.getByText(/待保存/)).toBeTruthy())
   fireEvent.click(screen.getByRole('button', { name: '立即保存' }))
@@ -123,7 +123,7 @@ test('冲突后可查看服务器版本预览，预览内容来自服务端正�
 
   mount()
   await screen.findByRole('textbox', { name: '笔记名称' })
-  fireEvent.click(screen.getByRole('button', { name: '模拟编辑正文' }))
+  fireEvent.click(await screen.findByRole('button', { name: '模拟编辑正文' }))
   /* 等保存状态真的变成「待保存」再点保存：避免编辑事件与按钮点击挤在同一帧里 */
   await waitFor(() => expect(screen.getByText(/待保存/)).toBeTruthy())
   fireEvent.click(screen.getByRole('button', { name: '立即保存' }))

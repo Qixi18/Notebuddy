@@ -63,7 +63,7 @@ try {
     elseif ((Test-Path -LiteralPath $localNode) -and (Test-Path -LiteralPath $localNpm)) { $sourceNodeDir = $localNodeDir }
     else {
         $installedNode = Get-Command node.exe -ErrorAction SilentlyContinue
-        if (-not $installedNode) { throw 'Node.js 22.12+ with npm is missing. Supply -NodeDirectory <Node installation folder>, then rerun scripts/setup.ps1.' }
+        if (-not $installedNode) { throw 'Node.js 22.22.2+ with npm is missing. Supply -NodeDirectory <Node installation folder>, then rerun scripts/setup.ps1.' }
         $sourceNodeDir = Split-Path -Parent $installedNode.Source
     }
     if (-not (Test-Path -LiteralPath (Join-Path $sourceNodeDir 'node.exe')) -or -not (Test-Path -LiteralPath (Join-Path $sourceNodeDir 'node_modules\npm\bin\npm-cli.js'))) {
@@ -80,7 +80,7 @@ try {
     }
     $env:Path = "$localNodeDir;$(Join-Path $runtime 'bin');$env:Path"
     $versionText = @(Invoke-SetupStep 'Checking local Node.js' $localNode @('--version') -Capture)[-1]
-    if ([version] ([string] $versionText).Trim().TrimStart('v') -lt [version] '22.12.0') { throw 'Node.js 22.12 or newer is required.' }
+    if ([version] ([string] $versionText).Trim().TrimStart('v') -lt [version] '22.22.2') { throw 'Node.js 22.22.2 or newer is required.' }
     Invoke-SetupStep 'Checking local uv' $uv @('--version')
     Invoke-SetupStep "Preparing project Python $PythonVersion" $uv @('python', 'install', $PythonVersion, '--no-bin', '--no-registry')
     $found = @(Invoke-SetupStep 'Finding project Python' $uv @('python', 'find', '--no-project', '--managed-python', '--no-python-downloads', $PythonVersion) -Capture)

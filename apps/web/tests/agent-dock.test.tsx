@@ -43,7 +43,7 @@ function liveRun(overrides: Partial<AgentRunState> = {}): AgentRunState {
   return { steps: [], streamingText: '', ...overrides }
 }
 
-function renderShell(overrides: Record<string, unknown> = {}) {
+async function renderShell(overrides: Record<string, unknown> = {}) {
   localStorage.setItem(DOCK_STORAGE.open, 'true')
   const workspace = {
     courseId: 'c1',
@@ -70,6 +70,7 @@ function renderShell(overrides: Record<string, unknown> = {}) {
     { initialEntries: ['/courses/c1/notebook'] },
   )
   render(<RouterProvider router={router} />)
+  await screen.findByRole('complementary', { name: '课程学习助手' }, { timeout: 5000 })
 }
 
 function scopeSelect() {
@@ -77,7 +78,7 @@ function scopeSelect() {
 }
 
 test('旧 Note 路径不再提供锁定入口，也不发送 reading_context.note_id', async () => {
-  renderShell()
+  await renderShell()
   const select = scopeSelect()
   const options = Array.from(select.options).map((option) => option.value)
   expect(options).not.toContain('__note__')
@@ -93,7 +94,7 @@ test('旧 Note 路径不再提供锁定入口，也不发送 reading_context.not
 })
 
 test('全局档不带笔记节选，scope 传 global', async () => {
-  renderShell()
+  await renderShell()
   fireEvent.change(scopeSelect(), { target: { value: '__global__' } })
   fireEvent.change(screen.getByLabelText(/快速提问/), { target: { value: '别的课程里有相关内容吗' } })
   fireEvent.click(screen.getByRole('button', { name: '发送' }))
@@ -104,7 +105,7 @@ test('全局档不带笔记节选，scope 传 global', async () => {
   expect(options.readingContext?.excerpt).toBeUndefined()
 })
 
-test('agent 执行中显示步骤时间线与流式文本', () => {
+test('agent 执行中显示步骤时间线与流式文本', async () => {
   const agentRun = liveRun({
     steps: [
       { type: 'step', tool: 'search_course', detail: '检索「行列式」', status: 'running' },
@@ -112,7 +113,7 @@ test('agent 执行中显示步骤时间线与流式文本', () => {
     ],
     streamingText: '行列式是线性代数的基本工具',
   })
-  renderShell({ conversation: {
+  await renderShell({ conversation: {
     messages: [], busy: true, error: undefined, agentRun,
     ask: async () => true, askAgent, startNewConversation: async () => {},
   } })
@@ -130,7 +131,7 @@ test('agent 完成后展示知识提议卡', async () => {
       sources: [], suggestions: [{ type: 'knowledge_proposal', id: 'p1', name: '克拉默法则' }],
     },
   })
-  renderShell({ conversation: {
+  await renderShell({ conversation: {
     messages: [], busy: false, error: undefined, agentRun,
     ask: async () => true, askAgent, startNewConversation: async () => {},
   } })
@@ -138,8 +139,8 @@ test('agent 完成后展示知识提议卡', async () => {
   expect(await screen.findByText(/提议新增知识点「克拉默法则」/)).toBeTruthy()
 })
 
-test('AI Dock 隐藏旧 Note 修改建议和回写入口', () => {
-  renderShell({ conversation: {
+test('AI Dock 隐藏旧 Note 修改建议和回写入口', async () => {
+  await renderShell({ conversation: {
     messages: [], busy: false, error: undefined, agentRun: null,
     ask: async () => true, askAgent, startNewConversation: async () => {},
   } })
@@ -149,8 +150,8 @@ test('AI Dock 隐藏旧 Note 修改建议和回写入口', () => {
   expect(api.listSuggestions).not.toHaveBeenCalled()
 })
 
-test('agent 回答中的 GFM 表格按表格渲染而不是管道文本', () => {
-  renderShell({ conversation: {
+test('agent 回答中的 GFM 表格按表格渲染而不是管道文本', async () => {
+  await renderShell({ conversation: {
     messages: [
       {
         id: 'a9', conversation_id: 'v1', role: 'assistant',
@@ -166,8 +167,8 @@ test('agent 回答中的 GFM 表格按表格渲染而不是管道文本', () => 
   expect(document.querySelectorAll('.assistant-dock-answer td').length).toBe(4)
 })
 
-test('普通页面不再提示进入旧 Note 编辑流程，也没有锁定 Note 范围', () => {
-  renderShell({ selectedNote: undefined })
+test('普通页面不再提示进入旧 Note 编辑流程，也没有锁定 Note 范围', async () => {
+  await renderShell({ selectedNote: undefined })
 
   expect(screen.queryByText(/点开一个具体小节/)).toBeNull()
   const select = screen.getByRole('combobox', { name: '本次提问的作用范围' }) as HTMLSelectElement

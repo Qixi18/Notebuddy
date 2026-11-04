@@ -6,7 +6,7 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 当前正式可编辑 Notebook 正文以 `Notebook.document_json` 为唯一权威源，并通过 revision/CAS 保存。原始资料解析结果、目录、检索块和森林视图属于来源或派生数据，不是第二套正文。架构决策入口见 [ADR 索引](docs/architecture-decisions/README.md)；基线记录 ADR-0001 当前为 Proposed，尚未获协作者审核。任何全局架构变更必须按根目录 [AGENTS.md](AGENTS.md) 公示并同步契约、测试和跨 Agent 影响。
 
-**当前架构公告**：`feat/overall-inspection` 是本轮工程治理和架构规范化分支；`feat/debug-integration` 是日常共享集成基线；`main` 是稳定版本分支。正文、来源解析和派生索引的权威边界见上文及 [架构说明](docs/architecture.md)。整改路线见 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md)；Notebook/Material 路由职责下沉见 [ADR-0003](docs/architecture-decisions/ADR-0003-service-layer-final-extraction.md)。其余复杂会话、Forest、Knowledge、Courses 用例及完整验收见 [ADR-0004](docs/architecture-decisions/ADR-0004-remaining-business-use-cases.md)，实现与自动回归已记录，ADR 仍为 Proposed，等待技术审查。当前主要目录职责见 [模块职责地图](docs/module-map.md)。
+**当前架构公告**：正文、来源解析和派生索引的权威边界见上文及 [架构说明](docs/architecture.md)。两个固定分支及功能分支的 PR 流程见 [协作指南](CONTRIBUTING.md)。整改路线见 [ADR-0002](docs/architecture-decisions/ADR-0002-verified-notebook-assistant-and-file-budget.md)；Notebook/Material 路由职责下沉见 [ADR-0003](docs/architecture-decisions/ADR-0003-service-layer-final-extraction.md)。其余复杂会话、Forest、Knowledge、Courses 用例及历史自动回归记录见 [ADR-0004](docs/architecture-decisions/ADR-0004-remaining-business-use-cases.md)；ADR 仍为 Proposed，等待技术审查。当前主要目录职责见 [模块职责地图](docs/module-map.md)。
 
 ## 当前能力与边界
 
@@ -31,7 +31,7 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 ## 本地启动
 
-Windows 下在仓库根目录执行以下两步。首次准备需要本机已有 `uv`、Node.js 22.12+（含 npm），或已经放好项目内的 `.runtime/bin/uv.exe` 和 `.runtime/node`。Python 会安装在项目内，不要求预先安装到系统。
+Windows 下在仓库根目录执行以下两步。首次准备需要本机已有 `uv`、Node.js 22.22.2+（含 npm；锁定的 Web 测试依赖最低要求），或已经放好项目内的 `.runtime/bin/uv.exe` 和 `.runtime/node`。Python 会安装在项目内，不要求预先安装到系统。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\setup.ps1

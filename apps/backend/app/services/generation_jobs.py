@@ -244,5 +244,3 @@ def cancel_generation_job(db: Session, notebook_id: str, job_id: str) -> dict:
     db.commit()
     db.refresh(job)
     return _job_read(db, job)
-
-

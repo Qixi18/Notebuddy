@@ -1,29 +1,22 @@
 # 当前开发状态
 
-## 基线
+记录日期：2026-11-04。以下“已实现”仅表示仓库有对应代码；本地自动回归、最新 GitHub Actions 失败和修订证据见 [验收快照](../acceptance.md)。CI 的 UTC 时区断言已修复，本地 UTC Web 测试通过；远端复测结果须单独核实。固定分支与 PR 流程见 [协作指南](../../CONTRIBUTING.md)。
 
-- 记录日期：2026-11-03
-- 当前治理分支：`feat/overall-inspection`
-- 本次阶段三、四开发起始基线：`740c6f3`（开始时 HEAD；以当前 Git 状态为准）
-- 日常共享集成基线：`feat/debug-integration`
-- 产品稳定分支：`main`
-- 全局 Notebook 架构提案 ADR-0001/ADR-0002：仍为 Proposed，须按 ADR 记录完成协作者审查后才能调整状态。
+| 模块 | 已实现的主要能力 | 验证与待验收 |
+| --- | --- | --- |
+| 前端应用架构 | React/Vite 路由、Workspace、Notebook 页面、助手坞与森林页面 | 本地导航 52/52、Vitest 426/426、Web TypeScript/Vite 构建通过；真实浏览器流程待验 |
+| 课程与 Notebook | 课程生命周期、多 Notebook、软删除和资源范围检查 | 本地全量后端 577 通过/4 跳过；实际用户流程待验 |
+| Notebook 正文编辑 | `document_json`、revision/CAS、历史恢复、章节投影和脏编辑导航保护 | 后端历史测试覆盖保存；并发、恢复及未知节点的浏览器验收待补 |
+| Document Processing / DocumentIR | Asset、持久任务、ParseRun、DocumentIR、质量告警及 OCR 路线 | 历史合成/自动测试有覆盖；真实 PDF/图片、扫描件、公式和表格质量待验 |
+| AI 讲解笔记生成 | 持久生成任务、来源映射、结构与质量门禁、受控正文合并 | 历史 Fake Provider 测试有覆盖；真实模型质量、失败回滚及并发压力待验 |
+| AI 答疑 | 会话持久化、范围化证据、Notebook 专属核验及 Agent 工具 | 历史自动测试有覆盖；真实模型、多 Notebook 连续问答与引用强度待验 |
+| 知识森林与检索 | 课程/Notebook/目录关系投影、搜索及培养方案导入 | 历史自动测试有覆盖；真实资料定位、规模和性能待验 |
+| 数据库与持久化 | SQLite/Alembic、备份与恢复入口、版本及任务状态 | 隔离库测试记录需按基线读取；旧库升级与真实备份恢复待验 |
+| 工程协作与 CI | Agent/协作规范、PR 模板、Windows CI 与静态边界检查 | 两个固定分支的触发配置已推送；Run 41789300953 因 Web 时间测试的 UTC 断言失败。本地修订后 Node 22.23.4、UTC 下 Web 测试两次通过；远端尚未复测，required check 未配置 |
 
-## 已落地的工程治理能力
+## 当前已知风险与下一步
 
-- 根目录 Agent 规则与人员协作规则已分离为 `AGENTS.md` 和 `CONTRIBUTING.md`；协作指南规定分支职责、任务角色和 L1/L2/L3 审查级别。
-- `docs/module-map.md` 描述当前主要目录职责、依赖方向及正文/来源/派生数据边界。
-- `.github/workflows/ci.yml` 定义 Windows CI：锁定环境安装、架构边界检查，以及 `scripts/test.ps1` 中的 Ruff、Pytest、Web 测试/生产构建、Desktop 主进程构建。
-- `scripts/check_architecture_boundaries.py` 静态检查 API 直写正文、正文唯一底层写入入口、改动 Service 对 FastAPI 的依赖、兼容聚合路由注册和改动页面直接 `fetch`。
-- `.github/pull_request_template.md` 收集任务角色、等级、影响、验证证据和合并前检查项。
-- 本目录建立了状态、路线图、日志规则和任务模板；本次治理工作记录在 `logs/2026/DEV-001-engineering-governance.md`。
-- 后续垂直分层增量：Notebook 正文/排序/阅读位置、关系、建议服务已统一使用 `ApplicationError`；关系列表和建议列表由 Service 负责查询/装配；资料 DocumentIR 查询、coverage/evidence、渲染路径解析及解析结果组装位于 `services/document_reads.py`，HTTP 文件响应保留在 Route。PDF 按需渲染会写入派生页面缓存并提交。Quiz Service 仍有 FastAPI 耦合，本轮没有修改。
-
-## 尚未证实或尚未完成
-
-- CI 尚未在 GitHub Actions 实际运行；在首次成功运行前，不将其记录为已通过的状态检查。
-- GitHub `main` 与 `feat/debug-integration` 的 Ruleset/branch protection、required check 名称、审查要求、禁止强推/删除等设置尚未通过管理员界面核实或配置。本地仓库文件不会自动启用远端保护。
-- 当前架构检查是静态规则的第一版，不能证明任意业务模块都满足完整分层；规则需随实际反例逐步扩展。
-- 本次没有把所有 API 路由迁移到 Service，也没有隔离 SQLAlchemy Session/事务；剩余领域需按垂直用例逐步收敛。
-- 本次没有执行产品测试套件、启动服务、运行真实资料或调用付费模型；当前分层增量尚无回归通过证据。
-- 完整业务回归、浏览器人工验收及真实 PDF/图片/模型质量证据，仍按 `docs/acceptance.md` 和 ADR-0002 对应记录跟踪。
+1. 在 GitHub Actions 核实本轮 UTC 时区断言与懒加载等待修订的完整检查结果；本地 Web 通过不能代替远端 CI 通过。另需对 Notebook 离开保护与 409 冲突进行真实浏览器复核。
+2. 验证正文并发保存、PDF/图片解析和 Generation Worker 幂等/并发；真实资料与模型验收须单独登记，不用合成测试代替。
+3. 更新 CI 触发分支与远端保护策略需单独审查和配置；仓库文档不证明 GitHub Ruleset 已生效。
+4. ADR-0001 至 ADR-0004 保持现有 Proposed 状态，实施记录和技术批准须分开判断。

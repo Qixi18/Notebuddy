@@ -164,4 +164,3 @@ def test_provider_timeout_marks_uncertain_and_prevents_retry_dispatch(ledger, mo
     assert len(calls) == 1
     assert state['status'] == 'uncertain'
     assert state['reserved_fen'] > 0
-

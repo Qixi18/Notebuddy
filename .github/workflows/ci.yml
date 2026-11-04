@@ -4,13 +4,11 @@ on:
   pull_request:
     branches:
       - main
-      - feat/debug-integration
-      - feat/overall-inspection
+      - fix/overall-debug-integration
   push:
     branches:
       - main
-      - feat/debug-integration
-      - feat/overall-inspection
+      - fix/overall-debug-integration
   workflow_dispatch:
 
 permissions:
@@ -39,7 +37,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7.1.0
         with:
-          node-version: "22.12.x"
+          node-version: "22.23.4"
           cache: npm
           cache-dependency-path: |
             apps/web/package-lock.json
@@ -78,4 +76,4 @@ jobs:
 
       - name: Run lint, backend and frontend checks, and builds
         shell: pwsh
-        run: ./scripts/test.ps1
+        run: ./scripts/test.ps1 -Ci

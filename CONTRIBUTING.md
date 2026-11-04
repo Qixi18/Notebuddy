@@ -4,9 +4,11 @@
 
 ## 分支职责
 
-- `main`：稳定版本，仅通过审查后的 PR 更新。
-- `feat/debug-integration`：日常共享集成基线。
-- `feat/*`：独立业务功能或缺陷修复分支，按团队约定向共享集成分支提 PR。
+- `main`：长期固定的稳定基线，仅接收共享集成分支完成联调、Debug 和回归验收后的 PR；禁止直接或强制推送。
+- `fix/overall-debug-integration`：长期固定的共享集成分支，接收三位开发者的临时功能/修复分支 PR，负责跨模块集成、冲突处理、接口联调、整体 Debug 与回归测试。它不是 `main` 的替代品；禁止强制推送。
+- `feat/*`、具体任务的 `fix/*`：临时工作分支。完成后先向 `fix/overall-debug-integration` 提 PR，不直接向 `main` 提 PR。
+
+统一流程：三位开发者分别在自己的临时分支完成垂直业务切片（页面/Feature/API Client、Router/Service/Domain、测试与文档），经 PR 进入共享集成分支；统一集成验收后，再由共享集成分支向 `main` 提 PR。功能测试通过不等于整体集成验收通过。旧 `feat/debug-integration` 曾用于历史工作，现不承担固定分支职责。
 
 分支用途是协作约定，仓库文档不代表 GitHub 已配置相应保护。服务端保护及必需检查须以管理员当前设置为准。
 
@@ -25,7 +27,7 @@
 
 ## 三人并行任务拆分
 
-多人同时开发时，先由协调人把需求拆成可独立验收的垂直切片，并建立一张共享任务表（Issue、项目看板或任务说明均可）。每条至少记录：负责人、目标分支/worktree、允许修改的目录或文件、依赖接口、验收条件、验证责任人和状态。不能只按“前端/后端/测试”分工；每个切片要有清楚的接口与完成定义。涉及高冲突入口时，按 [模块地图中的高频修改约束](docs/module-map.md#高频修改文件与协作约束)指定主编辑者和集成顺序。
+多人同时开发时，先由协调人把需求拆成可独立验收的垂直切片，并建立一张共享任务表（Issue、项目看板或任务说明均可）。每条至少记录：业务目标、负责人、目标分支/worktree、允许及禁止修改的目录或文件、依赖模块、API 输入/输出与错误契约、数据结构、验收条件、验证责任人和状态。不能只按“前端/后端/测试”分工；每个切片要有清楚的接口与完成定义。涉及高冲突入口时，按 [模块地图中的高频修改约束](docs/module-map.md#高频修改文件与协作约束)指定主编辑者和集成顺序。
 
 - 优先按业务域切片（如 Notebook 文档、资料处理、森林关系），避免多人同时改同一批路由、公共 schema、导航入口或全局样式。
 - 有共享接口依赖时，协调人先确定请求/响应 schema、错误语义、文件归属和 stub/模拟方式，再并行实现；接口变化需在任务表同步并通知受影响的开发者。
@@ -70,7 +72,7 @@
 
 ## 本地运行与测试
 
-Windows 官方准备/运行入口是 PowerShell 7（`pwsh`）和仓库脚本；环境要求 Node.js ≥22.12、uv、Python ≥3.12。`setup.ps1` 管理项目内 `.runtime` 与 `apps/backend/.venv-document`，按锁定文件安装。不要用裸 `uv run` 意外创建另一套 `.venv`；需单项运行时显式指向项目环境。
+Windows 官方准备/运行入口是 PowerShell 7（`pwsh`）和仓库脚本；环境要求 Node.js ≥22.22.2、uv、Python ≥3.12。`setup.ps1` 管理项目内 `.runtime` 与 `apps/backend/.venv-document`，按锁定文件安装。不要用裸 `uv run` 意外创建另一套 `.venv`；需单项运行时显式指向项目环境。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\setup.ps1
@@ -84,7 +86,7 @@ README 是官方一键准备/启动说明。浏览器访问 `http://localhost:51
 
 完整脚本负责 Ruff、pytest、Web 测试/构建与 Desktop 主进程构建；实际步骤以 `scripts/test.ps1` 为准。使用独立 `NOTEBOOK_DATA_DIR`/测试临时目录，禁止将用户真实 SQLite 用作测试或迁移对象。真实资料/OCR/模型联调需明确材料、保密和费用授权；自动测试通过不代表真实材料验收。
 
-Pull Request 与目标分支推送会触发 `.github/workflows/ci.yml` 的 `CI / quality` 检查。该工作流在 Windows runner 执行完整 `scripts/test.ps1`，并运行架构边界与差异空白检查。CI 配置存在不代表远端分支保护已启用；只有管理员确认当前 Ruleset/branch protection 且 Required status check 指向实际成功的检查后，才可认为服务端门禁生效。PR 填写要求见 `.github/pull_request_template.md`。
+Pull Request 与目标分支推送会触发 `.github/workflows/ci.yml` 的 `CI / quality` 检查。工作流在 Windows runner 安装锁定依赖，运行架构边界与差异空白检查，并以 `scripts/test.ps1 -Ci` 核对关键路径：后端 Ruff、健康检查、Notebook 正文读写与生命周期、资料上传；Web 导航契约、多 Notebook 未保存离开保护、Notebook 正文编辑和资料上传；以及 Web 生产构建和 Desktop 主进程构建。完整后端与 Web 测试仍由不带 `-Ci` 的 `scripts/test.ps1` 执行，CI 关键路径通过不代表所有功能已验收。CI 配置存在不代表远端分支保护已启用；只有管理员确认当前 Ruleset/branch protection 且 Required status check 指向实际成功的检查后，才可认为服务端门禁生效。PR 填写要求见 `.github/pull_request_template.md`。
 
 ## Git 同步、合并和推送
 
@@ -98,7 +100,7 @@ git fetch origin --prune
 git rev-list --left-right --count HEAD...origin/<目标分支>
 ```
 
-该计数依次是本地独有、远端独有提交。将 `<目标分支>` 替换为任务实际目标（例如日常共享基线 `feat/debug-integration`）。Fetch 失败即停止；工作区有他人修改时保留并先判断，不自动 stash/reset。`main` 不是日常功能开发目标分支。
+该计数依次是本地独有、远端独有提交。将 `<目标分支>` 替换为任务实际目标（通常为 `fix/overall-debug-integration`）。Fetch 失败即停止；工作区有他人修改时保留并先判断，不自动 stash/reset。`main` 不是日常功能开发目标分支。
 
 ### 处理分歧
 

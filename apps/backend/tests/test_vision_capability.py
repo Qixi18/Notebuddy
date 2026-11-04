@@ -144,4 +144,3 @@ def test_vision_client_uses_the_same_captured_credentials_that_passed_preflight(
 
     assert client.settings.deepseek_api_key == "credential-key-original"
     assert vision.config_fingerprint(vision._settings()) != fingerprint
-

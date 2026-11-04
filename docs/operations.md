@@ -40,7 +40,7 @@ pwsh -NoProfile -File .\scripts\restore.ps1 -Package -Checkpoint <包路径> -De
 
 ## GitHub 分支保护（需仓库管理员执行）
 
-本地文档与 `.githooks/pre-commit` 不构成服务端保护。仓库现有 `.github/workflows/ci.yml`，其 job check 名称配置为 `CI / quality`；需先等待 GitHub Actions 实际运行成功，并确认 GitHub 显示的状态检查名称，再由管理员对 `main` 和 `feat/debug-integration` 配置 Ruleset/branch protection。建议要求 PR review 和该 CI 检查、禁止 force push 与分支删除，并按团队决定限制直接 push；应检查可绕过保护的主体并尽量收窄。当前未核实或更改远端设置，也未确认该检查已在 GitHub 成功。提交签名、线性历史是可选项；启用线性历史前需调整本手册普通 merge 冲突整合协议，避免策略相互矛盾。
+本地文档与 `.githooks/pre-commit` 不构成服务端保护。仓库现有 `.github/workflows/ci.yml`，其 job check 名称配置为 `CI / quality`；需先等待 GitHub Actions 实际运行成功，并确认 GitHub 显示的状态检查名称，再由管理员对 `main` 和 `fix/overall-debug-integration` 配置 Ruleset/branch protection。建议要求 PR review 和该 CI 检查、禁止 force push 与分支删除，并按团队决定限制直接 push；应检查可绕过保护的主体并尽量收窄。当前未核实或更改远端设置，也未确认该检查已在 GitHub 成功。提交签名、线性历史是可选项；启用线性历史前需调整本手册普通 merge 冲突整合协议，避免策略相互矛盾。
 
 如需在服务完全停止后切换当前 `data/`，使用显式替换命令：
 

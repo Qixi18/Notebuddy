@@ -207,4 +207,3 @@ Materials 路由已按 assets、documents、materials、processing、uploads 拆
 在前述 Notebook、Material、Agent 和 Generation 用例下沉基础上，继续完成会话、Forest、Knowledge 和 Courses 的复杂用例分层，细节见 [ADR-0004](ADR-0004-remaining-business-use-cases.md)。会话消息发送的幂等检查、范围校验、用户消息持久化及答疑流程由 `assistant_execution` 协调用例；Forest 导入/任务与只读投影、Knowledge 派生查询/提案审核、课程概览和生命周期事务分别由垂直 Service 承接。课程简单列表仍由 Router 直接读取。新增架构测试约束复杂边界与该简单读取例外。
 
 核心数据/兼容审计确认正式正文运行时写入仍经 `notes/store.py::write_document`；旧 Note 模型/迁移保留，旧前端 `api/notes.ts` 与 `useNoteEditor` 没有运行时调用方，后端也未注册旧 Note API Router。旧 `app.parsers` 仍服务 Forest 培养方案导入和 Office DocumentIR 兼容适配器，因此本轮未删除。精确回归结果与 Web 已有失败见 [当前验收快照](../acceptance.md)。自动化后端、边界、构建结果通过不等于真实资料、供应商、浏览器或迁移恢复人工验收；ADR 继续保持 Proposed，等待审查。
-

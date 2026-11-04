@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch] $RealOcr, [switch] $Check)
+param([switch] $RealOcr, [switch] $Check, [switch] $Ci)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -38,14 +38,20 @@ try {
     if (-not (Test-Path -LiteralPath $npmCli)) { throw 'npm is missing from the selected Node installation. Run scripts/setup.ps1 first.' }
     $env:Path = "$nodeDir;$env:Path"
     $nodeVersion = & $node --version
-    if ($LASTEXITCODE -ne 0 -or [version] ([string] $nodeVersion).Trim().TrimStart('v') -lt [version] '22.12.0') { throw 'Node.js 22.12 or newer is required. Run scripts/setup.ps1 with a supported Node installation.' }
+    if ($LASTEXITCODE -ne 0 -or [version] ([string] $nodeVersion).Trim().TrimStart('v') -lt [version] '22.22.2') { throw 'Node.js 22.22.2 or newer is required. Run scripts/setup.ps1 with a supported Node installation.' }
     Write-Host "Using backend Python: $python"
     Write-Host "Using Node.js: $node"
     Invoke-CheckStep 'Checking backend test dependencies' $python @('-c', 'import pytest, ruff') $backend
     if ($Check) { Write-Host 'Test dependencies are ready; no tests or builds were started.'; exit 0 }
     Invoke-CheckStep 'Backend lint' $python @('-m', 'ruff', 'check', 'app', 'tests') $backend
-    Invoke-CheckStep 'Backend tests' $python @('-m', 'pytest') $backend
-    Invoke-CheckStep 'Web behavior tests' $node @($npmCli, 'test') (Join-Path $repo 'apps\web')
+    if ($Ci) {
+        Invoke-CheckStep 'Backend critical-path tests' $python @('-m', 'pytest', 'tests/test_health.py', 'tests/test_notebook_document_v2.py', 'tests/test_notebook_lifecycle.py', 'tests/test_asset_upload_service.py') $backend
+        Invoke-CheckStep 'Web navigation contracts' $node @($npmCli, 'run', 'test:navigation') (Join-Path $repo 'apps\web')
+        Invoke-CheckStep 'Web critical-path tests' $node @($npmCli, 'exec', 'vitest', 'run', 'tests/multi-book-dirty-navigation.test.tsx', 'tests/notebook-document.test.tsx', 'tests/processing-route-upload.test.tsx') (Join-Path $repo 'apps\web')
+    } else {
+        Invoke-CheckStep 'Backend tests' $python @('-m', 'pytest') $backend
+        Invoke-CheckStep 'Web behavior tests' $node @($npmCli, 'test') (Join-Path $repo 'apps\web')
+    }
     Invoke-CheckStep 'Web production build' $node @($npmCli, 'run', 'build') (Join-Path $repo 'apps\web')
     Invoke-CheckStep 'Desktop main-process build' $node @($npmCli, 'run', 'build:main') (Join-Path $repo 'apps\desktop')
     Write-Host "Checks completed. Log: $log"
