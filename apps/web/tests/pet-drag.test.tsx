@@ -178,3 +178,47 @@ test('拖回左栏范围松手：自动召回', () => {
   expect(document.body.querySelector('.workspace-petfloat')).toBeNull()
   expect(localStorage.getItem(PET_STORAGE_KEY)).toContain('"mode":"rail"')
 })
+
+test('拖动时切换被拎起 → 悬空 → 落地三段动画，落地播完回待机', () => {
+  vi.useFakeTimers()
+  try {
+    const { container } = renderPage()
+    const stage = container.querySelector('.workspace-petstage-drag') as HTMLElement
+    stage.getBoundingClientRect = () => ({ left: 260, top: 120, right: 460, bottom: 332, x: 260, y: 120, width: 200, height: 212, toJSON: () => ({}) }) as DOMRect
+    const rail = container.querySelector('.workspace-rail') as HTMLElement
+    rail.getBoundingClientRect = () => ({ left: 244, top: 0, right: 500, bottom: 800, x: 244, y: 0, width: 256, height: 800, toJSON: () => ({}) }) as DOMRect
+
+    const petSrc = () => (
+      document.body.querySelector('.workspace-petfloat .teacher-character-image')
+      ?? container.querySelector('.teacher-character-image')
+    )?.getAttribute('src') ?? ''
+
+    expect(petSrc()).toContain('idle.webp')
+
+    // 按下并拖出左栏：从第 1 帧被拎起
+    fireEvent.pointerDown(stage, { button: 0, pointerId: 1, clientX: 300, clientY: 200 })
+    move(360, 180)
+    expect(petSrc()).toContain('drag-intro.webp')
+
+    // 上升段 0.92s 播完，接悬空往复
+    act(() => { vi.advanceTimersByTime(950) })
+    expect(petSrc()).toContain('drag-loop.webp')
+
+    // 按住不放：一直停在悬空段
+    act(() => { vi.advanceTimersByTime(8000) })
+    expect(petSrc()).toContain('drag-loop.webp')
+
+    // 在左栏范围外松手：播落地收尾
+    move(700, 300)
+    up(700, 300)
+    expect(petSrc()).toContain('drop.webp')
+
+    // 落地 3.08s，播完才回待机
+    act(() => { vi.advanceTimersByTime(2000) })
+    expect(petSrc()).toContain('drop.webp')
+    act(() => { vi.advanceTimersByTime(1200) })
+    expect(petSrc()).toContain('idle.webp')
+  } finally {
+    vi.useRealTimers()
+  }
+})

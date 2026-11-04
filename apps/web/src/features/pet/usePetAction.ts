@@ -13,6 +13,8 @@ import { PET_ACTION_FALLBACK_SECONDS, PET_HOVER_GREET_DELAY, petActionSrc, type 
  *   输出结束 / thinking 结束      → 把当前这一轮讲解播完再回待机
  *   失败                         → 出错播一次，回待机
  *   悬停 ≥3s 且当前在待机         → 行礼播一次，回待机
+ *   拖动桌宠                     → drag-intro 播一次，按住不放接 drag-loop 往复；
+ *                                 松手播 drop 落地收尾，按当时的会话状态回位
  *
  * 一次性动作不靠 webp 自己循环，而是按 manifest 里的时长定时切回待机；
  * 状态本身是「粘滞」的（问过一次就一直是 explaining），所以只认状态跃迁。
@@ -51,6 +53,8 @@ export function usePetAction(
   streaming = false,
   /** 彩蛋命令：插播一次指定动作（每会话各彩蛋只来一次，nonce 递增） */
   command: PetEggCommand | null = null,
+  /** 是否正在拖动桌宠：按下即被拎起，松手播落地收尾 */
+  dragging = false,
 ): { action: PetActionId; src: string } {
   const durations = useActionDurations()
   const [action, setAction] = useState<PetActionId>('idle')
@@ -60,6 +64,10 @@ export function usePetAction(
   const prevStatusRef = useRef<TeacherStatus | null>(null)
   const streamingRef = useRef(streaming)
   streamingRef.current = streaming
+  const draggingRef = useRef(dragging)
+  draggingRef.current = dragging
+  const statusRef = useRef(status)
+  statusRef.current = status
   /** 当前讲解这一轮从哪一刻起算、总长多少：结束时至少把这一轮播完 */
   const cycleStartRef = useRef(0)
   const cycleMsRef = useRef(0)
@@ -120,9 +128,35 @@ export function usePetAction(
     timerRef.current = window.setTimeout(() => apply('idle'), Math.max(0, remain))
   }, [apply, clearTimer, secondsOf])
 
+  /** 被拎起：先把上升段播完，再切到悬空往复（按住多久都停在这一段） */
+  const playDrag = useCallback(() => {
+    clearTimer()
+    apply('drag-intro')
+    timerRef.current = window.setTimeout(() => {
+      if (actionRef.current === 'drag-intro') apply('drag-loop')
+    }, secondsOf('drag-intro'))
+  }, [apply, clearTimer, secondsOf])
+
+  /** 松手：播落地收尾；落地时若还在思考/输出，接回对应动作而不是干站着 */
+  const finishDrag = useCallback(() => {
+    clearTimer()
+    apply('drop')
+    timerRef.current = window.setTimeout(() => {
+      if (actionRef.current !== 'drop') return
+      if (statusRef.current === 'thinking') {
+        if (streamingRef.current) startExplaining()
+        else playThinking()
+        return
+      }
+      apply('idle')
+    }, secondsOf('drop'))
+  }, [apply, clearTimer, playThinking, secondsOf, startExplaining])
+
   useEffect(() => {
     const prev = prevStatusRef.current
     prevStatusRef.current = status
+    /* 拖动期间动作由拖拽独占：状态跃迁先记账，松手落地后由 finishDrag 结算 */
+    if (draggingRef.current) return
 
     if (status === 'thinking') {
       if (prev !== 'thinking') playThinking()
@@ -144,6 +178,15 @@ export function usePetAction(
     /* 没经过思考就直接失败（重试按钮、历史里最后一条是失败等） */
     if (status === 'error' && prev !== 'error') playOnce('error')
   }, [status, playThinking, playOnce, finishExplaining])
+
+  /* 拖动：按下即从第 1 帧拎起，按住不放切悬空往复；松手播落地收尾 */
+  useEffect(() => {
+    if (dragging) {
+      playDrag()
+      return
+    }
+    if (actionRef.current === 'drag-intro' || actionRef.current === 'drag-loop') finishDrag()
+  }, [dragging, playDrag, finishDrag])
 
   /* 吐字即讲解：只从「思考动作」切过去，不打断出错/行礼 */
   useEffect(() => {
