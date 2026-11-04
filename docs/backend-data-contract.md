@@ -1,6 +1,6 @@
 # 后端调用与业务数据契约
 
-**适用范围与时效：**本文包含 2026-10-30 的 `feat/debug-integration` 历史快照、后续 `feat/overall-inspection` 整改记录和仍为 Proposed 的目标，不能整体视为单一时间点的当前契约。历史段落保留其来源背景；当前字段、路由、服务行为和错误以当前分支 `apps/backend/app/schemas/`、`api/v1/`、`services/` 及数据模型源码为准。`feat/overall-inspection` 是治理整改分支，`feat/debug-integration` 是共享集成基线。云端多用户安全不在当前本地实现保证范围内。涉及架构目标的状态见 [ADR 索引](architecture-decisions/README.md)。
+**适用范围与时效：**本文包含 2026-10-30 的 `feat/debug-integration` 历史快照、后续 `feat/overall-inspection` 整改记录和仍为 Proposed 的目标，不能整体视为单一时间点的当前契约。历史段落保留其来源背景；当前字段、路由、服务行为和错误以当前分支 `apps/backend/app/schemas/`、`api/v1/`、`services/` 及数据模型源码为准。旧分支名称只表示历史记录；当前固定分支职责见协作指南。云端多用户安全不在当前本地实现保证范围内。涉及架构目标的状态见 [ADR 索引](architecture-decisions/README.md)。
 
 **阅读顺序：**“Notebook 答疑整改提案”记录目标和按批次实施情况；“B1 视觉模型”和“双路线处理补充”是带日期的历史实施快照；从“权威数据流”起描述正文与来源的稳定边界，并汇总实现核对及其他业务契约。快照中的测试结论仅适用于其标注的基线和日期，不能证明当前分支全量回归已通过。凡出现 Proposed 的内容都是待审目标，不是已生效的实现要求。
 
@@ -40,7 +40,7 @@ Notebook→DocumentIR→WebSearch→核验后 SSE 的实现进度见后续 A2 �
 
 `notebook_generation_jobs.relation_job_id` 跟踪正文提交后的独立藤蔓任务。用户删除联系时在 `notebook_relation_suppressions` 保留端点决定，自动分析不得恢复该条联系；人工联系也不会被自动关系覆盖。迁移为 `a5e3c8d1f209_dual_processing_routes`，使用 Alembic 升级，不删除现有业务数据。
 
-以上路线补充来自解析分支，仅作历史背景；本文其余稳定数据边界应以当前 `feat/overall-inspection` 源码和本文件后续契约核对为准。
+以上路线补充来自解析分支，仅作历史背景；本文其余稳定数据边界应以当前仓库源码和本文件后续契约核对为准。
 
 ## 当前稳定边界：权威数据流
 

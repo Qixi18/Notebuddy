@@ -1,6 +1,6 @@
 # 当前架构说明
 
-本页描述 `feat/overall-inspection` 当前实现；分支职责见 [协作指南](../CONTRIBUTING.md)，Agent 简明规则见根目录 [AGENTS.md](../AGENTS.md)，模块职责见 [module-map.md](module-map.md)，详细数据契约见 [backend-data-contract.md](backend-data-contract.md)。历史设计只作为历史证据，不可覆盖当前代码事实。Notebook 与 Material 的复杂读取和写入、会话持久化与答疑编排、Forest 导入/读取、Knowledge 投影/审核、复杂课程聚合与生命周期均由应用服务承接；课程等简单列表允许路由直接查询。Service 使用 SQLAlchemy Session，不引入 Repository。Notebook/Material 的初始分层记录在 [ADR-0003](architecture-decisions/ADR-0003-service-layer-final-extraction.md)，其余复杂用例及验收范围记录在 [ADR-0004](architecture-decisions/ADR-0004-remaining-business-use-cases.md)；两份 ADR 仍为 Proposed，等待技术审查。
+本页描述当前仓库源码中的实现；分支职责见 [协作指南](../CONTRIBUTING.md)，Agent 简明规则见根目录 [AGENTS.md](../AGENTS.md)，模块职责见 [module-map.md](module-map.md)，详细数据契约见 [backend-data-contract.md](backend-data-contract.md)。历史设计只作为历史证据，不可覆盖当前代码事实。Notebook 与 Material 的复杂读取和写入、会话持久化与答疑编排、Forest 导入/读取、Knowledge 投影/审核、复杂课程聚合与生命周期均由应用服务承接；课程等简单列表允许路由直接查询。Service 使用 SQLAlchemy Session，不引入 Repository。Notebook/Material 的初始分层记录在 [ADR-0003](architecture-decisions/ADR-0003-service-layer-final-extraction.md)，其余复杂用例及验收范围记录在 [ADR-0004](architecture-decisions/ADR-0004-remaining-business-use-cases.md)；两份 ADR 仍为 Proposed，等待技术审查。
 
 ## 正文与来源
 
@@ -16,6 +16,15 @@ Notebook / Asset
 Notebook 正文由 `apps/backend/app/notes/store.py` 的统一写入逻辑保存，并维护 revision、历史快照与章节索引。面向 API 的正文保存、历史恢复、图片资源归属检查和事务边界集中在 `apps/backend/app/services/notebook_document.py`；路由负责 Notebook 身份解析及响应适配，正文修改仍必须经 `write_document`。`apps/backend/app/notes/index.py` 中的 `NotebookSection` 是可重建目录/文本投影，不是第二正文源。`DocumentIR` 与 ParseRun 是源文件解析的版本化结构和质量信息；检索块、森林目录为派生数据。旧 `Note.content_markdown`、NoteRevision 与 `NotebookGenerationCandidate` 仍有迁移、兼容或历史含义，不应据此恢复旧正文链或删除历史资料。
 
 ## 请求与后台任务
+
+```text
+React 页面 / Feature → Web API Client → FastAPI Router
+                                      → Application Services → Domain Modules
+                                                             → Infrastructure（数据库、文件存储、模型客户端）
+持久任务 → Worker → Application Services / Domain Modules → 同一基础设施与正文写入路径
+```
+
+这是当前代码的逻辑依赖方向，不要求每个 Router 一对一建立 Service，也不暗示存在独立 BFF。数据库保存 Notebook 正文与 revision、Asset/ParseRun/任务状态和关联关系；文件存储保存上传原件及可重建的派生文件。AI 答疑由会话/答疑应用服务协调范围化证据、Notebook 专属核验、模型调用和响应；Document Processing 从 Asset 原件生成带位置与质量状态的 DocumentIR，生成任务再从有效来源构造正文候选。
 
 `apps/backend/app/api/v1/routes.py` 注册 config、courses、materials、jobs、knowledge、notebook、generation、assistant、conversations、agent、feedback、backup、terms、forest、forest_imports、quiz 路由。Notebook 正文/历史、生命周期、阅读位置、资源、关系和建议用例位于相应 `app/services/notebook_*.py`；正文写入继续经 `notes/store.py`。Materials 子路由保留既有 HTTP 兼容入口，兼容文件聚合位于 `app/services/material_reads.py`，DocumentIR 查询、兼容页面/证据投影、页面渲染与图片路径解析位于 `app/services/document_reads.py`。上传批次查询由 `app/services/notebook_generation_inputs.py` 提供；解析重试、重解析、OCR、图片重试、任务/预算读取、路线切换和取消由 `app/services/asset_processing.py` 与 `app/services/processing_budget.py` 提供。会话查询、CRUD、幂等消息保存和失败记录位于 `app/services/conversations.py`，答疑用例编排位于 `app/services/assistant_execution.py`；Forest 的复杂读取及导入任务分别位于 `app/services/forest_reads.py`、`app/services/forest_imports.py`；Knowledge 图/结构/提案查询与审核位于 `app/services/knowledge_reads.py`；课程概览及创建、改名、访问、删除/恢复事务位于 `app/services/course_management.py`。课程简单列表读取仍允许路由直接查询。共享数据范围检查位于 `app/services/resource_scopes.py`。预期业务错误使用框架无关的 `ApplicationError`（Forest 领域层使用框架无关领域错误），由应用边界映射 HTTP 响应；路由保留 HTTP 参数校验、文件传输适配和响应模型。底层仍直接使用 SQLAlchemy Session，未引入 Repository。持久任务由 `apps/backend/app/workers/runner.py` 运行。缺少 Worker 时，异步解析/生成可滞留队列。
 

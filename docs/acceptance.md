@@ -1,6 +1,8 @@
-# 当前验收状态与矩阵
+# 验收记录与待验收矩阵
 
-## 当前快照（2026-11-03）
+以下 2026-11-03 与 2026-10-30 的快照均为历史执行记录，只适用于各自注明的代码基线。当前提交尚未重跑完整产品测试；下方矩阵中的“自动通过”指历史基线的对应检查，不能作为当前提交的最新验收结论。
+
+## 历史快照（2026-11-03）
 
 - 代码基线为 `feat/overall-inspection` HEAD `f52ced9e4cd02772e37621dbf20d0acec789cc3c`；本轮实现和文档修改均留在未提交工作区，没有提交或推送。
 - 根目录执行 `pwsh -NoProfile -File .\scripts\test.ps1`，日志为 `.runtime/logs/test-20261103-204501-35044.log`（本地忽略日志）：Ruff 通过；后端 pytest **577 passed、4 skipped、2 warnings**；Web navigation **52/52 passed**。
@@ -9,14 +11,14 @@
 - API 路径/schema、数据库 schema/迁移和正式正文存储路径未改变。运行时引用审计确认旧 Note API Router 未注册；`api/notes.ts` 与 `useNoteEditor` 没有运行时导入方；旧解析器仍被 Forest 培养方案和 Office DocumentIR 兼容适配器使用。
 - 未执行真实浏览器、真实 PDF/图片质量、OCR、外部模型/账单或真实数据库迁移/恢复验收。
 
-## 当前快照（2026-10-30）
+## 历史快照（2026-10-30）
 
 - 本轮代码基线：本地 `feat/debug-integration` `0777d0ef6ba6c44d2e498238d605631ee907c6b3`；Fetch 时远端为 `4759ff50c3100894af47dfca72476fe1c14e9e4a`。
 - 本轮开始时工作区干净。自动回归：2026-10-30 在仓库根目录执行 `pwsh -NoProfile -File .\scripts\test.ps1`，退出码 1。首阶段 Ruff 发现 15 项错误（`tests/test_agent_skills.py`、`tests/test_quiz.py` 的 import 排序/未使用导入）；脚本在此停止，pytest、Web 测试/构建、Desktop 构建均未运行。详见 `.runtime/logs/test-20261030-231925-46976.log`（本地忽略日志）；本轮未修测试源文件。
 - `git diff --check` 通过，修改文档的相对 Markdown 链接检查通过。未执行浏览器、真实材料、OCR、真实模型或真实数据库迁移/恢复。
 - 历史报告中的日期、SHA、测试数量只证明当时执行结果，不表示当前 SHA 已重跑。
 
-## 当前验收矩阵
+## 历史自动验证与当前待验收矩阵
 
 | 范围 | 源码/自动验证 | 浏览器/真实资料 | 状态 |
 |---|---|---|---|
