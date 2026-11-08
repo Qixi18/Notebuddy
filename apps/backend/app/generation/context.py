@@ -28,12 +28,6 @@ class GenerationInputError(RuntimeError):
         self.details = details or []
 
 
-MAX_BLOCK_CHARS = 6_000
-MAX_TABLE_ROWS = 40
-MAX_TABLE_COLS = 12
-MAX_FIGURE_CHARS = 1_500
-
-
 def build_snapshot(db: Session, notebook: Notebook, asset_ids: list[str]) -> dict[str, Any]:
     sources: list[dict[str, Any]] = []
     failures: list[dict] = []
@@ -124,19 +118,21 @@ def _source_snapshot(db: Session, asset: Asset) -> dict[str, Any]:
 
 
 def _block_payload(block, *, full: bool = False) -> dict[str, Any]:
+    # Both routes retain all evidence. Standard IR is split before persistence;
+    # old immutable runs remain intact and oversized output fails explicitly.
     table = None
     if block.table:
         table = {
-            "rows": block.table.rows if full else [row[:MAX_TABLE_COLS] for row in block.table.rows[:MAX_TABLE_ROWS]],
+            "rows": [list(row) for row in block.table.rows],
             "header_rows": block.table.header_rows,
         }
     figure = None
     if block.figure:
         figure = {
             "kind": block.figure.kind,
-            "description": (block.figure.description or "")[:MAX_FIGURE_CHARS] or None,
-            "nodes": block.figure.nodes[:40],
-            "edges": block.figure.edges[:40],
+            "description": block.figure.description,
+            "nodes": list(block.figure.nodes),
+            "edges": list(block.figure.edges),
             "latex": block.figure.latex,
             "uncertain": block.figure.uncertain,
             "evidence_ref": block.block_id if block.figure.image_key else None,
@@ -145,7 +141,7 @@ def _block_payload(block, *, full: bool = False) -> dict[str, Any]:
         "block_id": block.block_id,
         "page_number": block.page_number,
         "type": block.type,
-        "text": block.text if full else block.text[:MAX_BLOCK_CHARS],
+        "text": block.text,
         "latex": block.latex,
         "table": table,
         "figure": figure,

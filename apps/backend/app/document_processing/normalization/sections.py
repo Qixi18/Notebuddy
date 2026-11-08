@@ -94,8 +94,16 @@ def build_sections(document: DocumentIR, *, document_title: str = "") -> list[Se
 
 
 def _finish(drafts: list[_Draft]) -> list[SectionIR]:
+    if len(drafts) > MAX_SECTIONS:
+        # Bound navigation size, never source coverage. The final section keeps
+        # the overflow in original order, so generation can still batch it.
+        tail = drafts[MAX_SECTIONS - 1:]
+        drafts = drafts[:MAX_SECTIONS - 1] + [_Draft(
+            title=tail[0].title, level=tail[0].level,
+            blocks=[block for draft in tail for block in draft.blocks],
+        )]
     sections: list[SectionIR] = []
-    for order, draft in enumerate(drafts[:MAX_SECTIONS]):
+    for order, draft in enumerate(drafts):
         if not draft.blocks:
             continue
         pages = [block.page_number for block in draft.blocks]

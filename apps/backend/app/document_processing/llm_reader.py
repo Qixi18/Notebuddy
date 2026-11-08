@@ -86,7 +86,28 @@ def validate_read_page(result, number: int) -> ReadPage:
     return _validate_page(result, number)
 
 
+def reading_page(parsed: ReadPage, run, asset, number: int, global_order: int) -> PageIR:
+    """Compile validated visual evidence into the same source IR as local parsers."""
+    blocks = []
+    for order, item in enumerate(_bounded_blocks(parsed.blocks)):
+        text = item.text or item.latex or ''
+        blocks.append(BlockIR(
+            block_id=f'{run.id[:8]}-p{number}-b{order+1}', page_number=number,
+            order=order, global_order=global_order + order, type=item.type, level=item.level,
+            text=text, latex=item.latex,
+            table=TableData(rows=item.rows or [], header_rows=0) if item.type == 'table' else None,
+            figure=FigureData(kind='diagram', description=text, uncertain=item.uncertain)
+                if item.type == 'figure' else None,
+            extraction='vision', source=SourceSpan(asset_id=asset.id, page_number=number),
+            warnings=['模型识别存在不确定内容，请核对原页'] if item.uncertain else [],
+        ))
+    return PageIR(page_id=f'{run.id}-p{number}', page_number=number, extraction='vision',
+        status='empty' if parsed.status == 'blank' else 'parsed',
+        text='\n'.join(b.searchable_text() for b in blocks), blocks=blocks)
+
+
 def read_document(db, run, asset, path, *, progress=None, max_new_pages=None):
+    from app.ai.request_control import request_checkpoint
     config = asset_config(asset)
     vision_snapshot = config.get("vision") if isinstance(config.get("vision"), dict) else None
     # Capture credentials once. The exact same in-memory values are validated
@@ -121,7 +142,14 @@ def read_document(db, run, asset, path, *, progress=None, max_new_pages=None):
             ))
             if not owner_notebook_id:
                 raise RuntimeError("资料没有有效 Notebook 预算归属")
-            with processing_budget_scope(asset_ids=[asset.id], notebook_id=owner_notebook_id,
+            def check_request():
+                if progress:
+                    progress(len(cached), count)
+                db.refresh(run)
+                if run.status != 'running':
+                    raise RuntimeError('资料处理已停止')
+                db.commit()
+            with request_checkpoint(check_request), processing_budget_scope(asset_ids=[asset.id], notebook_id=owner_notebook_id,
                     stage="read", job_id=run.id, step_key=str(number), kind="vision"):
                 parsed = read_page_image(client, png, number)
             if progress:

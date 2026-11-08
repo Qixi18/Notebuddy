@@ -58,6 +58,24 @@ class ParseContext:
     ocr_language: str = "chi_sim+eng"
 
 
+def _has_script_geometry(raw_page: RawPage) -> bool:
+    spans = [span for block in raw_page.text_blocks for line in block.lines
+             for span in line.spans if span.bbox and span.size and span.text.strip()]
+    by_size = {}
+    for span in spans:
+        by_size.setdefault(span.size, []).append(span)
+    larger = {size: [span for body_size, group in by_size.items() if size < body_size * 0.82
+                     for span in group] for size in by_size}
+    for small in spans:
+        for body in larger[small.size]:
+            horizontal_gap = max(0, small.bbox[0] - body.bbox[2], body.bbox[0] - small.bbox[2])
+            vertical_overlap = min(small.bbox[3], body.bbox[3]) - max(small.bbox[1], body.bbox[1])
+            if (horizontal_gap < body.size * 1.5 and vertical_overlap > 0
+                    and abs(small.bbox[3] - body.bbox[3]) > body.size * 0.15):
+                return True
+    return False
+
+
 def parse_pdf(
     path: Path,
     context: ParseContext,
@@ -68,6 +86,8 @@ def parse_pdf(
     ocr_recognize: Callable[..., object] | None = None,
     vision_describe: Callable[..., object] | None = None,
     figure_store: Callable[[int, bytes, str], str] | None = None,
+    page_numbers: list[int] | None = None,
+    strict_evidence: bool = False,
 ) -> DocumentIR:
     ocr_available = ocr_engine.availability().available if ocr_available is None else ocr_available
     vision_available = vision_engine.availability().available if vision_available is None else vision_available
@@ -75,16 +95,15 @@ def parse_pdf(
     describe = vision_describe or vision_engine.describe
 
     def should_render(page: RawPage) -> bool:
-        return bool(render_store) and (ocr_available or vision_available) and not page.has_text_layer
-
-    raw = pdf_text.extract_pdf(path, render_when=should_render if render_store else None)
-    body_size = block_body_size([block for page in raw.pages for block in page.text_blocks])
+        return (ocr_available or vision_available) and page.requires_ocr
 
     pages: list[PageIR] = []
     global_order = 0
     vision_budget = max(0, context.max_vision_images)
     run_prefix = context.parse_run_id[:8]
-    for raw_page in raw.pages:
+    page_options = {'page_numbers': page_numbers} if page_numbers is not None else {}
+    for raw_page in pdf_text.iter_pdf_pages(path, render_when=should_render, **page_options):
+        body_size = block_body_size(raw_page.text_blocks)
         render_key: str | None = None
         if raw_page.render_png and render_store is not None:
             try:
@@ -104,9 +123,16 @@ def parse_pdf(
             text=raw_page.text,
             confidence=1.0 if raw_page.has_text_layer else None,
         )
-        scanned = not raw_page.has_text_layer and (
+        if strict_evidence and (any(span.superscript or 'math' in (span.font or '').lower()
+               or 'symbol' in (span.font or '').lower()
+               for block in raw_page.text_blocks for line in block.lines for span in line.spans)
+               or _has_script_geometry(raw_page)):
+            page.warnings.append('native_math_geometry: 上下标或数学字体需要结构化识别')
+        if strict_evidence and raw_page.has_vector_content:
+            page.warnings.append('native_vector_content: 绘图原语可能包含分数线或图形，需核对原页')
+        scanned = raw_page.requires_ocr and (
             raw_page.render_png is not None or raw_page.render_error is not None
-            or _largest_image_area_ratio(raw_page) >= SCAN_IMAGE_AREA_RATIO
+            or bool(raw_page.image_blocks)
         )
 
         drafts: list[TextBlockDraft] = []
@@ -216,7 +242,9 @@ def parse_pdf(
             for image in raw_page.image_blocks:
                 if image.bbox is None:
                     continue
-                if _image_area_ratio(raw_page, image) < 0.01:
+                if not image.is_vector and _image_area_ratio(raw_page, image) < 0.01:
+                    if strict_evidence:
+                        page.warnings.append('native_small_visual: 小图像可能包含公式，不能按装饰忽略')
                     # Decorative rules/logos are not teaching figures.
                     continue
                 figure = _build_figure(
@@ -245,15 +273,16 @@ def parse_pdf(
         page.blocks = blocks
         pages.append(page)
 
+    engine = pdf_text.availability()
     document = DocumentIR(
         document_id=context.asset_id,
         asset_id=context.asset_id,
         parse_run_id=context.parse_run_id,
         doc_type="pdf",
         file_sha256=context.file_sha256,
-        parser_name=raw.engine.name,
-        parser_version=raw.engine.version,
-        config_version="pdf-layout-v1",
+        parser_name=engine.name,
+        parser_version=engine.version,
+        config_version="pdf-layout-v2",
         pages=pages,
         warnings=[instruction for page in pages for instruction in page.warnings][:50],
     )
@@ -300,11 +329,7 @@ def _image_area_ratio(page: RawPage, image: pdf_text.RawImageBlock) -> float:
 
 
 def _render_single(path: Path, page_number: int) -> bytes | None:
-    raw = pdf_text.extract_pdf(path, render_when=lambda page: page.page_number == page_number)
-    for page in raw.pages:
-        if page.page_number == page_number:
-            return page.render_png
-    return None
+    return pdf_text.render_pdf_page(path, page_number)
 
 
 def _intersection_ratio(inner: list[float], outer: list[float]) -> float:
@@ -377,12 +402,13 @@ def _build_figure(
     warnings: list[str] = []
     image_key = None
     suffix = ".png"
-    if image.xref is not None:
-        data = pdf_text.extract_pdf_image(path, image.xref)
+    if image.xref is not None or image.is_vector:
+        data = (pdf_text.render_pdf_region(path, page.page_number, image.bbox) if image.is_vector
+                else pdf_text.extract_pdf_image(path, image.xref))
         if data:
             if figure_store:
                 module = pdf_text._pymupdf()
-                if module is not None:
+                if module is not None and not image.is_vector:
                     try:
                         with module.open(str(path)) as document:
                             extracted = document.extract_image(image.xref)

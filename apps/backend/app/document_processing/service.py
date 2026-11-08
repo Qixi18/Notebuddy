@@ -181,6 +181,8 @@ def execute_parse_run(
         from app.document_processing.engines.pdf_text import EngineInfo
         from app.document_processing.engines.vision import VisionCapabilityError
         from app.document_processing.llm_reader import read_document
+        if run_config.get('provider', {}).get('reading_mode') == 'hybrid':
+            from app.document_processing.hybrid import read_hybrid_document as read_document
         try:
             document = read_document(db, run, asset, path, progress=progress, max_new_pages=max_new_pages)
         except VisionCapabilityError as exc:
@@ -300,6 +302,11 @@ def execute_parse_run(
             raise DocumentProcessingError(str(exc), code=code) from exc
         raise DocumentProcessingError(f"解析失败：{type(exc).__name__}: {exc}", code="parse_failed") from exc
 
+    from app.document_processing.normalization.blocks import normalize_standard_blocks
+    from app.document_processing.normalization.sections import build_sections
+
+    normalize_standard_blocks(document)
+    document.sections = build_sections(document, document_title=title or asset.original_name)
     document.quality = assess(
         document,
         engines=EngineState(

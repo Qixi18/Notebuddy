@@ -155,7 +155,7 @@ def test_math_normalization_failure_runs_one_atomic_format_repair(
     _run(job.id)
     db.expire_all()
     db.refresh(job)
-    assert len(repairs) == 1
+    assert len(repairs) == 1, (job.status, job.error_code, job.error_message)
     notebook = db.get(Notebook, book.id)
     assert "用户自己保存的正文" in notebook.document_json
     rows = list(db.scalars(select(NotebookBlockSource)))
@@ -185,3 +185,67 @@ def test_remote_math_and_callout_normalization_preserves_block_ids():
         "type": "inlineMath", "attrs": {"latex": "x^2"},
     }]}
     assert nodes[0]["attrs"]["tone"] == "danger"
+
+
+def test_standard_retry_reuses_valid_batches_without_partial_body_write(generation_db, monkeypatch):
+    from app.api.v1.generation import retry_generation_job
+    from app.generation.composer import CompositionError
+
+    db = generation_db
+    book, job = _job(db, batch_chars=600)
+    job.generator = 'offline-extractive'
+    db.commit()
+    original = worker.compose
+    calls = []
+    fail = True
+    def compose(snapshot, plan, batch, **kwargs):
+        calls.append(list(batch))
+        if fail and len(calls) == 2:
+            raise CompositionError('synthetic late batch failure')
+        return original(snapshot, plan, batch, **kwargs)
+    monkeypatch.setattr(worker, 'compose', compose)
+    _run(job.id)
+    db.expire_all()
+    assert db.get(NotebookGenerationJob, job.id).status == 'failed'
+    assert db.get(Notebook, book.id).document_revision == 1
+    assert db.scalar(select(NotebookBlockSource)) is None
+    fail = False
+    retry_generation_job(book.id, job.id, db)
+    _run(job.id)
+    db.expire_all()
+    assert db.get(NotebookGenerationJob, job.id).status == 'completed'
+    assert len(calls) == 3, 'The successful first batch must not be regenerated'
+    assert calls[1] == calls[2]
+    assert db.get(Notebook, book.id).document_revision == 2
+
+
+def test_cancel_during_first_draft_response_prevents_repair_request(generation_db, monkeypatch):
+    from app.db.models import ProviderUsageReservation
+    from app.document_processing import config
+    from app.generation.planner import build_plan
+
+    db = generation_db
+    book, job = _job(db)
+    snapshot = json.loads(job.input_snapshot_json)
+    snapshot['processing_route'] = 'llm'
+    snapshot['provider'] = {'reading_mode': 'hybrid'}
+    job.input_snapshot_json = json.dumps(snapshot)
+    job.knowledge_plan_json = json.dumps(build_plan(snapshot))
+    db.commit()
+    calls = []
+    def responder(payload):
+        calls.append(1)
+        with worker.SessionLocal() as other:
+            task = other.get(NotebookGenerationJob, job.id)
+            task.status = 'cancel_requested'
+            other.commit()
+        return _response(json.dumps({'blocks': []}))
+    client = _client(monkeypatch, responder)
+    monkeypatch.setattr(config, 'provider_client', lambda _: client)
+    monkeypatch.setattr(worker, 'provider_client', lambda _: client)
+    _run(job.id)
+    db.expire_all()
+    assert db.get(NotebookGenerationJob, job.id).status == 'cancelled'
+    assert len(calls) == 1, 'Cancellation must be checked before any draft-repair HTTP request'
+    assert len(list(db.scalars(select(ProviderUsageReservation)))) == 1
+    assert db.get(Notebook, book.id).document_revision == 1

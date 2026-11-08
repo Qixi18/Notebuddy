@@ -20,7 +20,7 @@ test('settings offers both routes and saves the selected default', async () => {
   render(<SettingsPanel onClose={() => {}} />)
   const select = await screen.findByLabelText('默认文档处理路线')
   expect(screen.getByRole('option', { name: '标准处理' })).toBeTruthy()
-  expect(screen.getByRole('option', { name: '全程 AI' })).toBeTruthy()
+  expect(screen.getByRole('option', { name: 'AI 增强' })).toBeTruthy()
   fireEvent.change(select, { target: { value: 'llm' } })
   fireEvent.click(screen.getByRole('button', { name: /保存/ }))
   await waitFor(() => expect(save).toHaveBeenCalledWith({ NOTEBOOK_DOCUMENT_PROCESSING_ROUTE: 'llm' }, undefined))

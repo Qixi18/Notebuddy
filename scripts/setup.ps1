@@ -3,6 +3,7 @@ param(
     [string] $UvPath,
     [string] $NodeDirectory,
     [string] $PythonVersion = '3.12',
+    [switch] $WithMinerU,
     [switch] $SkipWeb,
     [switch] $SkipDesktop
 )
@@ -89,7 +90,12 @@ try {
     if (-not (Test-Path -LiteralPath $python) -or -not [IO.Path]::GetFullPath($python).StartsWith($pythonRoot, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'uv did not resolve Python inside .runtime/python; setup stopped without changing a global Python.'
     }
-    Invoke-SetupStep 'Installing locked backend and CPU RapidOCR dependencies' $uv @('sync', '--locked', '--extra', 'rapidocr', '--python', $python) $backend
+    $backendSyncArguments = @('sync', '--locked', '--extra', 'rapidocr', '--python', $python)
+    # Keep an already-enabled optional parser when setup is rerun.
+    if ($WithMinerU -or (Test-Path -LiteralPath (Join-Path $backend '.venv-document\Lib\site-packages\mineru'))) {
+        $backendSyncArguments += @('--extra', 'mineru')
+    }
+    Invoke-SetupStep 'Installing locked backend and local parser dependencies' $uv $backendSyncArguments $backend
     if (-not (Test-Path -LiteralPath (Join-Path $env:UV_PROJECT_ENVIRONMENT 'Scripts\python.exe'))) { throw 'Backend sync did not produce .venv-document/Scripts/python.exe.' }
     if (-not $SkipWeb) { Invoke-SetupStep 'Installing Web dependencies' $localNode @($localNpm, 'ci') (Join-Path $repo 'apps\web') }
     if (-not $SkipDesktop) { Invoke-SetupStep 'Installing Desktop dependencies and Electron' $localNode @($localNpm, 'ci') (Join-Path $repo 'apps\desktop') }

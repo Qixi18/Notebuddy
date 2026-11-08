@@ -171,3 +171,40 @@ def test_complete_json_marks_invalid_output_and_truncation(
         client.complete_json([{"role": "user", "content": "生成"}])
 
     assert captured.value.code == ("output_truncated" if finish_reason == "length" else "invalid_json")
+
+
+@pytest.mark.parametrize(
+    ("content", "error_kind"),
+    [
+        (r'{"latex":"\alpha","private":"synthetic-private-marker"}', "invalid_escape"),
+        ('{"text":"synthetic-private-marker\n"}', "invalid_control_character"),
+        ('{"text":"synthetic-private-marker"', "expected_comma"),
+        ('{"text":"synthetic-private-marker"} extra', "extra_data"),
+    ],
+)
+@pytest.mark.parametrize("finish_reason", ["stop", "synthetic-private-finish"])
+def test_invalid_json_reports_safe_location_without_response_content(
+    monkeypatch: pytest.MonkeyPatch, content: str, error_kind: str, finish_reason: str,
+) -> None:
+    import json
+
+    with pytest.raises(json.JSONDecodeError) as decoding:
+        json.loads(content)
+
+    def fake_post(*_args: object, **_kwargs: object) -> httpx.Response:
+        return httpx.Response(200, json={
+            "choices": [{"finish_reason": finish_reason, "message": {"content": content}}],
+        }, request=httpx.Request("POST", "https://test.invalid"))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    client = DeepSeekClient(_test_settings())
+    with pytest.raises(DeepSeekError) as captured:
+        client.complete_json([{"role": "user", "content": "合成 JSON"}])
+
+    message = str(captured.value)
+    assert captured.value.code == "invalid_json"
+    assert f"json_error={error_kind}" in message
+    assert f"line={decoding.value.lineno}, column={decoding.value.colno}" in message
+    assert f"offset={decoding.value.pos}, chars={len(content)}" in message
+    assert f"finish_reason={'stop' if finish_reason == 'stop' else 'unknown'}" in message
+    assert "synthetic-private" not in message

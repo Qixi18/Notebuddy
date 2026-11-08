@@ -111,6 +111,10 @@ def process_generation_job(job_id: str) -> None:
         source_asset_ids = sorted({source['asset_id'] for source in snapshot.get('sources') or []
                                    if isinstance(source, dict) and isinstance(source.get('asset_id'), str)})
         model_steps = 0
+        def check_provider_request():
+            if not _checkpoint(db, job, attempt):
+                raise CompositionError('任务已停止', code='cancelled')
+            db.commit()
         def cached_model_call(messages, *, max_tokens=6000, validator=None):
             nonlocal model_steps
             identity = fingerprint([messages, snapshot.get('provider'), 'plan-v1'])
@@ -125,7 +129,8 @@ def process_generation_job(job_id: str) -> None:
                 raise CompositionError('任务已停止', code='cancelled')
             db.commit()
             client = provider_client(snapshot.get('provider', {}))
-            with processing_budget_scope(asset_ids=source_asset_ids,
+            from app.ai.request_control import request_checkpoint
+            with request_checkpoint(check_provider_request), processing_budget_scope(asset_ids=source_asset_ids,
                     notebook_id=job.notebook_id, stage='plan', job_id=job.id,
                     step_key=identity, kind='text'):
                 result = structured_call(client, messages, max_tokens=max_tokens)
@@ -186,15 +191,22 @@ def process_generation_job(job_id: str) -> None:
             compositions = []
             def fresh_composition(snapshot, plan, batch, *, generator):
                 nonlocal model_steps
-                if model_steps >= 2:
+                if llm_route and model_steps >= 2:
                     raise WorkPending()
                 ids = units_by_id(plan)
                 assets = sorted({ids[unit_id]['source_asset_id'] for unit_id in batch
                                  if unit_id in ids and ids[unit_id].get('source_asset_id')})
-                with processing_budget_scope(asset_ids=assets, notebook_id=job.notebook_id,
+                from app.ai.request_control import request_checkpoint
+                with request_checkpoint(check_provider_request), processing_budget_scope(asset_ids=assets, notebook_id=job.notebook_id,
                         stage='compose', job_id=job.id, step_key=','.join(batch), kind='text'):
                     result = compose(snapshot, plan, batch, generator=generator)
-                result.nodes = _normalize_model_blocks(result.nodes)
+                try:
+                    result.nodes = _normalize_model_blocks(result.nodes)
+                except DocumentValidationError:
+                    if llm_route:
+                        raise
+                    # The standard path has a bounded final format repair;
+                    # keep malformed output uncached for that existing gate.
                 if not _checkpoint(db, job, attempt):
                     raise CompositionError('任务已停止', code='cancelled')
                 model_steps += 1
@@ -204,16 +216,8 @@ def process_generation_job(job_id: str) -> None:
                     return
                 # Do not hold a read transaction across a network/model call.
                 db.commit()
-                if llm_route:
-                    compositions.append(compose_batch(db, job.id, snapshot, plan, batch, generator,
-                                                       compose_impl=fresh_composition))
-                else:
-                    ids = units_by_id(plan)
-                    assets = sorted({ids[unit_id]['source_asset_id'] for unit_id in batch
-                                     if unit_id in ids and ids[unit_id].get('source_asset_id')})
-                    with processing_budget_scope(asset_ids=assets, notebook_id=job.notebook_id,
-                            stage='compose', job_id=job.id, step_key=','.join(batch), kind='text'):
-                        compositions.append(compose(snapshot, plan, batch, generator=generator))
+                compositions.append(compose_batch(db, job.id, snapshot, plan, batch, generator,
+                    compose_impl=fresh_composition, allow_uncached_invalid=not llm_route))
                 if not _checkpoint(db, job, attempt):
                     return
         except WorkPending:
@@ -271,7 +275,8 @@ def process_generation_job(job_id: str) -> None:
                 if isinstance(block, dict) and isinstance(block.get("block_id"), str)
             }
             try:
-                with processing_budget_scope(asset_ids=source_asset_ids, notebook_id=job.notebook_id,
+                from app.ai.request_control import request_checkpoint
+                with request_checkpoint(check_provider_request), processing_budget_scope(asset_ids=source_asset_ids, notebook_id=job.notebook_id,
                         stage='repair', job_id=job.id, kind='text'):
                     repaired = repair_deepseek_document_format(
                         normalized_nodes, source_map, allowed_source_ids, str(first_validation_error),
@@ -515,6 +520,19 @@ def _normalize_model_blocks(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]
                     node.pop("text", None)
             elif latex != latex.strip():
                 attrs["latex"] = latex.strip()
+            normalized_latex = attrs.get("latex")
+            if isinstance(normalized_latex, str):
+                normalized_latex = normalized_latex.strip()
+                # Math nodes already provide math mode. Remove only one fully
+                # paired outer presentation wrapper; keep the expression and
+                # all structure/command validation intact.
+                for opening, closing in (("$$", "$$"), (r"\[", r"\]"),
+                                         (r"\(", r"\)"), ("$", "$")):
+                    if (normalized_latex.startswith(opening) and normalized_latex.endswith(closing)
+                            and len(normalized_latex) > len(opening) + len(closing)):
+                        normalized_latex = normalized_latex[len(opening):-len(closing)].strip()
+                        break
+                attrs["latex"] = normalized_latex
             node["attrs"] = attrs
         children = node.get("content")
         if kind == "callout":

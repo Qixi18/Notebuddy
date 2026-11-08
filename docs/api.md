@@ -1,5 +1,7 @@
 # API 路由现状（2026-11-03 源码核对）
 
+2026-11-05 标准资料处理升级保持既有路由、请求/响应字段、归属校验与错误语义；默认文档大小/页数改为 **200 MiB / 2,000 页**，已有配置仍优先。客户端应读取 `GET /api/v1/config/capabilities` 的有效限制。重新解析后的 IR 可能有更多实际来源块和矢量图证据，未解读图形继续通过既有 quality/issues 字段报告；正文、引用、revision/CAS 契约不变。详见 [标准处理说明](parsing.md) 与 [ADR-0005](architecture-decisions/ADR-0005-standard-document-completeness.md)。
+
 前缀为 `/api/v1`，路由模块以 `apps/backend/app/api/v1/routes.py` 实际注册为准。此处的主路径/兼容分类不意味着兼容 API 已废弃，也不代表每个响应字段均已完成文档化。2026-11-03 核对的已注册模块中没有旧 `notes` API Router；当前 Notebook 正文以 Notebook 路由为准。
 
 | 类别 | 方法/路径 | 用途与边界 |
@@ -23,6 +25,8 @@
 # API 契约
 
 ## 双路线文件处理（2026-10-30）
+
+2026-11-08 兼容补充：公共路线值仍为 `standard` / `llm`，Notebook 界面的 `llm` 文案变为“AI 增强”。新上传的 provider 快照冻结 `reading_mode=hybrid|vision`、本地解析器版本/档位及读取策略版本；新默认 hybrid，环境变量 `NOTEBOOK_LLM_READING_MODE=vision` 可恢复新上传的全视觉行为。该环境变量不新增设置 API 可编辑键。旧上传没有 reading_mode 时保持原全视觉方式；已失败任务普通重试不会自动切换新策略。切换已有资料仍使用现有 processing-route 端点创建新 ParseRun，付费调用继续共用原 Asset 预算。无新路由、公共枚举或数据库迁移。
 
 以下地址均以 `/api/v1` 为前缀：
 
