@@ -22,6 +22,8 @@ export function CourseCanopy({ canopy, empty, previewId, previewNoteId, onPrevie
   const texture = `canopy-wood-${useId().replace(/:/g, '')}`
   const targets = useRef(new Map<string, SVGEllipseElement>())
   const { items, variant } = canopy
+  // Geometry uses scene IDs; playback receipts use the stable Notebook body ID.
+  const growthBlocks = useMemo(() => new Map<string, SectionRead['block_id']>(items.flatMap(item => item.leaves.map(leaf => [`${leaf.section.id}:twig`, leaf.section.block_id] as const))), [items])
   const books = [...new Map(items.map(item => [item.book.id, item.book])).values()]
   const hitCells = useMemo(() => forest ? leafHitCells(items.flatMap(item => item.leaves)) : new Map(), [items, forest])
   const clipIds = new Map([...hitCells.keys()].map((id, index) => [id, `${texture}-hit-${index}`]))
@@ -48,7 +50,7 @@ export function CourseCanopy({ canopy, empty, previewId, previewNoteId, onPrevie
     {trunk && <g data-growth-trunk="true"><NaturalBranchWood limb={trunk} textureId={texture} stock /></g>}
     {items.map(({ branch, transform }, index) => <g key={`${branch.book.id}-${index}`} transform={transform}>
       <g data-wood-notebook-id={branch.book.id} className={growingBooks?.has(branch.book.id) ? 'kt-branch-growth' : undefined}>
-        {branch.limbs.map(limb => <NaturalBranchWood key={limb.id} limb={limb} textureId={texture} />)}
+        {branch.limbs.map(limb => <NaturalBranchWood key={limb.id} limb={limb} textureId={texture} growthBlockId={growthBlocks.get(limb.id)} />)}
       </g>
     </g>)}
     <g mask={!empty ? `url(#${texture}-trunk)` : undefined} pointerEvents="none" aria-hidden="true">{empty ? <TrunkSprite variant={variant} empty /> : <RootstockSprite variant={variant} />}</g>
@@ -57,11 +59,13 @@ export function CourseCanopy({ canopy, empty, previewId, previewNoteId, onPrevie
         <title>{book.title} · 打开笔记本</title>{items.filter(item => item.book.id === book.id).map((item, index) => <path key={index} transform={item.transform} d={item.branch.hitPath} fill="none" stroke="transparent" strokeWidth={forest ? operationSize(zoom) : 30} />)}
       </TreeAction>
     </g>)}
-    {items.flatMap(({ book, leaves }) => leaves.map(leaf => <g key={leaf.section.id} data-note-id={leaf.section.id} data-notebook-id={book.id} data-growth-book={book.id} data-growth-leaf={leaf.section.block_id ? sectionGrowthKey(book.id, leaf.section.block_id) : undefined} className={leaf.section.block_id && growingNotes?.has(sectionGrowthKey(book.id, leaf.section.block_id)) ? 'kt-leaf-growth' : undefined} onMouseEnter={() => { if (detail) show(book, leaf) }} onMouseLeave={onLeave} onBlur={onLeave}>
+    {items.flatMap(({ book, leaves }) => leaves.map(leaf => <g key={leaf.section.id} data-note-id={leaf.section.id} data-notebook-id={book.id} className={leaf.section.block_id && growingNotes?.has(sectionGrowthKey(book.id, leaf.section.block_id)) ? 'kt-leaf-growth' : undefined} onMouseEnter={() => { if (detail) show(book, leaf) }} onMouseLeave={onLeave} onBlur={onLeave}>
       <TreeAction disabled={!detail} label={`打开知识点：${leaf.section.title}`} describedBy={previewNoteId === leaf.section.id ? previewId : undefined} className={`home-tree-leaf${forest ? ' kt-note' : ''}`} onActivate={() => onNote(book, leaf.section)} onFocus={() => show(book, leaf)}>
         <g data-leaf-paint="true" transform={`translate(${leaf.x},${leaf.y})`}>
-          {[-62, 60].map((angle, index) => <g key={angle} transform={`rotate(${leaf.angle}) translate(0,3) rotate(${angle}) scale(.61) translate(0,-3)`}><LeafSprite variant={(leaf.variant + index + 1) % 4} /></g>)}
-          <LeafSprite variant={previewNoteId === leaf.section.id || highlighted?.has(leaf.section.id) ? 4 : leaf.variant} angle={leaf.angle} />
+          <g data-growth-book={book.id} data-growth-leaf={leaf.section.block_id ? sectionGrowthKey(book.id, leaf.section.block_id) : undefined}>
+            {[-62, 60].map((angle, index) => <g key={angle} transform={`rotate(${leaf.angle}) translate(0,3) rotate(${angle}) scale(.61) translate(0,-3)`}><LeafSprite variant={(leaf.variant + index + 1) % 4} /></g>)}
+            <LeafSprite variant={previewNoteId === leaf.section.id || highlighted?.has(leaf.section.id) ? 4 : leaf.variant} angle={leaf.angle} />
+          </g>
         </g>
         <g clipPath={forest ? `url(#${clipIds.get(leaf.section.id)})` : undefined}>
         {[-62, 60].map(angle => <ellipse key={angle} transform={`translate(${leaf.x},${leaf.y}) rotate(${leaf.angle}) translate(0,3) rotate(${angle}) scale(.61) translate(0,-3)`} cx="0" cy="-30" rx="22" ry="33" fill="transparent" />)}
