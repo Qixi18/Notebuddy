@@ -7,6 +7,8 @@ import { api } from '../api'
 import { AssistantComposer } from '../features/assistant/AssistantComposer'
 import { AssistantContextBar, type ScopeNext, type ScopeNotebook } from '../features/assistant/AssistantContextBar'
 import { NotebookScopePanel, type NotebookScopeTarget } from '../features/assistant/NotebookScopePanel'
+import { NotebookEditSuggestionCards } from '../features/assistant/AgentCards'
+import { useNotebookEditSuggestions } from '../features/assistant/useNotebookEditSuggestions'
 import { AssistantThread } from '../features/assistant/AssistantThread'
 import { ConversationList, ConversationSearch } from '../features/assistant/ConversationList'
 import { MistakeBook } from '../features/assistant/MistakeBook'
@@ -38,6 +40,13 @@ export function AssistantPage() {
   const { askAgent, stopAgent, ready, busy, hasMessages, messages, renameConversation, deleteConversation, agentRun } = conversation
   const navigate = useNavigate()
   const location = useLocation()
+
+  /* Notebook 编辑建议（ADR-0005）：本页没有打开编辑器，采纳走 API（CAS），不回灌编辑器。
+     agentFinalId 变化触发重载——agent 提交新建议后卡片自动出现。 */
+  const notebookEditSuggestions = useNotebookEditSuggestions({
+    courseId,
+    agentFinalId: agentRun?.final?.message_id,
+  })
 
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const composerAreaRef = useRef<HTMLDivElement>(null)
@@ -92,8 +101,12 @@ export function AssistantPage() {
      范围是会话级属性，存在 Conversation 行上；只有「还没有消息」的会话才允许再改。
      用 ref 守门，避免 conversations 列表因别处改名/排序变化时把用户未发送的选择冲掉。 */
   const scopeSyncRef = useRef<string | null>(null)
+  /* Notebook 范围激活期间，会话列表异步加载引起的 conversationId 变化不得把
+     跳转 state / 手动进入的 Notebook 范围冲掉（见 NotebookScopePanel 渲染条件）。 */
+  const notebookScopeActiveRef = useRef(false)
   useEffect(() => {
-    if (scopeSyncRef.current === conversation.conversationId) return
+    if (notebookScopeActiveRef.current) return
+    if (scopeSyncRef.current === (conversation.conversationId ?? null)) return
     scopeSyncRef.current = conversation.conversationId ?? null
     const target = conversation.conversationId
       ? conversation.conversations.find((item) => item.id === conversation.conversationId)
@@ -123,6 +136,7 @@ export function AssistantPage() {
     setMaterialId(undefined)
     setLearningMode('direct')
     setNotebookTarget(undefined)
+    notebookScopeActiveRef.current = false
   }, [courseId])
 
   useEffect(() => { void api.getWebSearchStatus().then(setWebStatus).catch(() => setWebStatus({ configured: false, status: 'unavailable' })) }, [])
@@ -133,6 +147,21 @@ export function AssistantPage() {
     if (typeof state?.initialQuestion !== 'string' || !state.initialQuestion.trim()) return
     initialQuestionSent.current = false
     setPendingInitialQuestion(state.initialQuestion.trim())
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.key, location.pathname, location.state, navigate])
+
+  /* 悬浮坞（Notebook 页）跳转带来的 Notebook 范围：直接进入该 Notebook 的答疑面板。
+     Notebook 会话不在课程会话列表里（scope='notebook' => course_id IS NULL），
+     主线程不可达，只有 NotebookScopePanel 能接续这段历史。 */
+  useEffect(() => {
+    const state = location.state as { notebookScope?: unknown } | null
+    const target = state?.notebookScope
+    if (!target || typeof target !== 'object') return
+    const { id, title } = target as { id?: unknown; title?: unknown }
+    if (typeof id !== 'string' || !id) return
+    setScopeKind('notebook')
+    setNotebookTarget({ id, title: typeof title === 'string' && title ? title : 'Notebook' })
+    notebookScopeActiveRef.current = true
     navigate(location.pathname, { replace: true, state: null })
   }, [location.key, location.pathname, location.state, navigate])
 
@@ -241,6 +270,7 @@ export function AssistantPage() {
     /* 已锁定的会话不再接受范围变更（UI 层拦截；后端也只在首轮落 scope，双保险） */
     if (scopeLocked) { flashScopeLockHint(); return }
     setScopeKind(next.kind)
+    notebookScopeActiveRef.current = next.kind === 'notebook'
     /* 收窄只在 course 档有意义：离开该档即复位，避免残留一个不可见的消息级参数 */
     if (next.kind !== 'course') setMaterialId(undefined)
     if (next.kind !== 'notebook') setNotebookTarget(undefined)
@@ -253,6 +283,7 @@ export function AssistantPage() {
     if (!target) return
     setNotebookTarget(target)
     setScopeKind('notebook')
+    notebookScopeActiveRef.current = true
     setMaterialId(undefined)
   }
 
@@ -467,7 +498,7 @@ export function AssistantPage() {
           <NotebookScopePanel
             courseId={courseId}
             notebook={notebookTarget}
-            onExit={() => { setNotebookTarget(undefined); setScopeKind('course') }}
+            onExit={() => { setNotebookTarget(undefined); setScopeKind('course'); notebookScopeActiveRef.current = false }}
           />
         ) : (
           <>
@@ -509,6 +540,14 @@ export function AssistantPage() {
           onSkillAsk={useStarter}
           highlightMessageId={conversation.pendingMessageId}
           onHighlightConsumed={conversation.consumePendingMessage}
+          extras={
+            <NotebookEditSuggestionCards
+              suggestions={notebookEditSuggestions.suggestions}
+              busyId={notebookEditSuggestions.busyId}
+              notice={notebookEditSuggestions.notice}
+              onReview={notebookEditSuggestions.review}
+            />
+          }
         />
 
         <div className="workspace-chat-foot" ref={composerAreaRef}>

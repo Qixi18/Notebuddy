@@ -21,7 +21,7 @@ test('data-router route tree keeps primary and legacy URLs addressable', () => {
     .toBe('/courses/:courseId/notes/:noteId')
 })
 
-function renderWorkspace(initialEntry: string, documentDirty = false) {
+function renderWorkspace(initialEntry: string, documentDirty = false, overrides: Record<string, unknown> = {}) {
   const setDocumentDirty = vi.fn()
   const setEditingNote = vi.fn()
   const workspace = {
@@ -32,6 +32,7 @@ function renderWorkspace(initialEntry: string, documentDirty = false) {
     documentDirty,
     setDocumentDirty,
     setEditingNote,
+    ...overrides,
   } as unknown as WorkspaceContextValue
   const router = createMemoryRouter([{
     element: <WorkspaceProvider value={workspace}><AppLayout /></WorkspaceProvider>,
@@ -39,6 +40,7 @@ function renderWorkspace(initialEntry: string, documentDirty = false) {
       { path: '/courses/c/notebooks/n', element: <p>Notebook 页面</p> },
       { path: '/forest', element: <p>知识森林页面</p> },
       { path: '/recycle', element: <p>回收站页面</p> },
+      { path: '/courses/:courseId/assistant', element: <p>答疑页面</p> },
     ],
   }], { initialEntries: [initialEntry] })
 
@@ -69,4 +71,15 @@ test('脏 Notebook 离开时等待确认，确认后完成侧栏跳转', async (
   expect(await screen.findByText('知识森林页面')).toBeTruthy()
   expect(setDocumentDirty).toHaveBeenCalledWith(false)
   expect(router.state.location.pathname).toBe('/forest')
+})
+
+test('侧栏「答疑桌宠」落到最近会话课程，与悬浮坞课程落点一致', async () => {
+  const { router } = renderWorkspace('/forest', false, {
+    courses: [{ id: 'c-visited', name: '最近访问' }],
+    conversationCourseId: 'c-visited',
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: '答疑桌宠' }))
+  expect(await screen.findByText('答疑页面')).toBeTruthy()
+  await waitFor(() => expect(router.state.location.pathname).toBe('/courses/c-visited/assistant'))
 })

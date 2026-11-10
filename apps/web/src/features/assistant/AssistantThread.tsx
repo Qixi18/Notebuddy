@@ -416,7 +416,7 @@ export function AssistantThread({ ready, busy, messages, conversationId, persona
           <div className="workspace-msg-body">
             <header className="workspace-msg-head">
               <strong>{personaName}</strong>
-              <em>{agentRun.aborted ? '已中断' : 'Agent 执行中'}</em>
+              <em>{agentRun.aborted ? '已中断' : agentRun.streamingText ? '生成中 · 未核验' : 'Agent 执行中'}</em>
             </header>
             {agentRun.aborted ? (
               <p className="workspace-agent-aborted-note">这次回答已停止，下面是已收到的部分；可以直接继续提问。</p>

@@ -1,14 +1,25 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { memo, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import { WorkspaceProvider } from '../src/components/AppLayout'
 import { AssistantDock } from '../src/features/assistant/AssistantDock'
+import { AssistantPage } from '../src/pages/AssistantPage'
 import { NotebookBridgeProvider, useNotebookBridge, useRegisterNotebookBridge, type NotebookBridgeValue } from '../src/features/notebook-editor/NotebookBridge'
 
 vi.mock('../src/api', () => ({
-  api: { listNotebookEditSuggestions: vi.fn(async () => []) },
+  api: {
+    listNotebookEditSuggestions: vi.fn(async () => []),
+    getWebSearchStatus: vi.fn(async () => ({ configured: false, provider: 'none', status: 'ok' })),
+    listNotebooks: vi.fn(async () => []),
+    listNotebookConversations: vi.fn(async () => []),
+    createNotebookConversation: vi.fn(async () => ({
+      id: 'conv-nb', course_id: null, notebook_id: 'nb1', title: '新对话',
+      scope: 'notebook', default_scope: 'notebook',
+    })),
+    getNotebookDocument: vi.fn(async () => ({ revision: 7, content: { type: 'doc', content: [] } })),
+  },
 }))
 
 const askAgent = vi.fn(async () => true)
@@ -86,4 +97,59 @@ test('Notebook 会话不暴露课程或全局范围切换', () => {
   render(<Harness locked />)
   expect(screen.queryByLabelText('本次提问的作用范围')).toBeNull()
   expect(screen.getByText('作用范围：当前 Notebook')).toBeTruthy()
+})
+
+test('Notebook 页悬浮坞提供「在完整答疑页打开」，课程场景入口文案不变', () => {
+  render(<Harness />)
+  const jump = screen.getByText('在完整答疑页打开')
+  expect(jump.getAttribute('href')).toBe('/courses/c1/assistant')
+  expect(screen.queryByText('打开完整答疑')).toBeNull()
+})
+
+test('答疑页消费悬浮坞跳转 state，直接进入该 Notebook 范围面板', async () => {
+  /* AssistantPage 的桌宠宽视口 hook 依赖 matchMedia，jsdom 没有 */
+  vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+    matches: false, media: query, onchange: null,
+    addListener: vi.fn(), removeListener: vi.fn(),
+    addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+  })))
+  /* 模拟真实时序：课程会话列表异步到达（conversationId 从无到有），
+     验证范围 chip 对齐 effect 不会把跳转 state 进入的 Notebook 范围冲掉 */
+  function JumpHarness() {
+    const [conversationId, setConversationId] = useState<string | undefined>(undefined)
+    const [conversations, setConversations] = useState<Array<{ id: string; scope: string }>>([])
+    useEffect(() => {
+      const timer = setTimeout(() => {
+        setConversations([{ id: 'conv-c1', scope: 'course' }])
+        setConversationId('conv-c1')
+      }, 40)
+      return () => clearTimeout(timer)
+    }, [])
+    return (
+      <MemoryRouter initialEntries={[{
+        pathname: '/courses/c1/assistant',
+        state: { notebookScope: { id: 'nb1', title: '极限笔记' } },
+      }]}>
+        <WorkspaceProvider value={{
+          courseId: 'c1', conversationCourseId: 'c1', courses: [{ id: 'c1', name: '逻辑电路' }],
+          materials: [], openMaterialSource: () => {},
+          conversation: {
+            messages: [], conversations, conversationId, ready: true,
+            busy: false, hasMessages: false, agentRun: null, error: undefined,
+            askAgent, stopAgent: vi.fn(), renameConversation: vi.fn(), deleteConversation: vi.fn(),
+            startNewConversation: vi.fn(async () => undefined),
+            agentSuggestionsByMessage: {}, pendingMessageId: undefined, consumePendingMessage: () => {},
+          },
+        } as never}>
+          <AssistantPage />
+        </WorkspaceProvider>
+      </MemoryRouter>
+    )
+  }
+  render(<JumpHarness />)
+  /* NotebookScopePanel 读取已保存正文 revision 后渲染，说明跳转 state 已被消费 */
+  await waitFor(() => expect(screen.getByText(/revision 7/)).toBeTruthy())
+  /* 会话列表异步到达、conversationId 变化后，Notebook 面板仍然在（不被对齐 effect 冲掉） */
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  expect(screen.getByText(/revision 7/)).toBeTruthy()
 })

@@ -12,7 +12,8 @@ import { teacherPersonaMeta } from '../persona/personas'
 import { modeLabelsShort } from './answerMeta'
 import { AgentSteps } from './AgentSteps'
 import { AssistantMessageMarkdown, AssistantMessageSource } from './AssistantMessageContent'
-import { KnowledgeProposalCards } from './AgentCards'
+import { KnowledgeProposalCards, NotebookEditSuggestionCards } from './AgentCards'
+import { useNotebookEditSuggestions } from './useNotebookEditSuggestions'
 
 import {
   clampDockWidth,
@@ -49,7 +50,7 @@ const QUICK_PROMPTS: Array<{ label: string; prompt: string }> = [
  *   · 左边缘分界条可拖拽实时调宽（双击复位、拖太窄自动收合、宽度记忆）；
  *   · 上下文感知：说明当前挂在哪门课 / 哪份课件上，范围可手动收窄；
  *   · 检索显性化：回答后附来源清单，可跳回课件；
- *   · 当前 Notebook 回答可由用户明确插入正文；Agent 不创建正文修改建议。
+ *   · Notebook 编辑建议（ADR-0005）：待审建议在本坞展示，采纳经 CAS 写入并回灌编辑器。
  */
 export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChange, notebookAction, onNotebookActionConsumed }: AssistantDockProps) {
   const {
@@ -74,6 +75,22 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const conversationCourse = courses.find((item) => item.id === conversationCourseId)
   const fellBackToRecent = Boolean(conversationCourseId) && !courseId
   const notebook = useNotebookBridge()
+
+  /* Notebook 编辑建议（ADR-0005）：目标 = 当前打开的 Notebook（经 bridge 拿到
+     revision/editVersion/isDirty/adoptDocument，采纳后回灌编辑器）。
+     未分类 Notebook（courseId 为空）暂不走建议卡：列表与采纳入口依赖课程上下文。 */
+  const notebookEditSuggestions = useNotebookEditSuggestions({
+    target: notebook && notebook.courseId ? {
+      courseId: notebook.courseId,
+      notebookId: notebook.notebookId,
+      title: notebook.title,
+      revision: notebook.revision,
+      editVersion: notebook.editVersion,
+      isDirty: notebook.isDirty,
+      adoptDocument: notebook.adoptDocument,
+    } : null,
+    agentFinalId: conversation.agentRun?.final?.message_id,
+  })
 
   useEffect(() => {
     if (!notebookAction) return
@@ -121,6 +138,13 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const agentMaterialId = scope === 'course' && scopeChoice && scopeChoice !== '__global__'
     ? scopeChoice
     : undefined
+  /* Notebook 页的跳转目标：答疑页路由挂课程下，未分类 Notebook（无课程）没有可跳的完整答疑页 */
+  const notebookJump = notebook?.courseId
+    ? {
+        path: featurePath(notebook.courseId, 'assistant'),
+        state: { notebookScope: { id: notebook.notebookId, title: notebook.title } },
+      }
+    : null
 
   const messages = conversation.messages
   const lastMessage = messages[messages.length - 1]
@@ -278,7 +302,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
           {scopeLocked ? (
             <p className="assistant-dock-scope-lock" role="status">🔒 范围已锁定（首条消息后不能改）；仍可限定到某份课件。</p>
           ) : null}
-          {notebook ? <p className="assistant-dock-open-hint">正在查看整篇 Notebook；答疑只读正文，不会修改文档。</p> : null}
+          {notebook ? <p className="assistant-dock-open-hint">正在查看整篇 Notebook；答疑只读正文，修改会以建议形式提交，由你审核后写入。</p> : null}
 
           <div className="assistant-dock-messages" aria-live="polite" ref={messagesRef}>
             {messages.map((message, index) => (
@@ -323,7 +347,11 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 被用户中断时保留已收到的正文，但标题改成「已中断」，不再假装还在执行。 */}
             {conversation.agentRun && !conversation.agentRun.final ? (
               <article className={`assistant-dock-message assistant-dock-message-assistant assistant-dock-live${conversation.agentRun.aborted ? ' is-aborted' : ''}`}>
-                <small>{conversation.agentRun.aborted ? `${persona.name} · 已中断` : persona.name}</small>
+                <small>{conversation.agentRun.aborted
+                  ? `${persona.name} · 已中断`
+                  : conversation.agentRun.streamingText
+                    ? `${persona.name} · 生成中 · 未核验`
+                    : persona.name}</small>
                 <AgentSteps steps={conversation.agentRun.steps} />
                 {conversation.agentRun.notice ? <p className="assistant-dock-agent-notice">{conversation.agentRun.notice}</p> : null}
                 {conversation.agentRun.streamingText ? (
@@ -336,6 +364,12 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
             ) : null}
           </div>
 
+          <NotebookEditSuggestionCards
+            suggestions={notebookEditSuggestions.suggestions}
+            busyId={notebookEditSuggestions.busyId}
+            notice={notebookEditSuggestions.notice}
+            onReview={notebookEditSuggestions.review}
+          />
           {conversation.agentRun?.final?.suggestions?.some((item) => item.type === 'knowledge_proposal') ? (
             <KnowledgeProposalCards
               suggestions={conversation.agentRun.final.suggestions.filter((item): item is Extract<typeof item, { type: 'knowledge_proposal' }> => item.type === 'knowledge_proposal')}
@@ -359,7 +393,18 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
                 <button type="submit" className="assistant-dock-send" disabled={!draft.trim()}>发送</button>
               )}
             </div>
-            {conversationCourseId && !notebook ? <div className="assistant-dock-links"><Link to={featurePath(conversationCourseId, 'assistant')}>打开完整答疑</Link></div> : null}
+            {(conversationCourseId && !notebook) || notebookJump ? (
+              <div className="assistant-dock-links">
+                {conversationCourseId && !notebook ? (
+                  <Link to={featurePath(conversationCourseId, 'assistant')}>打开完整答疑</Link>
+                ) : null}
+                {/* Notebook 会话不在课程会话列表里（scope='notebook' => course_id IS NULL），
+                    跳转带上 notebookScope 让答疑页直接进入该 Notebook 的范围面板，历史在那边接续 */}
+                {notebookJump ? (
+                  <Link to={notebookJump.path} state={notebookJump.state}>在完整答疑页打开</Link>
+                ) : null}
+              </div>
+            ) : null}
           </form>
 
           {conversation.error && <p className="assistant-dock-status assistant-dock-status-error" role="status">{conversation.error}</p>}

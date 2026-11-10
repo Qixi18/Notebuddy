@@ -36,6 +36,9 @@ from app.services.conversations import (
 from app.services.course_scope import material_in_course
 from app.services.errors import ApplicationError
 
+# 思维链原文随 process_json 落库的截断上限（ADR-0005）。
+_THINKING_STORE_LIMIT = 20000
+
 
 @dataclass(frozen=True)
 class ReadingContextCommand:
@@ -312,9 +315,9 @@ def agent_message_events(
     def event_stream() -> Iterator[str]:
         final_event: dict[str, Any] | None = None
         error_message: str | None = None
-        partial_text: list[str] = []
         completed_suggestions: list[dict[str, Any]] = []
         persisted = False
+        draft_streamed = False
         process: dict[str, Any] = {"thinking_ms": 0, "thinking_chars": 0, "steps": []}
         thinking_started: float | None = None
         thinking_announced = False
@@ -334,7 +337,9 @@ def agent_message_events(
                 {key: value for key, value in step.items() if key != "started"}
                 for step in process["steps"][:60]
             ]
-            trace = process if process["thinking_ms"] or process["steps"] else None
+            trace = process if (
+                process["thinking_ms"] or process["steps"] or process.get("thinking")
+            ) else None
             # 未核验正文不得写进历史：中断时只留状态，不留草稿。
             _persist_interrupted_agent(
                 db, conversation, "", payload.learning_goal, trace, completed_suggestions,
@@ -368,19 +373,27 @@ def agent_message_events(
                     error_message = str(event.get("message") or "agent 执行失败")
                 else:
                     if event["type"] == "thinking":
-                        # 思维链原文只用于计时和计数：不外发、不落库，
-                        # 前端最多收到一条"正在思考"的状态事件。
+                        # 思维链原文实时外发并落库（ADR-0005）：仅供展示与回看，
+                        # 不进入正文与证据；超过存储上限后只继续计数。
                         if thinking_started is None:
                             thinking_started = time.monotonic()
-                        process["thinking_chars"] += len(str(event.get("text") or ""))
+                        thinking_text = str(event.get("text") or "")
+                        process["thinking_chars"] += len(thinking_text)
                         if not thinking_announced:
                             thinking_announced = True
                             yield ({"type": "status", "status": "thinking"})
+                        if len(process.get("thinking") or "") < _THINKING_STORE_LIMIT:
+                            process["thinking"] = (
+                                (process.get("thinking") or "") + thinking_text
+                            )[:_THINKING_STORE_LIMIT]
+                            yield (event)
                         continue
                     if event["type"] == "delta":
-                        # 缓冲正文，等门禁通过后再发；这里绝不 yield。
+                        # 门禁前实时下发草稿增量（ADR-0005）：仅供前端实时展示，
+                        # 落库内容仍以 verify_answer 通过后的核验正文为准。
                         close_thinking()
-                        partial_text.append(str(event.get("text") or ""))
+                        draft_streamed = True
+                        yield ({"type": "delta", "text": str(event.get("text") or "")})
                         continue
                     if event["type"] == "step":
                         close_thinking()
@@ -460,7 +473,9 @@ def agent_message_events(
             ]
             process["verification"] = verified.verification
             saved_process = (
-                process if process["thinking_ms"] or process["steps"] or process["verification"]
+                process
+                if process["thinking_ms"] or process["steps"] or process["verification"]
+                or process.get("thinking")
                 else None
             )
             assistant = persist_assistant_message(
@@ -477,8 +492,10 @@ def agent_message_events(
             )
             persisted = True
             yield ({"type": "status", "status": verified.mode})
-            for offset in range(0, len(verified.answer), 180):
-                yield ({"type": "delta", "text": verified.answer[offset:offset + 180]})
+            if not draft_streamed:
+                # 草稿增量未流出时（异常路径兜底）按分段补发，保证客户端拿到完整正文。
+                for offset in range(0, len(verified.answer), 180):
+                    yield ({"type": "delta", "text": verified.answer[offset:offset + 180]})
             yield ({
                 "type": "final",
                 "answer": verified.answer,
