@@ -49,7 +49,8 @@ QUALITY = 78
 
 # loop: pingpong = 正放后倒放,保证首尾无缝;none = 按原顺序播一次;
 #       pingpong-reverse = 从末帧开始倒放再正放(接在"正放到末帧"的前段之后,不出跳帧)。
-# trim: 只取前 N 秒(覆盖 --trim-seconds);range: 取源帧区间 [start, end](含端点)。
+# trim: 只取前 N 秒(覆盖 --trim-seconds);range: 取源帧区间 [start, end](含端点);
+# crop: 裁切窗口 (left, top, right, bottom)，在缩放前按源像素裁（一般不用）。
 ACTIONS = [
     {"id": "idle",           "job": "待机", "loop": "pingpong", "trim": 3.0},
     # 思考时长不确定：先 0→75 正放一次，再在 75↔22 之间往复
@@ -64,8 +65,14 @@ ACTIONS = [
     {"id": "writing",        "job": "写笔记", "loop": "pingpong"},
     {"id": "waiting",        "job": "待确认", "loop": "pingpong"},
     {"id": "no-evidence",    "job": "无依据", "loop": "none"},
-    {"id": "drag",           "job": "被拎起", "loop": "pingpong"},
-    {"id": "drop",           "job": "落地", "loop": "none"},
+    # 拿起放下（拖动桌宠）：1-21 帧被拎起播一次 → 22-47 帧悬空往复（按住不放时循环）
+    # → 48-121 帧落地收尾（松手后播一次）。720×960 原画布直接缩到 408×544，
+    # 角色占比与待机素材只差 1.4%，切换不跳大小，所以不裁切。
+    # range 上界特意多要一帧：24→12fps 是隔帧取，21 帧只能抽 10 帧、末帧落在 f19，
+    # 会与从 f22 起的循环段差 3 帧；取到 f22 抽 11 帧正好收在 f21。
+    {"id": "drag-intro",     "job": "拿起放下", "loop": "none",       "range": (0, 21)},
+    {"id": "drag-loop",      "job": "拿起放下", "loop": "pingpong",   "range": (21, 46)},
+    {"id": "drop",           "job": "拿起放下", "loop": "none",       "range": (47, 120)},
     {"id": "sleep",          "job": "打盹", "loop": "pingpong"},
 ]
 
@@ -172,16 +179,19 @@ def loop_order(frames, loop: str):
     return frames
 
 
-def encode(frames, out_path, canvas, fps, quality):
-    """把帧序列缩放/补边到统一画布后编码成动画 WebP。"""
+def encode(frames, out_path, canvas, fps, quality, crop=None):
+    """把帧序列裁切/缩放/补边到统一画布后编码成动画 WebP。"""
     width, height = canvas
     with tempfile.TemporaryDirectory(prefix="pet-seq-") as tmp:
         for index, path in enumerate(frames, start=1):
             shutil.copyfile(path, os.path.join(tmp, f"{index:04d}.png"))
-        vf = (
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
-            f"pad={width}:{height}:(ow-iw)/2:oh-ih:color=0x00000000"
-        )
+        steps = []
+        if crop:
+            left, top, right, bottom = crop
+            steps.append(f"crop={right - left}:{bottom - top}:{left}:{top}")
+        steps.append(f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos")
+        steps.append(f"pad={width}:{height}:(ow-iw)/2:oh-ih:color=0x00000000")
+        vf = ",".join(steps)
         run([
             "ffmpeg", "-y", "-v", "error",
             "-framerate", str(fps), "-i", os.path.join(tmp, "%04d.png"),
@@ -347,6 +357,8 @@ def main():
 
         specs = [spec for spec in ACTIONS if not wanted or spec["id"] in wanted]
         sources = {}
+        # 同一个中文目录常被多个动作分段引用（思考、讲解、拖动），合成只做一次
+        job_cache = {}
         for spec in specs:
             action_id = spec["id"]
             if args.job_root:
@@ -357,13 +369,15 @@ def main():
                 frames_dir = os.path.join(args.job_root, cn, "frames")
                 alpha_dir = os.path.join(args.job_root, cn, "alpha")
                 if os.path.isdir(frames_dir) and os.path.isdir(alpha_dir):
-                    comp_dir = os.path.join(tmp_root, action_id)
-                    try:
-                        frames = composite_alpha(frames_dir, alpha_dir, comp_dir,
-                                                 args.src_fps)
-                    except Exception as error:  # noqa: BLE001
-                        print(f"[fail] {action_id}: 合成失败 - {error}")
-                        continue
+                    if cn not in job_cache:
+                        comp_dir = os.path.join(tmp_root, f"job{len(job_cache)}")
+                        try:
+                            job_cache[cn] = (comp_dir, composite_alpha(
+                                frames_dir, alpha_dir, comp_dir, args.src_fps))
+                        except Exception as error:  # noqa: BLE001
+                            print(f"[fail] {cn}: 合成失败 - {error}")
+                            job_cache[cn] = (comp_dir, [])
+                    comp_dir, frames = job_cache[cn]
                     if frames:
                         sources[action_id] = (comp_dir, frames)
                         continue
@@ -409,7 +423,7 @@ def main():
                 loop = spec["loop"] if args.loop == "auto" else args.loop
                 ordered = loop_order(frames, loop)
                 out_path = os.path.join(out_dir, action_id + ".webp")
-                encode(ordered, out_path, canvas, args.fps, args.quality)
+                encode(ordered, out_path, canvas, args.fps, args.quality, spec.get("crop"))
                 info = verify(out_path, len(ordered), args.fps)
             except Exception as error:  # noqa: BLE001 - 单个动作失败不影响其他动作
                 print(f"[fail] {action_id}: {error}")

@@ -100,7 +100,8 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 |---|---|---|
 | 持久会话 | `POST/GET /courses/{course_id}/conversations` | 会话只属于一个课程，切换课程不会带入旧历史 |
 | 会话消息 | `GET /conversations/{id}/messages`、`POST /conversations/{id}/messages` | 保存有限历史窗口、学习目标、失败状态和证据映射；`idempotency_key` 防止重复消息 |
-| Agent 流式会话 | `POST /conversations/{id}/agent-messages` | SSE 返回步骤、增量和最终回答；用户提问、最终回答或失败状态写入同一会话历史，中间流事件不作为消息保存 |
+| Agent 流式会话 | `POST /conversations/{id}/agent-messages` | SSE 返回思考链（`thinking` 增量）、工具步骤、正文增量与最终回答；门禁前增量属未核验草稿，最终落库内容与核验徽标仍由证据门禁决定（ADR-0005）。用户提问、最终回答或失败状态写入同一会话历史，中间流事件不作为消息保存 |
+| Notebook 编辑建议 | `GET /notebooks/{id}/edit-suggestions`、`GET /courses/{id}/notebook-edit-suggestions`、`POST /notebooks/{id}/edit-suggestions/{sid}/review`、`POST /courses/{id}/notebook-edit-suggestions/apply-all` | Agent 经 `propose_notebook_edits` 工具创建待审建议；接受/部分接受/拒绝与批量应用走 CAS（`expected_revision`），stale/冲突返回 409（ADR-0005） |
 | 知识提案 | `GET /courses/{course_id}/knowledge-proposals`、`POST /knowledge-proposals/{id}/review` | 相似但名称不同的跨讲候选进入待确认状态，确认后写入变更记录 |
 | 知识变更 | `GET /courses/{course_id}/knowledge-changes` | 查看新增、深化、来源补充和审核理由 |
 | 笔记建议 | `GET/POST /notes/{id}/suggestions`、`POST /notes/{id}/suggestions/{suggestion_id}/review` | AI 只写建议；用户确认后才生成用户版本 |

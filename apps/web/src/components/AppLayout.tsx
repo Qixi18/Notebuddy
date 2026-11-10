@@ -92,7 +92,7 @@ export function featurePath(courseId: string, feature: Feature): string {
 }
 
 export function AppLayout() {
-  const { courseId, courses, error, setError, documentDirty, setDocumentDirty } = useWorkspace()
+  const { courseId, courses, conversationCourseId, error, setError, documentDirty, setDocumentDirty } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
   const isHome = location.pathname === '/'
@@ -115,7 +115,9 @@ export function AppLayout() {
       case 'forest': navigate('/forest'); return
       case 'recycle': navigate('/recycle'); return
       case 'assistant': {
-        const target = courseId ?? courses[0]?.id
+        // 与悬浮坞同一课程落点（URL 课程 → 最近访问 → 第一门）：跳到与 dock 会话
+        // 相同的课程，否则 useConversation 会因课程参数变化重置、中止进行中的流。
+        const target = conversationCourseId ?? courses[0]?.id
         navigate(target ? featurePath(target, 'assistant') : '/courses')
         return
       }

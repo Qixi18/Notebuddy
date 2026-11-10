@@ -1,11 +1,11 @@
-"""P0-QA-02：course / global / 历史 note 的答疑也必须「核验后发布」。
+"""course / global / 历史 note 的答疑「核验后落库」契约（ADR-0005 修订过程可见性口径）。
 
 覆盖范围：
 - 证据编号映射（N/D/W）与"未知编号不认"；
 - 证据不足时降级为 insufficient 并给出公开 notice，而不是悄悄放行；
-- 门禁结构无效时 fail closed（抛错，调用方不得发布正文）；
+- 门禁结构无效时 fail closed（抛错，调用方不得发布/落库正文）；
 - 没有证据时直接标记未核验，且不调用模型；
-- SSE 入口：核验失败时流里不出现正文 delta，只出现错误事件。
+- SSE 入口：门禁前草稿可实时流出，但门禁失败时不落库、流以错误事件收尾（ADR-0005）。
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from sqlalchemy import select
 
 from app.ai import verified_answer
 from app.ai.deepseek import DeepSeekError
@@ -142,8 +143,8 @@ def test_unconfigured_provider_marks_verification_unavailable(session):
     assert verified.verification["notice"] == verified_answer.UNAVAILABLE_NOTICE
 
 
-def test_agent_stream_does_not_publish_body_when_gate_fails(session, monkeypatch):
-    """SSE 入口：门禁异常时流里不能出现正文，只能出现错误事件。"""
+def test_agent_stream_discards_draft_when_gate_fails(session, monkeypatch):
+    """SSE 入口（ADR-0005）：门禁异常时草稿可以实时流出，但绝不落库，流以错误事件收尾。"""
 
     from app.api.v1 import agent as agent_api
 
@@ -160,7 +161,7 @@ def test_agent_stream_does_not_publish_body_when_gate_fails(session, monkeypatch
     monkeypatch.setattr(agent_execution, "run_agent", fake_run_agent)
     monkeypatch.setattr(agent_execution, "verify_answer", failing_gate)
 
-    from app.db.models import Conversation, Course
+    from app.db.models import Conversation, ConversationMessage, Course
     from app.schemas.api import AgentMessageCreate
 
     course = Course(name="课程")
@@ -181,11 +182,18 @@ def test_agent_stream_does_not_publish_body_when_gate_fails(session, monkeypatch
         return "".join([chunk async for chunk in response.body_iterator])
 
     stream = asyncio.run(collect())
-    assert "DRAFT_SECRET" not in stream
+    # 草稿增量实时可见（过程透明），但没有任何核验后的正文发布
+    assert "DRAFT_SECRET" in stream
     assert '"type": "error"' in stream
-    assert '"type": "delta"' not in stream
+    assert '"type": "final"' not in stream
     payload = [json.loads(line[6:]) for line in stream.splitlines() if line.startswith("data: ")]
     assert payload[-1]["type"] == "error"
+
+    messages = session.scalars(
+        select(ConversationMessage).where(ConversationMessage.conversation_id == conversation.id)
+    ).all()
+    # 落库安全核心不变：未核验草稿不写进任何消息正文
+    assert all("DRAFT_SECRET" not in (message.content or "") for message in messages)
 
 
 def test_global_scope_uses_same_gate_as_course(session):

@@ -61,8 +61,8 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
   const [hovered, setHovered] = useState(false)
   /* 彩蛋：连点 / 重问 / 夜场 / 停笔 / 离开归来，各会话只放一次 */
   const eggs = usePetEasterEggs({ busy: status === 'thinking', draft })
-  const { src: petSrc } = usePetAction(status, hovered, streaming, eggs.command)
 
+  /* 拖拽状态要喂给动作机（被拎起 → 悬空 → 落地），所以先于 usePetAction 建立 */
   const drag = usePetDrag({
     mode: effectiveMode,
     size: box,
@@ -75,6 +75,8 @@ export const PetAvatar = forwardRef<PetAvatarHandle, {
     onDetach: () => onModeChange('float'),
     onReturn: () => onModeChange('rail'),
   })
+
+  const { src: petSrc } = usePetAction(status, hovered, streaming, eggs.command, drag.dragging)
 
   useImperativeHandle(ref, () => ({
     yieldFromRect: (rect: DOMRect | null) => {

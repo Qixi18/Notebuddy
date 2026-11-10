@@ -8,9 +8,9 @@
 
 - 目标范围固定为一个明确的 Notebook 或用户明确选择的课程；不得静默退化为全局跨课程检索。
 - Notebook 第一来源是所选 Notebook 当前已保存 `document_json` 与 revision。核验材料限于该 Notebook 有效 `NotebookAsset` 关联的当前完成 ParseRun；来源不完整时不得扩大到其他 Notebook 或课程文件。
-- 核验前的草稿不向客户端发送正文 delta，也不向用户暴露内部推理。只有完成主张核验和证据 ID 校验后才允许流式发送最终回答。
+- （ADR-0005 修订原 P0-QA-02 口径，2026-11-06）核验前的草稿正文 delta 实时下发，前端以"生成中·未核验"标注；思维链原文实时外发并写入消息过程 JSON（截断 20000 字符）。**落库与核验标记仍以证据门禁为唯一闸门**：只有完成主张核验和证据 ID 校验，回答才允许落库并打核验徽标；核验失败仍整段丢弃、不落未核验草稿。
 - 新会话目标使用 `notebook_id`；`course_id` 可空仅表示 Notebook 级范围。历史 `scope='note'` 的读取映射必须显式兼容，不得依据最近访问课程猜测归属。
-- 本轮 Agent 不创建 Notebook 编辑建议；既有 `NotebookEditSuggestion` 和 Note 历史数据/迁移留存，旧写回入口在兼容风险核查后关闭。
+- （ADR-0005 修订原 A1 口径，2026-11-06）Agent 可对当前可编辑 Notebook 创建待审 `NotebookEditSuggestion`（工具 `propose_notebook_edits`，仅当存在 `editable_notebook_id` 时暴露，内容门禁保留）。应用建议仍必须经待审核端点并以 `write_document` CAS（`origin="ai_suggestion"`）写入，禁止静默覆盖；旧 Note 写回入口保持关闭。
 
 ### A1 实施快照（历史记录）
 

@@ -13,12 +13,13 @@ import { usePetAction } from '../src/features/pet/usePetAction'
  * - 悬停 3s 才打招呼，且不打断正在播的动作
  */
 
-function Harness({ status, hovered = false, streaming = false }: {
+function Harness({ status, hovered = false, streaming = false, dragging = false }: {
   status: TeacherStatus
   hovered?: boolean
   streaming?: boolean
+  dragging?: boolean
 }) {
-  const { src } = usePetAction(status, hovered, streaming)
+  const { src } = usePetAction(status, hovered, streaming, null, dragging)
   return <img data-testid="pet" src={src} alt="" />
 }
 
@@ -121,5 +122,74 @@ test('悬停：思考中不打断动作', () => {
   current = render(<Harness status="thinking" hovered />)
   expect(srcOf()).toContain('thinking-intro.webp')
   act(() => { vi.advanceTimersByTime(3500) })
+  expect(srcOf()).toContain('thinking-loop.webp')
+})
+
+test('拖动：按下从第 1 帧拎起，播完接悬空往复，按住多久都不回待机', () => {
+  current = render(<Harness status="idle" />)
+  expect(srcOf()).toContain('idle.webp')
+
+  current.rerender(<Harness status="idle" dragging />)
+  expect(srcOf()).toContain('drag-intro.webp')
+
+  // 上升段 0.83s：没播完不能提前切
+  act(() => { vi.advanceTimersByTime(600) })
+  expect(srcOf()).toContain('drag-intro.webp')
+
+  act(() => { vi.advanceTimersByTime(400) })
+  expect(srcOf()).toContain('drag-loop.webp')
+
+  // 一直按着就一直悬空往复
+  act(() => { vi.advanceTimersByTime(30000) })
+  expect(srcOf()).toContain('drag-loop.webp')
+})
+
+test('松手：播落地收尾，播完才回待机', () => {
+  current = render(<Harness status="idle" dragging />)
+  act(() => { vi.advanceTimersByTime(1200) })
+  expect(srcOf()).toContain('drag-loop.webp')
+
+  current.rerender(<Harness status="idle" />)
+  expect(srcOf()).toContain('drop.webp')
+
+  // 落地有 3.08s，中途不能掐断
+  act(() => { vi.advanceTimersByTime(2000) })
+  expect(srcOf()).toContain('drop.webp')
+
+  act(() => { vi.advanceTimersByTime(1200) })
+  expect(srcOf()).toContain('idle.webp')
+})
+
+test('拖动中状态跃迁不打断动作，松手落地后按当时状态结算', () => {
+  current = render(<Harness status="thinking" />)
+  expect(srcOf()).toContain('thinking-intro.webp')
+
+  current.rerender(<Harness status="thinking" dragging />)
+  expect(srcOf()).toContain('drag-intro.webp')
+
+  // 拖着的时候思考结束（状态粘滞到 explaining），动作不能被拽回待机
+  current.rerender(<Harness status="explaining" dragging />)
+  expect(srcOf()).toContain('drag-intro.webp')
+  act(() => { vi.advanceTimersByTime(1000) })
+  expect(srcOf()).toContain('drag-loop.webp')
+
+  current.rerender(<Harness status="explaining" />)
+  expect(srcOf()).toContain('drop.webp')
+  act(() => { vi.advanceTimersByTime(3200) })
+  expect(srcOf()).toContain('idle.webp')
+})
+
+test('思考中被拖动，松手落地后接回思考，而不是干站着', () => {
+  current = render(<Harness status="thinking" />)
+  current.rerender(<Harness status="thinking" dragging />)
+  expect(srcOf()).toContain('drag-intro.webp')
+
+  current.rerender(<Harness status="thinking" />)
+  expect(srcOf()).toContain('drop.webp')
+
+  act(() => { vi.advanceTimersByTime(3200) })
+  expect(srcOf()).toContain('thinking-intro.webp')
+
+  act(() => { vi.advanceTimersByTime(3300) })
   expect(srcOf()).toContain('thinking-loop.webp')
 })
