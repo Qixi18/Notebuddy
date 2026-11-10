@@ -1,9 +1,10 @@
 [CmdletBinding()]
-param([switch] $Check)
+param([switch] $Check, [switch] $Restart)
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $runtime = Join-Path $repo '.runtime'
+if (-not $env:MINERU_HOME) { $env:MINERU_HOME = Join-Path $runtime 'mineru' }
 $backendDir = Join-Path $repo 'apps\backend'
 $frontendDir = Join-Path $repo 'apps\web'
 $backendUrl = 'http://localhost:8000'
@@ -73,6 +74,11 @@ function Stop-ProcessTree([int] $processId) {
         Stop-ProcessTree ([int] $child.ProcessId)
     }
     Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+}
+
+if ($Restart) {
+    & (Join-Path $PSScriptRoot 'stop-dev.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not stop the existing NoteBuddy services.' }
 }
 
 Assert-PortFree 8000

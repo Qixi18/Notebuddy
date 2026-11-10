@@ -70,7 +70,7 @@ def _block_id(prefix: str = "ai") -> str:
 
 
 def _text_node(text: str) -> dict[str, Any]:
-    return {"type": "text", "text": text[:MAX_TEXT_NODE]}
+    return {"type": "text", "text": text}
 
 
 def paragraph(text: str) -> dict[str, Any]:
@@ -117,7 +117,7 @@ def table_node(rows: list[list[str]], header_rows: int = 1) -> dict[str, Any]:
 
 
 def math_node(latex: str) -> dict[str, Any]:
-    return {"type": "blockMath", "attrs": {"blockId": _block_id(), "latex": latex[:2_000]}}
+    return {"type": "blockMath", "attrs": {"blockId": _block_id(), "latex": latex}}
 
 
 def callout(title: str, text: str, *, tone: str = "note") -> dict[str, Any]:
@@ -199,9 +199,12 @@ def compose_offline(
                 return
             if not text:
                 return
-            node = paragraph(text)
-            nodes.append(node)
-            source_map[node["attrs"]["blockId"]] = sources
+            from app.document_processing.normalization.blocks import text_parts
+
+            for part in text_parts(text, MAX_PARAGRAPH_CHARS):
+                node = paragraph(part)
+                nodes.append(node)
+                source_map[node["attrs"]["blockId"]] = sources
 
         for block in blocks:
             kind = block.get("type")
@@ -374,8 +377,10 @@ def compose_deepseek(
         ],
         "processing_route": snapshot.get("processing_route"),
         "outline_context": snapshot.get("outline_context", []),
+        "draft_format": snapshot.get('provider', {}).get('reading_mode') == 'hybrid',
     }
-    requests = _DeepSeekRequests(client, llm_route=snapshot.get("processing_route") == "llm")
+    requests = _DeepSeekRequests(client, llm_route=snapshot.get("processing_route") == "llm"
+                                and not base_payload['draft_format'])
     pending = partition_payload_units(payload_units)
     compositions: list[Composition] = []
     while pending:
@@ -446,6 +451,9 @@ def combine_compositions(compositions: list[Composition]) -> Composition:
 def _compose_deepseek_batch(
     requests: _DeepSeekRequests, base_payload: dict[str, Any], payload_units: list[dict[str, Any]],
 ) -> Composition:
+    if base_payload.get('draft_format'):
+        from app.generation.draft import compose_draft
+        return compose_draft(requests, base_payload, payload_units)
     user_payload = {**base_payload, "units": payload_units}
     allowed_ids = {block["block_id"] for unit in payload_units for block in unit["blocks"]}
     if base_payload.get("processing_route") == "llm":

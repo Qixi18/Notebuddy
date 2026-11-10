@@ -11,6 +11,10 @@
 - [ADR-0003：后端路由业务职责下沉](ADR-0003-service-layer-final-extraction.md) — Proposed，Notebook/Material 等 Service 下沉与对应自动验证已完成，等待技术把关者审查。
 - [ADR-0004：剩余复杂路由用例的应用服务边界](ADR-0004-remaining-business-use-cases.md) — Proposed，`f52ced9` 基线上的会话/森林/知识/课程用例分层与自动验收已完成；真实资料、模型及浏览器人工验收仍有明确缺口，等待技术审查。
 
+- [ADR-0005：标准资料处理的完整性与规模升级](ADR-0005-standard-document-completeness.md) — Proposed，标准路线页迭代、版面/OCR/矢量证据与无损分块方案；保持现有依赖方向和正文写入边界，无 schema 迁移。待技术审查，实际验证见验收记录。
+
+- [ADR-0006：本地优先的 AI 增强资料处理](ADR-0006-hybrid-ai-document-processing.md) — Proposed，用户已批准实现方向；混合读页、紧凑教学草稿及统一批次缓存，正文/来源/预算边界保持，技术审查与真实材料验收分别记录。
+
 ## 状态含义
 
 - **Proposed**：记录现状或待审核决策，不代表批准实施。

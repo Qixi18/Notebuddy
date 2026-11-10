@@ -100,7 +100,9 @@ def _is_blank_page_model_output(items: Any) -> bool:
     )
 
 
-def parse_document(path: Path, context: ParseContext) -> DocumentIR:
+def parse_document(path: Path, context: ParseContext, *,
+                   page_numbers: list[int] | None = None, tier: str | None = None,
+                   local_only: bool = False) -> DocumentIR:
     """Parse one local file with MinerU and translate its page blocks to NoteBuddy IR."""
     try:
         from mineru import parse as mineru_parse
@@ -113,19 +115,27 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
 
     # Flash keeps text PDFs model-free and uses the cached small ONNX models
     # for scanned pages, avoiding heavyweight VLM downloads on CPU.
-    tier = (os.getenv("NOTEBOOK_MINERU_TIER", "flash").strip().lower() or "flash")
+    tier = tier or (os.getenv("NOTEBOOK_MINERU_TIER", "flash").strip().lower() or "flash")
     if tier not in {"flash", "basic", "standard", "advanced"}:
         raise ValueError("NOTEBOOK_MINERU_TIER 必须是 flash、basic、standard 或 advanced")
+    if local_only:
+        from mineru.config import config as mineru_config
+
+        aided = mineru_config.llm_aided.features
+        if tier not in {'flash', 'basic'} or aided.title_leveling or aided.cross_page_table_cell_merge:
+            raise MinerUUnavailable('本地解析禁用外部模型辅助，请使用独立的本地 MinerU 配置')
 
     _ensure_windows_vlm_utf8_locale(tier)
     parse_started = time.perf_counter()
     logger.info("mineru_parse_started parse_run_id=%s tier=%s", context.parse_run_id, tier)
+    page_options = {"page_range": ",".join(str(n) for n in sorted(set(page_numbers)))} if page_numbers else {}
     parsed = mineru_parse(
         path,
         tier=tier,
         ocr_mode="auto",
         image_analysis=os.getenv("NOTEBOOK_MINERU_IMAGE_ANALYSIS", "true").strip().lower()
         in {"1", "true", "yes", "on"},
+        **page_options,
     )
     logger.info(
         "mineru_inference_finished parse_run_id=%s tier=%s elapsed_seconds=%.3f",
@@ -147,7 +157,10 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
                                                 height=image.height)}
     else:
         source_started = time.perf_counter()
-        source_document = pdf_text.extract_pdf(path)
+        source_document = (pdf_text.extract_pdf(path) if page_numbers is None else
+                           pdf_text.RawDocument(page_count=len(page_numbers),
+                               pages=list(pdf_text.iter_pdf_pages(path, page_numbers=page_numbers)),
+                               engine=pdf_text.availability()))
         logger.info(
             "mineru_source_extract_finished parse_run_id=%s elapsed_seconds=%.3f",
             context.parse_run_id, time.perf_counter() - source_started,
@@ -198,6 +211,7 @@ def parse_document(path: Path, context: ParseContext) -> DocumentIR:
                     context.asset_id, context.parse_run_id, payload, suffix,
                 ),
                 raw_block=raw_block,
+                allow_vision=not local_only,
                 image_fallback=lambda box, page_number=page_number: _render_figure_crop(
                     path, source_pages.get(page_number), box,
                     context.asset_id, context.parse_run_id,
@@ -312,6 +326,7 @@ def _map_item(
     image_store: Any = None,
     raw_block: dict[str, Any] | None = None,
     image_fallback: Any = None,
+    allow_vision: bool = True,
 ) -> list[BlockIR]:
     kind = str(item.get("type") or "paragraph")
     content = item.get("content") if isinstance(item.get("content"), dict) else {}
@@ -389,7 +404,7 @@ def _map_item(
         vision_blocks = _enrich_mineru_figure(
             figure, image_key, asset_id=asset_id, page_number=page_number,
             order=order + 1, global_order=global_order + 1, bbox=normalized_bbox,
-        ) if image_key else []
+        ) if image_key and allow_vision else []
         if image_key:
             figure.image_key = image_key
         source.bbox = normalized_bbox

@@ -46,6 +46,7 @@ class Settings:
     document_processing_route: str = "standard"
     llm_max_upload_bytes: int = 200 * 1024 * 1024
     llm_max_pages: int = 2_000
+    llm_reading_mode: str = "hybrid"
     allowed_extensions: tuple[str, ...] = (".pptx", ".pdf", ".docx")
 
     @property
@@ -67,8 +68,8 @@ class Settings:
 
 settings = Settings(
     data_dir=_resolve_data_dir(),
-    max_upload_bytes=int(os.getenv("NOTEBOOK_MAX_UPLOAD_MB", "50")) * 1024 * 1024,
-    max_pages=max(1, int(os.getenv("NOTEBOOK_MAX_PAGES", "500"))),
+    max_upload_bytes=int(os.getenv("NOTEBOOK_MAX_UPLOAD_MB", "200")) * 1024 * 1024,
+    max_pages=max(1, int(os.getenv("NOTEBOOK_MAX_PAGES", "2000"))),
     deepseek_api_key=os.getenv("DEEPSEEK_API_KEY") or None,
     deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
     deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
@@ -86,6 +87,7 @@ settings = Settings(
     document_processing_route=os.getenv("NOTEBOOK_DOCUMENT_PROCESSING_ROUTE", "standard"),
     llm_max_upload_bytes=int(os.getenv("NOTEBOOK_LLM_MAX_UPLOAD_MB", "200")) * 1024 * 1024,
     llm_max_pages=max(1, int(os.getenv("NOTEBOOK_LLM_MAX_PAGES", "2000"))),
+    llm_reading_mode=os.getenv("NOTEBOOK_LLM_READING_MODE", "hybrid").strip().lower(),
     allowed_extensions=tuple(
         item.strip().lower() for item in os.getenv("NOTEBOOK_ALLOWED_EXTENSIONS", ".pptx,.pdf,.docx").split(",") if item.strip()
     ) or (".pptx",),

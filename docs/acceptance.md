@@ -1,5 +1,38 @@
 # 验收记录与待验收矩阵
 
+## 混合 AI 处理（2026-11-08）
+
+- 实施用户已批准的“本地优先、疑难页视觉兜底”：新 llm 上传默认 hybrid 快照，旧快照维持原全视觉；紧凑受类型校验草稿本地编译，标准/LLM 统一复用已验证生成批次，正文仍单次 write_document/CAS。无新 API 路线枚举或数据库迁移，ADR-0006 保持 Proposed。
+- 官方完整脚本退出 **1**：Ruff 通过、后端 **672 passed / 1 skipped / 1 warning**、导航 **52 passed**；Web **426 passed / 3 failed**（抽屉超时及编辑器未就绪），后续构建跳过。保持原门槛完整 Web 复测 **429 passed**，导航仍 **52 passed**，Web/Desktop 构建随后分别退出 **0**。不抹去首次失败，不声称前端时序根因已修复。
+- 最后追加长段无损分块后，混合/草稿/生成DB/旧视觉定向 **67 passed，退出 0**；独立审查指出的隐式收费、数学漏读和取消问题复现/修复后独立定向 **35 passed**。真实 MinerU 4.0.12 合成数字 PDF 选页、Basic 扫描 OCR 均退出 **0**。真实用户文件、付费模型、浏览器人工和总 Token 节省尚未验收。
+- 修改文件、命令、失败/跳过、跨模块依赖和回滚详见 [本轮交付记录](development/2026-11-08-hybrid-ai-processing.md)。
+
+## 上传后生成失败排查（2026-11-05）
+
+- 通过任务状态确认解析已完成，首个失败为缺少预算配置。已按官方 Flash 高峰费率和当日公开汇率补齐非密钥字段、重启 Worker，预算校验 ready=true；保留单文件 ¥10 和 25% 缓冲。用户分别授权两次真实重试，先因 `math_delimiter_invalid` 失败，公式兼容更新后的第二次因 JSON 自动修复后仍无效失败。正文 revision 仍为 1；本地账本累计 127 fen、预留 0、剩余 873 fen，不将其冒充供应商账单，此后未继续收费重跑。
+- 修正批次提示隐藏具体原因的问题；补齐结构化公式完整外层定界符的确定性规范化，保留质量/来源/CAS 门禁；增加不含模型正文的 JSON 错误类别、位置及结束原因诊断。定向前端 **7 passed**，最终后端生成/公式/来源/DeepSeek 回归 **82 passed**，Ruff 与 Web 构建退出 **0**。JSON 模式原已启用，本次真实语法错误的具体根因仍未知，不能把诊断补充写成生成成功。
+- Web 全量仍出现未改动历史弹窗焦点断言失败（428 passed / 1 failed，退出 1）；首次构建有沙箱 EPERM，沙箱外复测通过。当前真实任务仍失败，用户文件尚未完成生成验收；完整证据、已核对的官方接口要求及标准路线缺少批次复用的限制见 [本轮排查记录](development/2026-11-05-generation-failure-remediation.md)。
+
+## 本地重复启动端口冲突修复（2026-11-05）
+
+- 用户启动失败确认为 19:51 启动的旧 NoteBuddy API/前端仍监听 8000/5173，父启动窗口已不存在；两个端口当时都返回 HTTP 200。新增 `scripts/stop-dev.ps1` 的项目路径/模块归属选择与子进程清理，并提供 `dev.ps1 -Restart` 和可双击的 `restart-notebuddy.bat`；启动失败提示区分端口占用与缺失依赖。业务/API/数据结构/迁移定义变化：无。
+- `pwsh -NoProfile -File scripts/tests/stop-dev.test.ps1` 退出 **0**，验证只选择本项目 API/Worker/Vite 与子进程，排除其他 Python/Node。`start-notebuddy.bat -Check -Restart` 退出 **0**，没有停止服务或执行迁移；脚本语法与 `git diff --check` 通过。新增选择器测试在实现前按预期失败，随后通过。
+- 按用户启动修复授权，通过可见终端执行本项目 `start-notebuddy.bat -Restart`；正常启动路径执行已有迁移检查，不做恢复或迁移演练。21:06 的新 API/前端替换旧 PID，API health=`ok`、Web HTTP **200**，新 Worker 存在。只做启动/首页健康验证，没有上传真实材料或发起模型请求。启动窗口保留，用户可用 Ctrl+C 停止。
+
+## 标准处理升级验证（2026-11-05，feat/improve-standard-document-processing）
+
+- 默认文档上限升级为 **200 MiB / 2,000 页**；新增标准路线无损分块、混合/分片扫描 OCR、按栏排序、矢量图来源、按页消费和渲染分配边界。无 API 字段/schema/迁移或必装依赖变化；方案 [ADR-0005](architecture-decisions/ADR-0005-standard-document-completeness.md) 保持 Proposed。
+- 最终官方 `scripts/test.ps1 -RealOcr` **退出 1**：Ruff 通过、后端 **600 passed / 1 skipped / 2 warnings**、导航 **52 passed**；Vitest 425 通过、1 个未改动历史弹窗焦点断言失败，因此后续构建被跳过。日志 `.runtime/logs/test-20261105-204209-26416.log`。该文件单独 **7/7**、完整 Web **426/426** 复测和 Web/Desktop 构建随后均退出 **0**；前端时序失败如实保留，不称其根因已修复。
+- 新增 **20 项**后端回归通过，其中 600 页完整上传/解析/生成检查保留所有页尾标记并核对全部来源行。原审计反例复测和五条本地真实 OCR/离线生成 HTTP 流程通过；独立审查提出的三个边界均补测试修复并复核。真实课件、模型/费用和浏览器未验收。
+- 具体修改范围、所有关键命令/失败/跳过项、兼容与风险见 [升级交付记录](development/2026-11-05-standard-processing-upgrade.md)。
+
+## 功能完整性审计（2026-11-05，09faff5 工作区）
+
+- 在隔离测试数据、禁用 `.env` 和真实外部模型凭据的条件下，执行 `pwsh -NoProfile -File .\scripts\test.ps1 -RealOcr`，最终退出码 **0**：Ruff 通过，后端 **580 passed / 1 skipped / 2 warnings**，Web navigation **52 passed**、Vitest **85 files / 426 passed**，Web/Desktop 主进程构建通过。日志 `.runtime/logs/test-20261105-200105-36476.log`。跳过项为缺失的可选私人 PPTX；真实本地 RapidOCR 合成 PDF/PNG/JPG 用例已执行。
+- 额外五条隔离 HTTP→解析/OCR→Worker→离线生成→正文/来源/检索流程通过，涵盖课程原生 PDF、扫描 PDF、PNG、JPG 和未分类 PNG；未调用真实付费模型。`start-notebuddy.bat -Check`、架构差异检查和 `git diff --check` 均退出 **0**。
+- 新增探针复现四类标准路线内容完整性问题：扫描主体叠加少量文字时绕过 OCR、矢量图未入 DocumentIR 却报告 complete、标准生成快照裁剪长块/大表、部分双栏阅读顺序错误。**常规回归通过不代表这些反例已解决，也不能判定功能已完备。** 本轮只审计和记录，没有修改产品逻辑、API、数据结构或迁移。
+- 沙箱内曾因临时目录权限和 Python 本机 socketpair 挂起而中止检查；最终保留隔离条件在沙箱外完成。真实浏览器、真实课件、真实模型/账单、用户库迁移恢复和 Electron 实际运行未验收。详细命令、失败记录、复现与优先级见 [本轮功能审计](development/2026-11-05-functional-audit.md)。
+
 ## CI 故障复核与本地修复（2026-11-04，未提交）
 
 - GitHub Actions [Run 41789300953](https://github.com/Qixi18/Notebuddy/actions/runs/41789300953) 在 `fix/overall-debug-integration` 提交 `129ed4e3035a8ce5475d4a0ea5f6af3519c2e33a` 上失败：Ruff 通过、后端 pytest **577 passed / 4 skipped / 2 warnings**；Web navigation **51 passed / 1 failed**，因此 Vitest 和后续构建未执行。失败位于 `apps/web/tests/conversation-groups.test.ts` 的 `created_at` 回退时间断言。
@@ -20,7 +53,7 @@
 - `git diff --check` 与对 `origin/main` 的提交差异检查通过。历史 CI 指出的 5 个文件在当前树中仍有多余末尾空行，本轮仅删除这些空行；未改函数逻辑、断言、数据结构或 API。
 - 失败集中在旧助手坞交互和 Notebook 编辑相关 UI 测试。尤其正文离开确认与 409 冲突面板未通过当前测试，尚不能据后端通过推断浏览器中的数据保护行为已验收。未运行真实浏览器、真实 PDF/图片、模型、付费 API 或真实数据库迁移/恢复。
 
-以下失败快照及 2026-11-03、2026-10-30 快照均为历史执行记录，只适用于各自注明的代码基线。当前本地自动验收结果以上方 13:22 快照为准；仍不能据此声称 GitHub Actions 或真实浏览器/资料/模型验收通过。
+以上 2026-11-04 快照及下方 2026-11-03、2026-10-30 快照均为历史执行记录，只适用于各自注明的代码基线。当前本轮自动验收结果以最上方 2026-11-05 审计记录为准；仍不能据此声称 GitHub Actions 或真实浏览器/资料/模型验收通过。
 
 ## 历史快照（2026-11-03）
 

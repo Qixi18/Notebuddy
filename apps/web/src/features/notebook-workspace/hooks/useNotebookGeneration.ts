@@ -19,12 +19,29 @@ export type UploadProgressState = {
 export function uploadBatchFailureMessage(batch: NotebookUploadBatch): { message: string; errorKind: UploadProgressErrorKind } {
   const parseFailures = batch.inputs.filter((input) => input.status === 'parse_failed').length
   const generationFailures = batch.inputs.filter((input) => input.status === 'generation_failed').length
-  if (parseFailures && generationFailures) return {
-    message: `${parseFailures} 份资料解析失败，${generationFailures} 份笔记生成失败。可重试失败项。`, errorKind: 'parse',
+  const failed = batch.inputs.filter((input) => ['parse_failed', 'generation_failed'].includes(input.status))
+  const labels: Record<string, string> = {
+    DEEPSEEK_PRICE_SOURCE: '文本价格来源 URL', DEEPSEEK_PRICE_VERSION: '文本价格版本',
+    DEEPSEEK_INPUT_COST_PER_MILLION: '文本输入单价', DEEPSEEK_OUTPUT_COST_PER_MILLION: '文本输出单价',
+    NOTEBOOK_VISION_PRICE_SOURCE: '视觉价格来源 URL', NOTEBOOK_VISION_PRICE_VERSION: '视觉价格版本',
+    NOTEBOOK_BUDGET_USD_CNY_RATE: '美元兑人民币汇率', NOTEBOOK_BUDGET_FX_RATE_SOURCE: '汇率来源 URL',
+    NOTEBOOK_BUDGET_FX_RATE_AS_OF: '汇率日期',
   }
-  if (parseFailures) return { message: `${parseFailures} 份资料解析失败，可重试。`, errorKind: 'parse' }
-  if (generationFailures) return { message: `${generationFailures} 份笔记生成失败，可重试。`, errorKind: 'generation' }
-  return { message: '部分资料未能处理完成，可重试失败项。', errorKind: 'parse' }
+  const reasons = [...new Set(failed.map((input) => {
+    let reason = input.error_message?.trim() ?? ''
+    for (const [key, label] of Object.entries(labels)) reason = reason.replaceAll(key, label)
+    return reason.slice(0, 400)
+  }).filter(Boolean))].slice(0, 3)
+  const summary = parseFailures && generationFailures
+    ? `${parseFailures} 份资料解析失败，${generationFailures} 份笔记生成失败。`
+    : parseFailures ? `${parseFailures} 份资料解析失败。`
+      : generationFailures ? `${generationFailures} 份笔记生成失败。` : '部分资料未能处理完成。'
+  const nextStep = failed.some(input => input.error_code === 'budget_config_missing')
+    ? '请先在设置中补齐模型价格与汇率，再重试。' : '可重试失败项。'
+  return {
+    message: `${summary}${nextStep}${reasons.length ? ` 原因：${reasons.join('；')}` : ''}`,
+    errorKind: parseFailures || !generationFailures ? 'parse' : 'generation',
+  }
 }
 
 /**

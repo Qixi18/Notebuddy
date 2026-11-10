@@ -92,6 +92,55 @@ def test_math_gate_blocks_malformed_and_untrusted_math_without_changing_symbols(
         assert report.issues[0].node_path == "doc.content[0].content[1]"
 
 
+@pytest.mark.parametrize("latex", [r"$x+y$", r"$$x+y$$", r"\(x+y\)", r"\[x+y\]"])
+@pytest.mark.parametrize("node_type", ["inlineMath", "blockMath"])
+def test_model_math_normalization_removes_only_paired_outer_wrappers(latex, node_type):
+    original = _doc_with_math(latex, node_type=node_type)
+    before = json.dumps(original)
+    nodes = worker._normalize_model_blocks(original["content"])
+    math_node = nodes[0] if node_type == "blockMath" else nodes[0]["content"][1]
+    assert math_node["attrs"]["latex"] == "x+y"
+    assert json.dumps(original) == before
+    assert inspect_generated_math({"type": "doc", "content": nodes}).passed
+
+
+@pytest.mark.parametrize("latex", [r"\(x+y\]", r"$$\frac{1}{2$$", r"$x$ + $y$",
+                                  r"\[\href{https://example.test}{x}\]"])
+def test_unwrapping_never_accepts_broken_or_forbidden_math(latex):
+    nodes = worker._normalize_model_blocks(_doc_with_math(latex)["content"])
+    assert not inspect_generated_math({"type": "doc", "content": nodes}).passed
+
+
+def test_wrapped_model_math_can_commit_with_real_source_and_revision(db, file_db, monkeypatch):
+    course = make_course(db)
+    notebook = make_notebook(db, course)
+    asset = make_asset(db, notebook)
+    persist_ir(db, notebook, asset)
+    db.commit()
+    from app.api.v1.generation import create_generation_job
+    from app.schemas.generation import NotebookGenerationCreate
+
+    created = create_generation_job(notebook.id, NotebookGenerationCreate(asset_ids=[asset.id]),
+                                    "wrapped-model-math", db)
+    job = db.get(NotebookGenerationJob, created["id"])
+    snapshot = json.loads(job.input_snapshot_json)
+    source_id = snapshot["sources"][0]["sections"][0]["blocks"][0]["block_id"]
+    monkeypatch.setattr(worker, "compose", lambda *args, **kwargs: Composition(
+        nodes=[{"type": "blockMath", "attrs": {"blockId": "wrapped-math", "latex": r"\[x+y\]"}}],
+        source_map={"wrapped-math": [source_id]},
+    ))
+    monkeypatch.setattr(worker, "SessionLocal", sessionmaker(
+        bind=file_db, autoflush=False, expire_on_commit=False))
+    assert worker.claim_next_generation_job() == created["id"]
+    worker.process_generation_job(created["id"])
+    db.expire_all()
+    saved = db.get(Notebook, notebook.id)
+    assert db.get(NotebookGenerationJob, created["id"]).status == "completed"
+    assert saved.document_revision == 1
+    assert load_document(saved.document_json).content["content"][0]["attrs"]["latex"] == "x+y"
+    assert db.scalar(select(NotebookBlockSource)) is not None
+
+
 def test_suspicious_text_math_is_diagnostic_and_ignores_code_and_filenames():
     document = {
         "type": "doc",

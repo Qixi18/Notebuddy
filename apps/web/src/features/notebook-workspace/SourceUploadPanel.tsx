@@ -121,7 +121,7 @@ export function SourceUploadPanel({
               {item.error_message && <small>{item.error_message}</small>}
               {item.status === 'parse_failed' && item.processing_route !== 'llm' && <button type="button" onClick={() => {
                 void api.switchAssetProcessingRoute(item.asset_id, 'llm').then(() => poll(batch.id)).catch(cause => setError(String(cause)))
-              }}>改用全程 AI</button>}
+              }}>改用 AI 增强</button>}
               {['waiting_parse', 'parsing'].includes(item.status) && item.processing_route === 'llm' && <button type="button" onClick={() => {
                 void api.cancelAssetProcessing(item.asset_id).then(() => poll(batch.id)).catch(cause => setError(String(cause)))
               }}>取消读取</button>}

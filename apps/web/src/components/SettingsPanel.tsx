@@ -96,10 +96,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <select aria-label="默认文档处理路线" value={draft.NOTEBOOK_DOCUMENT_PROCESSING_ROUTE}
                     disabled={saving} onChange={event => update('NOTEBOOK_DOCUMENT_PROCESSING_ROUTE', event.target.value)}>
                     <option value="standard">标准处理</option>
-                    <option value="llm">全程 AI</option>
+                    <option value="llm">AI 增强</option>
                   </select>
                 </label>
-                <p className="settings-hint">标准处理使用本地解析，再生成笔记。全程 AI 通过当前模型读取页面、组织笔记和知识联系，会增加 API 用量。切换仅影响新上传，已有任务和重试保持原路线。</p>
+                <p className="settings-hint">标准处理使用本地解析，再生成笔记。AI 增强默认优先本地解析，疑难页交给视觉模型，再由 AI 组织笔记；仍会产生 API 用量。切换仅影响新上传，已有任务和重试保持原路线。</p>
               </section>
               <section className="settings-section">
                 <div className="settings-section-heading">
@@ -176,13 +176,13 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <span className="actions-hint">
                     {visionPreflightResult?.message ?? (status.vision.image_capability.supports_image_input
                       ? `已通过图片输入预检（${status.vision.image_capability.model ?? '当前模型'}）`
-                      : '全程 AI 上传前必须先通过；预检会发送一张极小测试图片')}
+                      : 'AI 增强上传前必须先通过；预检会发送一张极小测试图片')}
                   </span>
                   {visionPreflightResult && <em className={visionPreflightResult.supports_image_input ? 'field-existing' : 'field-existing test-bad'}>
                     {visionPreflightResult.supports_image_input ? '图片输入可用' : `预检未通过：${visionPreflightResult.status}`}
                   </em>}
                 </div>
-                <p className="field-hint">视觉配置独立于文本模型。预检使用当前表单值；用于上传前请保存同一组配置。更换地址、模型或 Key 后需重新预检；未确认图片能力时，后端会拒绝全程 AI 上传。</p>
+                <p className="field-hint">视觉配置独立于文本模型。预检使用当前表单值；用于上传前请保存同一组配置。更换地址、模型或 Key 后需重新预检；AI 增强需要已确认图片能力的模型为疑难页兜底。</p>
               </section>
 
               <section className="settings-section">
@@ -345,7 +345,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <input
                     value={draft.NOTEBOOK_MAX_UPLOAD_MB}
                     onChange={(event) => update('NOTEBOOK_MAX_UPLOAD_MB', event.target.value)}
-                    placeholder="50"
+                    placeholder="200"
                     inputMode="numeric"
                   />
                 </label>

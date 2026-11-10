@@ -17,6 +17,8 @@ Notebook 正文由 `apps/backend/app/notes/store.py` 的统一写入逻辑保存
 
 ## 请求与后台任务
 
+2026-11-08：新 `llm` 上传通过 provider 快照的 `reading_mode=hybrid` 选择 `document_processing/hybrid.py`：本地按页提取，必要时用已锁定本地 MinerU，再对未解决疑点调用原视觉 reader。原始数学几何、向量、小图或缺布局证据时保守读取原页，防止另一解析器的纯文本结果覆盖风险。旧快照缺此字段继续旧全视觉 reader。新混合生成使用 `generation/draft.py` 的受类型校验教学草稿、本地编译到 Tiptap；两条生成路线复用 `generation/resume.py`，已通过结构/公式/来源校验才缓存。每次 DeepSeek 非流式请求通过 `ai/request_control.py` 的任务检查，包括内部重试，正式正文仍原子调用 `write_document`。详见 ADR-0006（Proposed）；数据表/API 路线枚举不变。
+
 ```text
 React 页面 / Feature → Web API Client → FastAPI Router
                                       → Application Services → Domain Modules

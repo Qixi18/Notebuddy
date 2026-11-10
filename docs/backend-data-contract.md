@@ -44,6 +44,10 @@ Notebook→DocumentIR→WebSearch→核验后 SSE 的实现进度见后续 A2 �
 
 ## 当前稳定边界：权威数据流
 
+2026-11-08 混合读取补充（ADR-0006 Proposed）：provider 非敏感快照增加 reading_mode/local_parser/local_parser_version/local_tier/reading_policy。新混合成功页以 Asset scope、hybrid-read stage、页号和文件/模型/实际解析器版本/策略指纹保存 ProcessingStep，重建时为当前 ParseRun 重新绑定真实块 ID、原页码与 SourceSpan；旧全视觉任务不改。生成批次统一通过 compose_batch，只有结构、公式和来源覆盖校验通过才作为成功结果缓存，指纹包含草稿/编译版本。标准路线保留最终一次有界格式修复，格式异常批次不缓存；最终仍在全片段质量/来源及 revision/CAS 后原子写入 Notebook.document_json。取消检查下沉到每次模型请求前，避免内部重试继续预留预算。无表或已发布迁移变更。
+
+2026-11-05 标准处理升级：新标准 ParseRun 在持久化前对长文本/表格进行保留来源的分块，并重建章节、块和检索派生视图；每一片都是该 ParseRun 的真实 DocumentBlock，生成引用不使用临时虚构来源 ID。表格单元格序列化与生成快照保留完整内容，章节溢出通过合并尾部保留块覆盖。原有 ParseRun/正文历史不重写，数据库 schema 和统一正文写入路径不变。默认文档上限为 200 MiB / 2,000 页，配置可覆盖；既有正文大小、来源、预算和 revision/CAS 验证仍有效。方案为 [ADR-0005](architecture-decisions/ADR-0005-standard-document-completeness.md)（Proposed），质量与容量证据以本轮验收为准。
+
 以下数据流用于说明正文、来源解析与派生数据的归属。API 字段、状态、兼容路径等易变化细节仍须对照当前源码；相关核对记录不是全量测试或人工验收报告。
 
 ```text
