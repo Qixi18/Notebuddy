@@ -37,12 +37,17 @@ def test_material_tools_not_registered_in_note_scope(session):
     assert "list_course_materials" not in names
 
 
-def test_propose_notebook_edits_stays_disabled():
-    """P0-QA-06：本轮不恢复 Agent 对 Notebook 正文的写入口。"""
+def test_propose_notebook_edits_only_with_editable_notebook():
+    """ADR-0005 修订 P0-QA-06：编辑建议工具仅在有可编辑 Notebook 时暴露，
+    且只创建待审建议——Agent 写正文的唯一路径仍是待审审核 + 受控 CAS 应用。"""
 
-    names = _spec_names(scope="course", editable_notebook=True)
-    assert "propose_notebook_edits" not in names
-    assert "propose_knowledge_node" in names
+    for scope in ("course", "global", "note"):
+        names = _spec_names(scope=scope, editable_notebook=True)
+        assert "propose_notebook_edits" in names
+    for scope in ("course", "global", "note"):
+        names = _spec_names(scope=scope, editable_notebook=False)
+        assert "propose_notebook_edits" not in names
+    assert "propose_knowledge_node" in _spec_names(scope="course", editable_notebook=True)
 
 
 def test_list_course_materials_and_page_reading(session):

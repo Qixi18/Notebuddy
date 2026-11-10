@@ -16,6 +16,29 @@ def _retry_after(value: str | None) -> float | None:
         return None
 
 
+def _json_failure_details(error: json.JSONDecodeError, finish_reason: str | None) -> str:
+    # Keep diagnostics useful without exposing model text or arbitrary provider
+    # fields. Never include error.doc, a content excerpt, or a raw provider value.
+    kinds = {
+        "Invalid \\escape": "invalid_escape",
+        "Invalid control character at": "invalid_control_character",
+        "Unterminated string starting at": "unterminated_string",
+        "Expecting ',' delimiter": "expected_comma",
+        "Expecting ':' delimiter": "expected_colon",
+        "Expecting property name enclosed in double quotes": "expected_property_name",
+        "Expecting value": "expected_value",
+        "Extra data": "extra_data",
+    }
+    kind = kinds.get(error.msg, "invalid_syntax")
+    known_reasons = {"stop", "length", "content_filter", "tool_calls",
+                     "insufficient_system_resource", "aborted"}
+    reason = finish_reason if finish_reason in known_reasons else "unknown"
+    return (
+        f"json_error={kind}; line={error.lineno}, column={error.colno}; "
+        f"offset={error.pos}, chars={len(error.doc)}; finish_reason={reason}"
+    )
+
+
 class DeepSeekError(RuntimeError):
     """Raised when the configured DeepSeek provider cannot return a result."""
 
@@ -48,6 +71,8 @@ class DeepSeekClient:
         temperature: float = 0.2,
         thinking: bool | None = None,
     ) -> str:
+        from app.ai.request_control import check_request_allowed
+        check_request_allowed()
         if not self.configured:
             raise DeepSeekError("DEEPSEEK_API_KEY 未配置")
         from app.services.processing_budget import ProcessingBudgetError, active_budget_guard
@@ -148,9 +173,9 @@ class DeepSeekClient:
         try:
             decoded = json.loads(content)
         except json.JSONDecodeError as exc:
-            reason = "，可能因输出长度限制而被截断" if self.last_finish_reason == "length" else ""
+            details = _json_failure_details(exc, self.last_finish_reason)
             raise DeepSeekError(
-                f"DeepSeek 返回内容不是有效 JSON{reason}", code="invalid_json",
+                f"DeepSeek 返回内容不是有效 JSON（{details}）", code="invalid_json",
             ) from exc
         if not isinstance(decoded, dict):
             raise DeepSeekError("DeepSeek JSON 输出不是对象", code="invalid_json")

@@ -1,10 +1,11 @@
 import { memo, useId } from 'react'
 import type { Limb } from './naturalBranchGeometry'
 
-export const NaturalBranchWood = memo(function NaturalBranchWood({ limb, textureId, stock = false, primaryParent }: { limb: Limb; textureId: string; stock?: boolean; primaryParent?: string }) {
+export const NaturalBranchWood = memo(function NaturalBranchWood({ limb, textureId, stock = false, primaryParent, growthBlockId }: { limb: Limb; textureId: string; stock?: boolean; primaryParent?: string; growthBlockId?: string | null }) {
   const clip = `natural-limb-${useId().replace(/:/g, '')}`
   return <g className={`home-natural-limb home-natural-limb-${limb.level}`} data-wood-notebook-id={limb.bookId} aria-hidden="true" pointerEvents="none"
-    data-growth-limb={limb.id} data-growth-book={limb.bookId} data-growth-note={limb.level === 3 ? limb.id.replace(/:twig$/, '') : undefined}
+    data-growth-limb={limb.id} data-growth-book={limb.bookId} data-growth-note={limb.level === 3 ? growthBlockId : undefined}
+    data-breeze-origin={limb.level === 3 ? `${limb.curves[0][0].x}px ${limb.curves[0][0].y}px` : undefined}
     data-growth-path={limb.centerPath} data-growth-radius={limb.rootRadius} data-growth-level={stock ? 0 : limb.level} data-growth-parent={primaryParent ?? limb.parentId ?? undefined} data-growth-parent-t={primaryParent ? 1 : limb.parentT}>
     <defs><clipPath id={clip}><path d={limb.outline} /></clipPath></defs>
     <path d={limb.outline} fill={`url(#${textureId}-wood)`} stroke={limb.level > 1 ? '#938568' : undefined} strokeWidth=".35" />

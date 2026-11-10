@@ -49,16 +49,36 @@ test-*.pptx
 # Task implementation scratch and review evidence
 .superpowers/
 
-# Local tree-growth visual QA harness and original-renderer comparison copies
-/apps/web/output/growth-qa.html
-/apps/web/output/growth-qa.tsx
-/apps/web/output/growth-base/
+# Local browser and visual QA output; no tracked files live here
+/apps/web/output/
 
-# Local UI-only visual fixture; never writes real data
-/apps/web/output/garden-polish-preview.html
-/apps/web/output/garden-polish-preview.tsx
+# Developer-local scripts and draft notes
+/scripts/local/
+/scripts/scratch/
+/scripts/experiments/
+/scripts/*.local.py
+/scripts/*.local.ps1
+/scripts/*.scratch.py
+/scripts/*.scratch.ps1
+/docs/_drafts/
+/docs/_local/
+/.scratch/
+/.notes/
 
-# Local browser visual experiments and bundled previews
-/apps/web/output/playwright/
-/apps/web/output/tree-inspection/
+# Local test and profiling output
+/.cache/
+/.mypy_cache/
+/.coverage
+/.coverage.*
+/htmlcov/
+/playwright-report/
+/test-results/
+/output/
+*.prof
+*.pstats
+*.cpuprofile
+*.heapprofile
+
+# Generated preview; product animation files and manifest stay tracked
+/apps/web/public/assets/pet/preview.html
 

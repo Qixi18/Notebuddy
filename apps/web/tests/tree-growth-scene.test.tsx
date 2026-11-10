@@ -6,7 +6,8 @@ import { growthLedger } from '../src/features/tree/growth/ledger'
 import { TreeVines } from '../src/features/tree/TreeVines'
 import type { CourseTree } from '../src/types'
 import type { TreeRelation, ForestCourse } from '../src/features/forest/types'
-import { sceneBlockId } from '../src/features/forest/notebookRelations'
+import { projectDirectory, sceneBlockId } from '../src/features/forest/notebookRelations'
+import { KnowledgeTreeScene } from '../src/features/tree/KnowledgeTreeScene'
 
 const course = { course_id: 'growth-course', name: '生长课程', learning_state: 'learning', note_count: 1 } as ForestCourse
 const book = (id: string) => ({ id, course_id: course.course_id, title: id, tree_slot: id === 'old-book' ? 0 : 1, chapters: [{ id: 'm', title: '第一讲', status: 'completed', sections: [{ id: `note-${id}`, block_id: `note-${id}`, title: `知识-${id}`, notebook_id: id, material_id: 'm', tree_slot: 0 }] }], historical_sections: [], removed_chapters: [] })
@@ -24,10 +25,14 @@ test('home animates a real new branch once, keeps hit positions, and focus compl
   expect(view.container.querySelector('[data-growth-defs]')).toBeNull()
   view.rerender(<StrictMode><HomeCourseGarden courses={[course]} trees={tree(true)} {...actions} /></StrictMode>)
   await waitFor(() => expect(view.container.querySelector('[data-growth-defs]')).not.toBeNull())
+  const growingLeaf = view.container.querySelector('[data-growth-leaf][data-growth-book="new-book"]')!
+  expect(growingLeaf.querySelector('[data-home-leaf-id]')).toBeNull()
+  expect(growingLeaf.closest('[data-leaf-paint]')).not.toBeNull()
   const leaf = view.container.querySelector('[data-home-leaf-id="note-new-book"]')!
   const position = leaf.getAttribute('transform')
   fireEvent.focus(screen.getByRole('button', { name: '打开知识点：知识-new-book' }))
   expect(view.container.querySelector('[data-growth-defs]')).toBeNull()
+  expect(view.container.querySelector('[data-growth-light]')).toBeNull()
   expect(leaf.getAttribute('transform')).toBe(position)
   fireEvent.click(screen.getByRole('button', { name: '打开知识点：知识-new-book' }))
   expect(actions.onNote).toHaveBeenCalledExactlyOnceWith(course.course_id, 'new-book', expect.objectContaining({ id: 'note-new-book' }))
@@ -45,6 +50,21 @@ test('a covered scene holds new course growth until its modal closes', async () 
   expect(growthLedger.pending().some(e => e.kind === 'course')).toBe(true)
   modal.remove()
   await waitFor(() => expect(view.container.querySelector('[data-growth-defs]')).not.toBeNull())
+})
+test('projected forest leaves wait for their supporting twig using the stable body block id', async () => {
+  const animate = vi.spyOn(Element.prototype, 'animate').mockImplementation(() => ({ finished: new Promise<Animation>(() => {}), cancel: vi.fn() }) as unknown as Animation)
+  const scene = (added: boolean) => <KnowledgeTreeScene courses={[course]} trees={tree(added).map(projectDirectory)} {...actions} />
+  const view = render(scene(false))
+  view.rerender(scene(true))
+  await waitFor(() => expect(view.container.querySelector('[data-growth-defs]')).not.toBeNull())
+  const twig = view.container.querySelector('[data-growth-book="new-book"][data-growth-note="note-new-book"]')!
+  expect(twig).not.toBeNull()
+  const maskId = twig.getAttribute('mask')!.slice(5, -1)
+  const maskLine = document.getElementById(maskId)!.querySelector('path')!
+  const leaf = [...view.container.querySelectorAll<SVGGElement>('[data-growth-leaf]')].find(element => element.dataset.growthLeaf === JSON.stringify(['new-book', 'note-new-book']))!
+  const phase = (element: Element) => animate.mock.calls[animate.mock.instances.indexOf(element)][1] as KeyframeAnimationOptions
+  const wood = phase(maskLine), foliage = phase(leaf)
+  expect(Number(foliage.delay)).toBeGreaterThanOrEqual(Number(wood.delay) + Number(wood.duration) - 120)
 })
 test('a new relation grows its stem, adding to an existing stem only unfolds the new relation leaf', async () => {
   vi.mocked(Element.prototype.getBoundingClientRect).mockImplementation(function (this: Element) {

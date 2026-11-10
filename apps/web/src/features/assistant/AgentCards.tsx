@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react'
 import { api } from '../../api'
 import type { AgentSuggestion } from '../../api/agentStream'
 import type { QuizDto } from '../../api/quiz'
+import type { NotebookEditSuggestion } from '../../types'
 import { readStorage, writeStorage } from '../../utils/safeStorage'
+import { docToMarkdown } from '../notebook-editor/document'
 import { AssistantMessageMarkdown } from './AssistantMessageContent'
 import { DiffView } from './DiffView'
 import { applySelected, diffRows, hunksOf } from './noteDiff'
@@ -111,6 +113,80 @@ export function NoteSuggestionCards({
           </article>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * NotebookEditSuggestionCards（ADR-0007）：Notebook 结构化修改建议卡。
+ * 数据来自 useNotebookEditSuggestions（建议列表 API 加载的完整行，含 operations），
+ * agent 流里的 notebook_edit_suggestion 只是「产生了新建议」的指针，触发 hook 重载。
+ * 采纳走待审 review 端点（CAS + 可选操作序号），不直接改动正文。
+ */
+export function NotebookEditSuggestionCards({ suggestions, busyId, notice, onReview }: {
+  suggestions: NotebookEditSuggestion[]
+  busyId?: string
+  notice?: string
+  onReview: (suggestion: NotebookEditSuggestion, decision: 'accept' | 'reject', selectedIndices?: number[]) => void
+}) {
+  const [selected, setSelected] = useState<Record<string, Set<number>>>({})
+  if (suggestions.length === 0) return null
+  return (
+    <div className="agent-cards" role="list" aria-label="待审核的 Notebook 修改建议">
+      <small className="agent-cards-title">Notebook 修改建议 · 勾选要应用的操作，确认后写入正文</small>
+      {suggestions.map((item) => {
+        const selectedIndices = selected[item.id] ?? new Set(item.operations.map((_, index) => index))
+        return (
+          <article key={item.id} className="agent-card" role="listitem">
+            <p className="agent-card-body">
+              {item.notebook_title && <small className="agent-card-note">《{item.notebook_title}》</small>}
+              {item.rationale || 'AI 提出的修改建议'}
+            </p>
+            <fieldset className="notebook-edit-operations">
+              <legend>修改操作</legend>
+              {item.operations.map((operation, index) => (
+                <label key={`${index}-${operation.op}`}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIndices.has(index)}
+                    onChange={() => setSelected((current) => {
+                      const next = new Set(current[item.id] ?? item.operations.map((_, i) => i))
+                      if (next.has(index)) next.delete(index)
+                      else next.add(index)
+                      return { ...current, [item.id]: next }
+                    })}
+                  />
+                  <span>
+                    {operation.op} · {operation.anchor || '文末'}
+                    {operation.content ? `：${operation.content.slice(0, 120)}${operation.content.length > 120 ? '…' : ''}` : ''}
+                  </span>
+                </label>
+              ))}
+            </fieldset>
+            {item.proposed_content ? (
+              <details className="notebook-edit-preview">
+                <summary>查看完整建议正文（预览）</summary>
+                <pre>{docToMarkdown(item.proposed_content)}</pre>
+              </details>
+            ) : null}
+            <div className="agent-card-actions">
+              <button
+                type="button"
+                className="agent-card-confirm"
+                disabled={busyId === item.id || selectedIndices.size === 0}
+                onClick={() => onReview(item, 'accept', [...selectedIndices].sort((a, b) => a - b))}
+              >{busyId === item.id ? '写入中…' : `采纳所选操作（${selectedIndices.size}/${item.operations.length}）`}</button>
+              <button
+                type="button"
+                className="agent-card-reject"
+                disabled={busyId === item.id}
+                onClick={() => onReview(item, 'reject')}
+              >忽略</button>
+            </div>
+          </article>
+        )
+      })}
+      {notice ? <p className="agent-cards-title" role="status">{notice}</p> : null}
     </div>
   )
 }

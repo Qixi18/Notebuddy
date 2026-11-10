@@ -14,8 +14,8 @@
 - [数据迁移](migrations.md)、[运维](operations.md)、[安全](security.md)
 - [验收矩阵](acceptance.md)、[答疑验收](acceptance-notebook-qa.md)、[文件预算验收](acceptance-file-budget.md)
 
-## 历史记录
+## 历史与待审记录
 
-部分过期设计和交接材料已从当前工作树移除；当前仍保留专项设计、迁移方案、运行手册和验收记录。阅读时应依据文档内的日期、分支与 Proposed/Accepted 状态判断适用性，需要追溯已移除内容时可查 Git 历史。历史验收数据只证明对应日期的执行结果，不自动构成当前实现要求。尤其旧 Note/ParsedPage/知识提案流程须先核对当前路由和数据契约。
+两份旧软件工程概要/详细设计及其配图、两份已完成执行计划已从当前工作树移除，可由 Git 历史追溯。保留的专题交付记录、迁移方案与验收记录只证明各自标注的日期和基线；[ADR 索引](architecture-decisions/README.md)中的 Proposed 仍待技术审查。旧 Note/ParsedPage/知识提案流程须先核对当前路由和数据契约。
 
 查代码时可从 [模块职责地图](module-map.md)定位；Web 路由定义位于 `apps/web/src/App.tsx`，后端 API 注册位于 `apps/backend/app/api/v1/routes.py`。具体调用链和数据边界以架构说明、契约与当前源码为准。

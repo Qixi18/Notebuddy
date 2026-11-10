@@ -6,6 +6,39 @@
   ],
   "fps": 12,
   "actions": {
+    "drag-intro": {
+      "id": "drag-intro",
+      "file": "drag-intro.webp",
+      "loop": "none",
+      "once": true,
+      "outputFrames": 11,
+      "duration": 0.92,
+      "width": 408,
+      "height": 544,
+      "bytes": 266252
+    },
+    "drag-loop": {
+      "id": "drag-loop",
+      "file": "drag-loop.webp",
+      "loop": "pingpong",
+      "once": false,
+      "outputFrames": 24,
+      "duration": 2.0,
+      "width": 408,
+      "height": 544,
+      "bytes": 594874
+    },
+    "drop": {
+      "id": "drop",
+      "file": "drop.webp",
+      "loop": "none",
+      "once": true,
+      "outputFrames": 37,
+      "duration": 3.08,
+      "width": 408,
+      "height": 544,
+      "bytes": 941556
+    },
     "error": {
       "id": "error",
       "file": "error.webp",

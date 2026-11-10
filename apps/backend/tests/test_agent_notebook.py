@@ -48,7 +48,7 @@ def _setup(session):
 
 
 def _seed_existing_suggestion(session, book, edits, rationale="测试遗留建议"):
-    """为兼容 API 测试种入既有数据；Agent 不再具备创建建议的工具。"""
+    """为兼容 API 测试种入既有数据（绕过 agent 工具直接建行）。"""
     proposed = apply_edits(load_document(book.document_json).content, edits)
     suggestion = NotebookEditSuggestion(
         notebook_id=book.id,
@@ -68,7 +68,12 @@ def test_tool_specs_use_notebook_names():
     names = {spec["function"]["name"] for spec in specs}
     assert {"search_course", "read_notebook", "list_course_notebooks",
             "search_forest", "get_source_coverage"}.issubset(names)
-    assert "propose_notebook_edits" not in names
+    # ADR-0005：存在可编辑 Notebook 时暴露编辑建议工具（仍只创建待审建议）
+    assert "propose_notebook_edits" in names
+    # 无可编辑 Notebook 时不暴露
+    assert "propose_notebook_edits" not in {
+        spec["function"]["name"] for spec in build_tool_specs(scope="global", editable_notebook=False, allow_web=False)
+    }
     assert "read_note" not in names
     assert "propose_note_edits" not in names
 
@@ -184,7 +189,8 @@ def test_agent_rejects_notebook_context_from_foreign_course(session):
     assert captured.value.status_code == 404
 
 
-def test_agent_cannot_create_notebook_edit_suggestions(session):
+def test_agent_can_propose_notebook_edit_suggestions(session):
+    """ADR-0005：存在可编辑 Notebook 时，agent 通过工具创建待审编辑建议（不直接改正文）。"""
     course, book, _asset = _setup(session)
     before = book.document_json
     outcome = execute_tool(
@@ -197,10 +203,56 @@ def test_agent_cannot_create_notebook_edit_suggestions(session):
         scope="course", editable_notebook_id=book.id,
     )
     session.commit()
-    assert "工具" in outcome.payload_text
-    assert "建议" not in outcome.suggestions
+    assert "待确认状态" in outcome.payload_text
+    assert outcome.suggestions and outcome.suggestions[0]["type"] == "notebook_edit_suggestion"
+    assert outcome.suggestions[0]["notebook_id"] == book.id
     session.refresh(book)
     assert book.document_json == before
+    row = session.query(NotebookEditSuggestion).filter_by(notebook_id=book.id).one()
+    assert row.status == "pending"
+    assert row.base_revision == book.document_revision
+
+
+def test_agent_cannot_propose_edits_without_editable_notebook(session):
+    """无 editable_notebook_id 时工具不进 spec，越权调用被范围门禁拒绝。"""
+    course, book, _asset = _setup(session)
+    outcome = execute_tool(
+        session, course_id=course.id, name="propose_notebook_edits",
+        arguments={"edits": [{"op": "append", "content": "追加一段。"}]},
+        scope="course",
+    )
+    assert "不允许" in outcome.payload_text
+    assert outcome.suggestions == []
+    assert session.query(NotebookEditSuggestion).filter_by(notebook_id=book.id).count() == 0
+
+
+def test_agent_cannot_propose_edits_for_other_notebook(session):
+    """只能对当前打开（或锁定）的笔记提交建议。"""
+    course, book, _asset = _setup(session)
+    outcome = execute_tool(
+        session, course_id=course.id, name="propose_notebook_edits",
+        arguments={
+            "notebook_id": "other-notebook",
+            "edits": [{"op": "append", "content": "追加一段。"}],
+        },
+        scope="course", editable_notebook_id=book.id,
+    )
+    assert "超出可编辑范围" in outcome.summary
+    assert session.query(NotebookEditSuggestion).filter_by(notebook_id=book.id).count() == 0
+
+
+def test_agent_edit_suggestion_rejects_chat_markers(session):
+    """内容门禁保留：建议正文混入对话性文字时拒绝，不产生建议行。"""
+    course, book, _asset = _setup(session)
+    outcome = execute_tool(
+        session, course_id=course.id, name="propose_notebook_edits",
+        arguments={
+            "edits": [{"op": "append",
+                       "content": "已经提交了修改建议，点「采纳」即可。"}],
+        },
+        scope="course", editable_notebook_id=book.id,
+    )
+    assert "混入对话文字" in outcome.summary
     assert session.query(NotebookEditSuggestion).filter_by(notebook_id=book.id).count() == 0
 
 

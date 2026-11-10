@@ -1,9 +1,10 @@
-"""Agent 工具层：只读检索与学习技能。
+"""Agent 工具层：只读检索、学习技能与待审编辑建议。
 
 安全边界：
 - 只读工具全部校验课程归属（经 Notebook.course_id）；
-- 本轮 Agent 只读 Notebook 正文，不提供正文编辑工具；
-- 可编辑目标仅供历史/兼容辅助逻辑保留，不暴露给当前工具集；
+- Agent 不直接改写 Notebook 正文：propose_notebook_edits 只创建待审
+  NotebookEditSuggestion（ADR-0007），应用必须经审核端点按 CAS 写入正文；
+- 仅当会话携带可编辑 Notebook（editable_notebook_id）时暴露编辑建议工具；
 - 工具回填文本一律截断，防止多轮循环撑爆上下文。
 """
 
@@ -156,6 +157,35 @@ def build_tool_specs(
                 "confidence": {"type": "number", "description": "0-1 置信度"},
             },
             ["candidate_name", "candidate_summary", "rationale"],
+        ))
+    if editable_notebook and scope in ("note", "course", "global"):
+        # ADR-0007：编辑建议产生端重新开放；只创建待审建议，不直接改动正文。
+        specs.append(_spec(
+            "propose_notebook_edits",
+            "对当前打开（或锁定）的笔记提交结构化修改建议，用户在前端逐块审核后才写入正文。"
+            "用户要求修改、整理、补充或纠错笔记内容时使用；不要在回答正文里复述整篇修改结果。",
+            {
+                "notebook_id": {"type": "string", "description": "可选：笔记 ID，默认当前打开的笔记"},
+                "rationale": {"type": "string", "description": "一句话说明这批修改的意图"},
+                "edits": {
+                    "type": "array",
+                    "description": "1-8 个按顺序执行的操作；content 一律为 Markdown，且只包含笔记本身内容",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "op": {
+                                "type": "string",
+                                "enum": ["append", "insert_after_heading", "replace_section", "remove_section"],
+                                "description": "append=追加到文末；insert_after_heading=插入到小节标题后；replace_section=替换小节内容（保留标题）；remove_section=删除整个小节",
+                            },
+                            "anchor": {"type": "string", "description": "目标小节标题原文，必须与正文标题逐字一致；append 不需要"},
+                            "content": {"type": "string", "description": "Markdown 内容；remove_section 不需要"},
+                        },
+                        "required": ["op"],
+                    },
+                },
+            },
+            ["edits"],
         ))
     if allow_quiz:
         specs.extend([
@@ -446,6 +476,7 @@ _EXECUTORS = {
     "explain_term": _explain_term,
     "web_search": _web_search,
     "propose_knowledge_node": _propose_knowledge_node,
+    "propose_notebook_edits": _propose_notebook_edits,
     "generate_quiz": _generate_quiz,
     "generate_review_outline": _generate_review_outline,
     "generate_concept_contrast": _generate_concept_contrast,
@@ -462,6 +493,7 @@ _EXECUTOR_PARAMS: dict[str, tuple[str, ...]] = {
     "explain_term": ("course_id", "arguments", "scope", "locked_notebook_id", "fixed_material_id"),
     "web_search": ("course_id", "arguments", "allow_web"),
     "propose_knowledge_node": ("course_id", "arguments"),
+    "propose_notebook_edits": ("course_id", "arguments", "editable_notebook_id"),
     "generate_quiz": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),
     "generate_review_outline": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),
     "generate_concept_contrast": ("course_id", "arguments", "conversation_id", "scope", "locked_notebook_id", "fixed_material_id"),

@@ -124,7 +124,7 @@ class TableData:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "rows": [[_clean(cell, 2_000) for cell in row] for row in self.rows],
+            "rows": [[cell if isinstance(cell, str) else "" for cell in row] for row in self.rows],
             "header_rows": max(0, min(int(self.header_rows), len(self.rows))),
         }
 

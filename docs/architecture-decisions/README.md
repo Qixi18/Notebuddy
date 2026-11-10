@@ -10,6 +10,11 @@
 - [ADR-0002：Notebook 核心架构整改路线](ADR-0002-verified-notebook-assistant-and-file-budget.md) — Proposed，A1/A2、B1/B2、C1/C2、S1–S8 有实现记录；自动回归已完成，真实材料/模型/浏览器及迁移恢复验收仍未完成。协作者审核前不能视为 Accepted。
 - [ADR-0003：后端路由业务职责下沉](ADR-0003-service-layer-final-extraction.md) — Proposed，Notebook/Material 等 Service 下沉与对应自动验证已完成，等待技术把关者审查。
 - [ADR-0004：剩余复杂路由用例的应用服务边界](ADR-0004-remaining-business-use-cases.md) — Proposed，`f52ced9` 基线上的会话/森林/知识/课程用例分层与自动验收已完成；真实资料、模型及浏览器人工验收仍有明确缺口，等待技术审查。
+- [ADR-0005：标准资料处理的完整性与规模升级](ADR-0005-standard-document-completeness.md) — Proposed，标准路线页迭代、版面/OCR/矢量证据与无损分块方案；保持现有依赖方向和正文写入边界，无 schema 迁移。待技术审查，实际验证见验收记录。
+
+- [ADR-0006：本地优先的 AI 增强资料处理](ADR-0006-hybrid-ai-document-processing.md) — Proposed，用户已批准实现方向；混合读页、紧凑教学草稿及统一批次缓存，正文/来源/预算边界保持，技术审查与真实材料验收分别记录。
+
+- [ADR-0007：恢复答疑过程可见性与 Notebook 编辑建议工具](ADR-0007-restore-agent-streaming-and-notebook-edit-suggestions.md) — Proposed，原编号 ADR-0005；因与标准资料处理 ADR 编号冲突而重编号，决策内容与状态不变。修订 ADR-0002 S2（P0-QA-02）"过程不可见"部分并保留其核验留档契约；等待技术把关者与原作者复核。
 
 ## 状态含义
 

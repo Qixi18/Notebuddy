@@ -1,5 +1,7 @@
 # API 路由现状（2026-11-03 源码核对）
 
+2026-11-05 标准资料处理升级保持既有路由、请求/响应字段、归属校验与错误语义；默认文档大小/页数改为 **200 MiB / 2,000 页**，已有配置仍优先。客户端应读取 `GET /api/v1/config/capabilities` 的有效限制。重新解析后的 IR 可能有更多实际来源块和矢量图证据，未解读图形继续通过既有 quality/issues 字段报告；正文、引用、revision/CAS 契约不变。详见 [标准处理说明](parsing.md) 与 [ADR-0005](architecture-decisions/ADR-0005-standard-document-completeness.md)。
+
 前缀为 `/api/v1`，路由模块以 `apps/backend/app/api/v1/routes.py` 实际注册为准。此处的主路径/兼容分类不意味着兼容 API 已废弃，也不代表每个响应字段均已完成文档化。2026-11-03 核对的已注册模块中没有旧 `notes` API Router；当前 Notebook 正文以 Notebook 路由为准。
 
 | 类别 | 方法/路径 | 用途与边界 |
@@ -23,6 +25,8 @@
 # API 契约
 
 ## 双路线文件处理（2026-10-30）
+
+2026-11-08 兼容补充：公共路线值仍为 `standard` / `llm`，Notebook 界面的 `llm` 文案变为“AI 增强”。新上传的 provider 快照冻结 `reading_mode=hybrid|vision`、本地解析器版本/档位及读取策略版本；新默认 hybrid，环境变量 `NOTEBOOK_LLM_READING_MODE=vision` 可恢复新上传的全视觉行为。该环境变量不新增设置 API 可编辑键。旧上传没有 reading_mode 时保持原全视觉方式；已失败任务普通重试不会自动切换新策略。切换已有资料仍使用现有 processing-route 端点创建新 ParseRun，付费调用继续共用原 Asset 预算。无新路由、公共枚举或数据库迁移。
 
 以下地址均以 `/api/v1` 为前缀：
 
@@ -96,7 +100,8 @@ Web 定位：`/courses/:courseId/notebook?chapter=<materialId>&section=<noteId>`
 |---|---|---|
 | 持久会话 | `POST/GET /courses/{course_id}/conversations` | 会话只属于一个课程，切换课程不会带入旧历史 |
 | 会话消息 | `GET /conversations/{id}/messages`、`POST /conversations/{id}/messages` | 保存有限历史窗口、学习目标、失败状态和证据映射；`idempotency_key` 防止重复消息 |
-| Agent 流式会话 | `POST /conversations/{id}/agent-messages` | SSE 返回步骤、增量和最终回答；用户提问、最终回答或失败状态写入同一会话历史，中间流事件不作为消息保存 |
+| Agent 流式会话 | `POST /conversations/{id}/agent-messages` | SSE 返回思考链（`thinking` 增量）、工具步骤、正文增量与最终回答；门禁前增量属未核验草稿，最终落库内容与核验徽标仍由证据门禁决定（ADR-0007）。用户提问、最终回答或失败状态写入同一会话历史，中间流事件不作为消息保存 |
+| Notebook 编辑建议 | `GET /notebooks/{id}/edit-suggestions`、`GET /courses/{id}/notebook-edit-suggestions`、`POST /notebooks/{id}/edit-suggestions/{sid}/review`、`POST /courses/{id}/notebook-edit-suggestions/apply-all` | Agent 经 `propose_notebook_edits` 工具创建待审建议；接受/部分接受/拒绝与批量应用走 CAS（`expected_revision`），stale/冲突返回 409（ADR-0007） |
 | 知识提案 | `GET /courses/{course_id}/knowledge-proposals`、`POST /knowledge-proposals/{id}/review` | 相似但名称不同的跨讲候选进入待确认状态，确认后写入变更记录 |
 | 知识变更 | `GET /courses/{course_id}/knowledge-changes` | 查看新增、深化、来源补充和审核理由 |
 | 笔记建议 | `GET/POST /notes/{id}/suggestions`、`POST /notes/{id}/suggestions/{suggestion_id}/review` | AI 只写建议；用户确认后才生成用户版本 |

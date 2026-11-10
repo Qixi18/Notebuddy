@@ -8,11 +8,13 @@ import { pointAt } from './naturalBranchGeometry'
 import { groupForestVines, type VineGroup } from './vineGroups'
 import { VineLayer } from './VineLayer'
 import type { VineExclusionZone, VineInput } from './vineGeometry'
+import type { VineFlow } from './motion/vineFlow'
 import './vine.css'
 import '../home/note-preview.css'
 
 export type VineCourseGeometry = { x: number; y: number; canopy: CourseCanopy; scale?: number; grove?: number }
 type Preview = { kind: 'relation' | 'group'; id: string; target: SVGGElement }
+const EMPTY_NOTEBOOKS = new Map<string, string>()
 
 function branchAnchor(course: VineCourseGeometry, side: number, order: number, notebookId?: string): Point | undefined {
   const size = course.scale ?? 1
@@ -44,7 +46,7 @@ function GroupPreview({ preview, id, title, text, onEnter, onLeave }: { preview:
   return createPortal(<div ref={ref} role="tooltip" id={id} className="home-leaf-preview kt-vine-preview" style={{ left: position.left, top: position.top, visibility: position.ready ? 'visible' : 'hidden' }} onMouseEnter={onEnter} onMouseLeave={onLeave}><strong>{title}</strong><p>{text}</p><span className="home-leaf-preview-hint">{preview.kind === 'group' ? '点击藤茎，查看这组的全部联系' : '点击小叶子，查看依据与两端笔记'}</span></div>, document.body)
 }
 
-export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, noteBooks = new Map(), courseGeometry, viewKey, onSelectedPoint, stemHitRange, leafExclusions, layout = 'row' }: {
+export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, noteBooks = EMPTY_NOTEBOOKS, courseGeometry, viewKey, onSelectedPoint, stemHitRange, leafExclusions, layout = 'row' }: {
   relations: TreeRelation[]; endpoints: Map<string, Point>; noteBooks?: Map<string, string>
   selectedId?: string; onRelation: (relation: TreeRelation) => void; zoom: number
   courseGeometry?: Map<string, VineCourseGeometry>; viewKey?: string
@@ -77,21 +79,24 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
       return { rect: { x: course.x - 350 * scale, y: course.y - 85 * scale, width: 700 * scale, height: 170 * scale } }
     }),
   ], [leafExclusions, courseGeometry])
-  const inputs = useMemo(() => {
+  const { inputs, flowByRelation } = useMemo(() => {
     const counts = new Map<string, number>()
     const result: VineInput[] = []
+    const flows = new Map<string, VineFlow>()
     for (const group of groups) {
       const pair = JSON.stringify(group.courses), order = counts.get(pair) ?? 0
       counts.set(pair, order + 1)
       const selected = group.relations.find(relation => relation.id === selectedId)
       const representative = selected ?? group.relations.find(relation => endpoints.has(relation.source_block_id) && endpoints.has(relation.target_block_id)) ?? group.relations[0]
       let start = representative && endpoints.get(representative.source_block_id), end = representative && endpoints.get(representative.target_block_id)
+      let startCourseId = representative?.source_course_id
       const a = courseGeometry?.get(group.courses[0]), b = courseGeometry?.get(group.courses[1])
       let midpoint: Point | undefined
       if (a && b) {
         const left = a.x <= b.x ? a : b, right = a.x <= b.x ? b : a
         const leftId = left === a ? group.courses[0] : group.courses[1]
         const rightId = right === a ? group.courses[0] : group.courses[1]
+        startCourseId = leftId
         const notebookFor = (courseId: string) => representative
           ? noteBooks.get(representative.source_course_id === courseId ? representative.source_block_id : representative.target_block_id)
           : undefined
@@ -104,10 +109,15 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
         start = branchAnchor(left, 1, order, notebookFor(leftId)) ?? start; end = branchAnchor(right, -1, order, notebookFor(rightId)) ?? end
       }
       if (!start || !end || Math.hypot(end.x - start.x, end.y - start.y) < 30) continue
-      if (start.x > end.x) [start, end] = [end, start]
+      if (start.x > end.x) {
+        [start, end] = [end, start]
+        startCourseId = startCourseId === group.courses[0] ? group.courses[1] : group.courses[0]
+      }
       result.push({ id: group.id, order, start, end, midpoint, routeExclusions: exclusions, relationIds: group.relations.map(relation => relation.id), leafRange: courseGeometry ? [.36,.64] : undefined, stemHitRange, startTangent: { x: 1, y: order === 0 ? -.5 : .2 }, endTangent: { x: 1, y: order === 0 ? .35 : -.3 } })
+      for (const relation of group.relations) flows.set(relation.id, { reverse: relation.source_course_id !== startCourseId,
+        source: endpoints.get(relation.source_block_id), target: endpoints.get(relation.target_block_id) })
     }
-    return result
+    return { inputs: result, flowByRelation: flows }
   }, [groups, endpoints, noteBooks, selectedId, courseGeometry, stemHitRange, layout, exclusions])
   const groupTitle = (group: VineGroup) => {
     const first = group.relations[0]
@@ -119,7 +129,7 @@ export function TreeVines({ relations, endpoints, selectedId, onRelation, zoom, 
   const previewRelation = preview?.kind === 'relation' ? relationMap.get(preview.id) : undefined
   const previewGroup = preview?.kind === 'group' ? groupMap.get(preview.id) : undefined
   return <g className="kt-vines">
-    <VineLayer groups={inputs} screenScale={zoom} leafExclusions={exclusions} leafAtlasHref="/assets/forest/leaves-atlas.webp" selectedRelationId={selectedId} selectedGroupId={groups.find(group => group.relations.some(relation => relation.id === selectedId))?.id ?? openGroup} onSelectedPoint={onSelectedPoint}
+    <VineLayer groups={inputs} flowByRelation={flowByRelation} screenScale={zoom} leafExclusions={exclusions} leafAtlasHref="/assets/forest/leaves-atlas.webp" selectedRelationId={selectedId} selectedGroupId={groups.find(group => group.relations.some(relation => relation.id === selectedId))?.id ?? openGroup} onSelectedPoint={onSelectedPoint}
       groupMembers={id => groupMap.get(id)!.relations.map(relation => relation.id).join('|')}
       groupLabel={id => `查看${groupTitle(groupMap.get(id)!)}的${groupMap.get(id)!.relations.length}条知识联系`}
       relationLabel={id => relationTitle(relationMap.get(id)!)} previewId={previewId} previewItemId={preview?.id}

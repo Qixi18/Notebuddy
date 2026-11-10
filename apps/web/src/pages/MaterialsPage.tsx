@@ -208,7 +208,7 @@ export function MaterialsPage() {
                   </button>
                   {material.status === 'failed' && material.asset_id && material.processing_route !== 'llm' && <button className="material-retry-action" onClick={() => {
                     void api.switchAssetProcessingRoute(material.asset_id!, 'llm').then(() => refreshCurrentMaterials()).catch(cause => setMaterialActionError(String(cause)))
-                  }}>改用全程 AI</button>}
+                  }}>改用 AI 增强</button>}
                   {['pending', 'processing'].includes(material.status) && material.asset_id && material.processing_route === 'llm' && <button className="text-button" onClick={() => {
                     void api.cancelAssetProcessing(material.asset_id!).then(() => refreshCurrentMaterials()).catch(cause => setMaterialActionError(String(cause)))
                   }}>取消读取</button>}

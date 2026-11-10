@@ -11,7 +11,7 @@ data.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -50,6 +50,7 @@ class RawSpan:
     bold: bool = False
     italic: bool = False
     font: str | None = None
+    superscript: bool = False
 
 
 @dataclass
@@ -78,6 +79,7 @@ class RawImageBlock:
     width: int | None = None
     height: int | None = None
     xref: int | None = None
+    is_vector: bool = False
 
 
 @dataclass
@@ -98,10 +100,33 @@ class RawPage:
     text: str = ""
     render_png: bytes | None = None
     render_error: str | None = None
+    has_vector_content: bool = False
 
     @property
     def has_text_layer(self) -> bool:
         return any(block.text for block in self.text_blocks)
+
+    @property
+    def requires_ocr(self) -> bool:
+        if not self.has_text_layer:
+            return True
+        area = (self.width or 0) * (self.height or 0)
+        if not area:
+            return False
+        from app.document_processing.normalization.layout import covered_area
+
+        boxes = [[max(0, image.bbox[0]), max(0, image.bbox[1]),
+                  min(self.width, image.bbox[2]), min(self.height, image.bbox[3])]
+                 for image in self.image_blocks if not image.is_vector and image.bbox]
+        boxes = [box for box in boxes if box[2] > box[0] and box[3] > box[1]]
+        if covered_area(boxes) / area < .6:
+            return False
+        chars = sum(len(block.text.strip()) for block in self.text_blocks)
+        inside = sum(len(block.text.strip()) for block in self.text_blocks if block.bbox
+                     and any(box[0] <= (block.bbox[0] + block.bbox[2]) / 2 <= box[2]
+                             and box[1] <= (block.bbox[1] + block.bbox[3]) / 2 <= box[3]
+                             for box in boxes))
+        return chars < 80 or inside < chars * .1
 
 
 @dataclass
@@ -158,15 +183,19 @@ def _bbox(raw: Any) -> list[float] | None:
     return None
 
 
-def _render(page: Any, dpi: int) -> bytes | None:
+def _render(page: Any, dpi: int, *, clip: Any = None) -> bytes | None:
     try:
         dpi = max(72, min(int(dpi), MAX_RENDER_DPI))
-        pixmap = page.get_pixmap(dpi=dpi, alpha=False)
-        if max(pixmap.width, pixmap.height) > MAX_RENDER_SIDE:
-            # Re-render at the reduced dpi instead of resampling the pixmap.
-            scale = MAX_RENDER_SIDE / max(pixmap.width, pixmap.height)
-            reduced = max(48, int(dpi * scale))
-            pixmap = page.get_pixmap(dpi=reduced, alpha=False)
+        rect = clip if clip is not None else page.rect
+        max_dpi = int(72 * MAX_RENDER_SIDE / max(rect.width, rect.height, 1))
+        if max_dpi < 1:
+            logger.warning("PDF geometry exceeds the bounded renderer's supported size")
+            return None
+        dpi = min(dpi, max_dpi)
+        kwargs = {"dpi": dpi, "alpha": False}
+        if clip is not None:
+            kwargs["clip"] = clip
+        pixmap = page.get_pixmap(**kwargs)
         return pixmap.tobytes("png")
     except Exception:  # pragma: no cover - rendering must not fail a parse
         logger.warning("Could not render PDF page", exc_info=True)
@@ -187,10 +216,34 @@ def extract_pdf(
     disables native OCR.
     """
 
+    pages = list(iter_pdf_pages(path, render_when=render_when, render_dpi=render_dpi))
+    return RawDocument(page_count=len(pages), pages=pages, engine=availability())
+
+
+def iter_pdf_pages(path: Path, *, render_when: Callable[[RawPage], bool] | None = None,
+                   render_dpi: int = 120, page_numbers: list[int] | None = None) -> Iterator[RawPage]:
+    """Release each raw page/render after the consumer has persisted its evidence."""
     module = _pymupdf()
     if module is not None:
-        return _extract_with_pymupdf(module, path, render_when=render_when, render_dpi=render_dpi)
-    return _extract_with_pypdf(path, render_when=render_when, render_dpi=render_dpi)
+        yield from _iter_with_pymupdf(module, path, render_when=render_when, render_dpi=render_dpi,
+                                      page_numbers=page_numbers)
+    else:
+        yield from _iter_with_pypdf(path, render_when=render_when, render_dpi=render_dpi,
+                                   page_numbers=page_numbers)
+
+
+def render_pdf_region(path: Path, page_number: int, bbox: list[float]) -> bytes | None:
+    module = _pymupdf()
+    if module is None:
+        return None
+    try:
+        with module.open(str(path)) as document:
+            page = document[page_number - 1]
+            rect = module.Rect(bbox) & page.rect
+            return _render(page, 120, clip=rect) if not rect.is_empty else None
+    except Exception:
+        logger.debug("Could not render vector evidence", exc_info=True)
+        return None
 
 
 def extract_pdf_image(path: Path, xref: int) -> bytes | None:
@@ -244,16 +297,18 @@ def render_pdf_page(path: Path, page_number: int, *, dpi: int = 120) -> bytes | 
     return None
 
 
-def _extract_with_pymupdf(
+def _iter_with_pymupdf(
     module: Any,
     path: Path,
     *,
     render_when: Callable[[RawPage], bool] | None,
     render_dpi: int,
-) -> RawDocument:
-    pages: list[RawPage] = []
+    page_numbers: list[int] | None = None,
+) -> Iterator[RawPage]:
     with module.open(str(path)) as document:
         for index, page in enumerate(document, start=1):
+            if page_numbers is not None and index not in page_numbers:
+                continue
             raw_page = RawPage(
                 page_number=index,
                 width=float(page.rect.width),
@@ -261,7 +316,9 @@ def _extract_with_pymupdf(
                 rotation=int(getattr(page, "rotation", 0) or 0),
             )
             try:
-                payload = page.get_text("dict")
+                # Images are located through xrefs below; avoid copying every
+                # embedded image's bytes into the text-layout dictionary.
+                payload = page.get_text("dict", flags=module.TEXTFLAGS_DICT & ~module.TEXT_PRESERVE_IMAGES)
             except Exception:  # pragma: no cover
                 payload = {"blocks": []}
             for block in payload.get("blocks") or []:
@@ -278,6 +335,7 @@ def _extract_with_pymupdf(
                                 bold=bool(int(span.get("flags") or 0) & 16),
                                 italic=bool(int(span.get("flags") or 0) & 2),
                                 font=str(span.get("font")) if span.get("font") else None,
+                                superscript=bool(int(span.get("flags") or 0) & 1),
                             )
                             for span in line.get("spans") or []
                         ]
@@ -311,14 +369,36 @@ def _extract_with_pymupdf(
                             raw_page.tables.append(RawTable(rows=normalized, bbox=_bbox(table.bbox)))
             except Exception:  # pragma: no cover - optional table detection
                 logger.debug("Table detection failed on page %s", index, exc_info=True)
+            from app.document_processing.normalization.layout import order_text_blocks
+
+            raw_page.text_blocks = order_text_blocks(raw_page.text_blocks, raw_page.width or 1)
+            _attach_vectors(page, raw_page)
             raw_page.text = "\n".join(block.text for block in raw_page.text_blocks if block.text).strip()
             if render_when is not None and render_when(raw_page):
                 raw_page.render_png = _render(page, render_dpi)
                 if raw_page.render_png is None:
                     raw_page.render_error = f"第 {index} 页 PyMuPDF 渲染失败"
-            pages.append(raw_page)
-    info = availability()
-    return RawDocument(page_count=len(pages), pages=pages, engine=info)
+            yield raw_page
+
+
+def _attach_vectors(page: Any, raw_page: RawPage) -> None:
+    try:
+        raw_page.has_vector_content = bool(page.get_drawings())
+    except Exception:
+        raw_page.has_vector_content = True  # Unknown geometry is unsafe for the strict router.
+    try:
+        regions = page.cluster_drawings()
+    except Exception:
+        return
+    for region in regions:
+        box = _bbox(region)
+        if not box or (box[2] - box[0]) * (box[3] - box[1]) < 400:
+            continue
+        if any(table.bbox and table.bbox[0] - 3 <= box[0] and table.bbox[1] - 3 <= box[1]
+               and table.bbox[2] + 3 >= box[2] and table.bbox[3] + 3 >= box[3]
+               for table in raw_page.tables):
+            continue
+        raw_page.image_blocks.append(RawImageBlock(bbox=box, is_vector=True))
 
 
 def _attach_image_xrefs(page: Any, raw_page: RawPage) -> None:
@@ -352,16 +432,16 @@ def _attach_image_xrefs(page: Any, raw_page: RawPage) -> None:
                 raw_page.image_blocks.append(RawImageBlock(bbox=rect_bbox, xref=xref))
 
 
-def _extract_with_pypdf(
+def _iter_with_pypdf(
     path: Path,
     *,
     render_when: Callable[[RawPage], bool] | None = None,
     render_dpi: int = 120,
-) -> RawDocument:
+    page_numbers: list[int] | None = None,
+) -> Iterator[RawPage]:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
-    pages: list[RawPage] = []
     pdfium_document = None
     render_error = None
     if render_when is not None:
@@ -374,6 +454,8 @@ def _extract_with_pypdf(
             logger.warning("PDFium could not open PDF for page rendering", exc_info=True)
     try:
         for index, page in enumerate(reader.pages, start=1):
+            if page_numbers is not None and index not in page_numbers:
+                continue
             try:
                 text = (page.extract_text() or "").strip()
             except Exception as exc:  # pragma: no cover
@@ -392,6 +474,16 @@ def _extract_with_pypdf(
                 lines = [RawLine(spans=[RawSpan(text=line)]) for line in paragraph.splitlines() if line.strip()]
                 if lines:
                     raw_page.text_blocks.append(RawTextBlock(lines=lines))
+            if len(text.strip()) < 80:
+                try:
+                    objects = page.get("/Resources", {}).get("/XObject", {})
+                    if hasattr(objects, "get_object"):
+                        objects = objects.get_object()
+                    if any(value.get_object().get("/Subtype") == "/Image" for value in objects.values()):
+                        raw_page.image_blocks.append(RawImageBlock(
+                            bbox=[0, 0, raw_page.width or 1, raw_page.height or 1]))
+                except Exception:
+                    logger.debug("Could not inspect fallback image objects", exc_info=True)
             if page_error:
                 raw_page.render_error = page_error
             elif render_when is not None and render_when(raw_page):
@@ -415,12 +507,7 @@ def _extract_with_pypdf(
                         raw_page.render_error = (
                             f"第 {index} 页 PDFium 渲染失败：{type(exc).__name__}: {exc}"
                         )
-            pages.append(raw_page)
+            yield raw_page
     finally:
         if pdfium_document is not None:
             pdfium_document.close()
-    return RawDocument(
-        page_count=len(pages), pages=pages,
-        engine=EngineInfo(name="pypdf", version="text-only", available=True,
-                          capabilities=("text_only", "render") if render_when else ("text_only",)),
-    )

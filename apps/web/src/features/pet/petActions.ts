@@ -5,9 +5,13 @@
  * 思考动作拆成两段，因为思考时长不确定：
  *   thinking-intro  0→75 帧正放一次
  *   thinking-loop   75↔22 帧之间往复，直到答案出来
+ * 拖动同样拆成三段，因为按住多久不确定：
+ *   drag-intro  被拎起，播一次
+ *   drag-loop   悬空往复，按住不放时一直循环
+ *   drop        松手后落地收尾，播一次回待机
  * 其余一次性动作播完自动回 idle。
  */
-export type PetActionId = 'idle' | 'thinking-intro' | 'thinking-loop' | 'explaining' | 'explaining-loop' | 'error' | 'greet'
+export type PetActionId = 'idle' | 'thinking-intro' | 'thinking-loop' | 'explaining' | 'explaining-loop' | 'error' | 'greet' | 'drag-intro' | 'drag-loop' | 'drop'
 
 /** 兜底时长（秒）：与 manifest.json 的 duration 一致；拉不到 manifest 时用它 */
 export const PET_ACTION_FALLBACK_SECONDS: Record<PetActionId, number> = {
@@ -18,6 +22,9 @@ export const PET_ACTION_FALLBACK_SECONDS: Record<PetActionId, number> = {
   'explaining-loop': 2,
   error: 5,
   greet: 5,
+  'drag-intro': 0.92,
+  'drag-loop': 2,
+  drop: 3.08,
 }
 
 /** 悬停多久触发一次「行礼」 */

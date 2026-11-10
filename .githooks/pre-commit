@@ -30,6 +30,14 @@ if [ -n "$staged_data" ]; then
     fail "检测到本地数据/课件文件被暂存。这些内容不应进入版本库。"
 fi
 
+# 2b) 约定的个人工作区与生成预览不可通过 git add -f 绕过忽略规则。
+staged_local=$(git diff --cached --name-only --diff-filter=ACM \
+    | grep -E '^(scripts/(local|scratch|experiments)/|scripts/[^/]+\.(local|scratch)\.(py|ps1)$|docs/(_drafts|_local)/|\.scratch/|\.notes/|output/|apps/web/public/assets/pet/preview\.html$)' || true)
+if [ -n "$staged_local" ]; then
+    printf '%s\n' "$staged_local"
+    fail "检测到个人脚本、草稿或生成预览被暂存。请移出暂存区并使用约定的本地目录。"
+fi
+
 # 3) 扫描新增内容中的疑似密钥字面量
 staged_content=$(git diff --cached -U0 --diff-filter=ACM \
     | grep -E '^\+' \

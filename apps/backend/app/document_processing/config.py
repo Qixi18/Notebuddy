@@ -28,11 +28,18 @@ def provider_snapshot() -> dict:
     from app.document_processing.engines.vision import config_snapshot
 
     vision = config_snapshot()
+    mode = settings.llm_reading_mode
+    if mode not in {"hybrid", "vision"}:
+        raise ValueError("NOTEBOOK_LLM_READING_MODE 仅支持 hybrid 或 vision")
+    from app.document_processing.adapters.mineru import availability
+
     return {"model": settings.deepseek_model, "base_url": settings.deepseek_base_url,
             "timeout_seconds": settings.deepseek_timeout_seconds,
             "vision": vision,
             "vision_capability_fingerprint": _vision_fingerprint(vision),
-            "prompt_version": "llm-document-v1"}
+            "prompt_version": "llm-document-v1", "reading_mode": mode,
+            "local_parser": "mineru", "local_parser_version": availability()["version"],
+            "local_tier": "basic", "reading_policy": "hybrid-v1"}
 
 
 def ensure_vision_preflight() -> None:

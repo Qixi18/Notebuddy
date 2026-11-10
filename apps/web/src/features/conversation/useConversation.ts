@@ -38,7 +38,7 @@ export type AgentRunStep = AgentStepEvent & { startedAt?: number; durationMs?: n
 export type AgentRunState = {
   steps: AgentRunStep[]
   streamingText: string
-  /** 旧版思维链累计文本；服务端已不外发，恒为空字符串，保留字段给旧测试/旧界面 */
+  /** 思维链累计文本（ADR-0007 起服务端恢复实时外发；历史旧消息不含该数据时为空） */
   thinking: string
   notice?: string
   /** 服务端阶段状态（thinking/drafting/…/verified）：区分「还在核验」与「已核验」 */
@@ -562,7 +562,8 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
       },
       onNotice: (event: AgentNoticeEvent) => {
         if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
-        setAgentRun((current) => current ? { ...current, notice: event.text } : current)
+        /* 回退标准问答：清掉未核验草稿，避免旧 agent 的草稿文本与 fallback 回答混在一起 */
+        setAgentRun((current) => current ? { ...current, notice: event.text, streamingText: '' } : current)
       },
       onStatus: (event: AgentStatusEvent) => {
         if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
@@ -581,7 +582,12 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
           ? { ...current, status: event.status, notice: labels[event.status] ?? current.notice }
           : current)
       },
-        onError: (event: AgentErrorEvent) => { if (courseRef.current === requestCourseId && historyRequestRef.current === historyRequest) setError(event.message) },
+        onError: (event: AgentErrorEvent) => {
+          if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
+          setError(event.message)
+          /* 失败即丢弃未核验草稿：正文从未发布，界面不留残句（ADR-0007） */
+          setAgentRun((current) => current ? { ...current, streamingText: '' } : current)
+        },
         onFinal: (final: AgentFinalEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
           setAgentRun((current) => current

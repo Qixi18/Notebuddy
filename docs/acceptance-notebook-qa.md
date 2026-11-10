@@ -4,7 +4,11 @@
 > 状态：**自动验证已完成；真实模型、真实 PDF/图片、浏览器人工验收未执行**
 > 基线：`feat/overall-inspection`，本地工作树（未提交）
 
-## 1. 已实现的发布契约
+> **⚠️ 契约修订（2026-11-06，ADR-0007）**：下文第 1 节描述的"缓冲正文、不发 delta、不外发思维链"口径已被 ADR-0007 部分修订——门禁前正文 delta 与思维链原文恢复实时下发、思维链恢复落库；**但落库内容与核验徽标仍只由证据门禁决定，核验失败仍整段丢弃**，本记录中的安全测试结论（Stage 隔离、AnswerGate、fail-closed）继续有效。历史测试数字只代表其标注基线。
+
+## 1. 历史发布契约（仅适用于上述基线）
+
+以下流程图保留当时的自动测试证据，不描述当前 SSE 时序。现行流式事件和编辑建议以 [API 契约](api.md) 与 [ADR-0007](architecture-decisions/ADR-0007-restore-agent-streaming-and-notebook-edit-suggestions.md) 为准。
 
 ```text
 提问 + 会话范围（notebook / course / global / 历史 note）
