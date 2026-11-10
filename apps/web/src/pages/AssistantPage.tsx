@@ -41,7 +41,7 @@ export function AssistantPage() {
   const navigate = useNavigate()
   const location = useLocation()
 
-  /* Notebook 编辑建议（ADR-0005）：本页没有打开编辑器，采纳走 API（CAS），不回灌编辑器。
+  /* Notebook 编辑建议（ADR-0007）：本页没有打开编辑器，采纳走 API（CAS），不回灌编辑器。
      agentFinalId 变化触发重载——agent 提交新建议后卡片自动出现。 */
   const notebookEditSuggestions = useNotebookEditSuggestions({
     courseId,

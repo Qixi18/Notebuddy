@@ -12,11 +12,11 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 ## 当前能力与边界
 
-2026-11-08 混合 AI 处理：新上传选择“AI 增强”（API 仍为 `llm`）时默认先本地解析，疑难页交给已预检的视觉模型；成功读取及已验证生成批次可恢复。安装 MinerU 用 `pwsh -NoProfile -File .\scripts\setup.ps1 -WithMinerU`，重跑 setup 会保留已装的 MinerU extra。新上传可用 `NOTEBOOK_LLM_READING_MODE=vision` 回退全页视觉；旧任务快照不变。来源、预算、质量门禁及正文 revision/CAS 保持原路径。方案见 [ADR-0006](docs/architecture-decisions/ADR-0006-hybrid-ai-document-processing.md)（Proposed）；实际验证与限制见 [混合处理交付记录](docs/development/2026-11-08-hybrid-ai-processing.md)，真实材料/模型质量和费用节省仍须分别验收。
+2026-11-08 混合 AI 处理：新上传选择“AI 增强”（API 仍为 `llm`）时默认先本地解析，疑难页交给已预检的视觉模型；成功读取及已验证生成批次可恢复。安装 MinerU 用 `pwsh -NoProfile -File .\scripts\setup.ps1 -WithMinerU`，重跑 setup 会保留已装的 MinerU extra。新上传可用 `NOTEBOOK_LLM_READING_MODE=vision` 回退全页视觉；旧任务快照不变。来源、预算、质量门禁及正文 revision/CAS 保持原路径。方案见 [ADR-0006](docs/architecture-decisions/ADR-0006-hybrid-ai-document-processing.md)（Proposed）；历史验证摘要见 [验收记录](docs/acceptance.md)，真实材料/模型质量和费用节省仍须分别验收。
 
 - 一门课程可有多本笔记本；笔记按讲次、章节和小节组织，知识树叶子定位到具体笔记小节。课程、资料、笔记、会话及修改记录保存在本地 SQLite。
 - 资料上传后进入持久任务队列，由独立执行器解析。解析结果保留来源位置与告警；扫描 PDF 等缺少可提取文字的情况需要检查或启用 OCR。
-- Notebook 上传后的初始/增量生成通过质量门禁后可写入正式正文；当前 Agent 答疑不修改正文，旧编辑建议数据与审核 API 暂保留兼容但不由 Agent 新建。
+- Notebook 上传后的初始/增量生成通过质量门禁后可写入正式正文。Agent 在具有可编辑 Notebook 的会话中可创建待审编辑建议；采纳建议仍须经审核 API，并以 revision/CAS 写入正文。没有可编辑 Notebook 的会话不暴露该工具，Agent 不直接改写正文。
 - 课程答疑支持持久会话、资料检索、来源展示与可选的网络搜索。未配置外部模型时存在本地降级路径；降级结果不代表真实模型质量。
 - 首页展示近期课程知识树，森林页浏览全部课程。培养方案先预览再确认导入。
 
@@ -35,13 +35,9 @@ NoteBuddy 是以课程为中心的学习工作区。用户可以导入资料、�
 
 ## 本地启动
 
-已完成环境准备后，也可直接双击仓库根目录的 `start-notebuddy.bat`，同时启动后端、Web 和后台任务执行器；保持窗口打开，启动后访问 `http://localhost:5173`，按 `Ctrl+C` 停止。在命令行执行 `start-notebuddy.bat -Check` 可只检查依赖，不启动服务或迁移数据库。
+Windows 下在仓库根目录使用 PowerShell 7 执行以下命令。先运行 `pwsh -NoProfile -File .\scripts\dev.ps1 -Check` 检查依赖，再运行 `pwsh -NoProfile -File .\scripts\dev.ps1` 启动后端、Web 和后台任务执行器；访问 `http://localhost:5173`，按 `Ctrl+C` 停止。首次准备需要本机已有 `uv`、Node.js 22.22.2+（含 npm；锁定的 Web 测试依赖最低要求），或已经放好项目内的 `.runtime/bin/uv.exe` 和 `.runtime/node`。Python 会安装在项目内，不要求预先安装到系统。
 
-若上次关闭窗口后服务仍占用端口，或希望加载最新后端代码，可执行 `start-notebuddy.bat -Restart`；它只停止经项目路径与启动命令确认属于本仓库的 API、Worker、Vite 及其子进程，再按正常流程启动，不会按端口盲目结束其他程序。
-
-也可直接双击根目录的 `restart-notebuddy.bat` 完成上述重启。
-
-Windows 下在仓库根目录执行以下两步。首次准备需要本机已有 `uv`、Node.js 22.22.2+（含 npm；锁定的 Web 测试依赖最低要求），或已经放好项目内的 `.runtime/bin/uv.exe` 和 `.runtime/node`。Python 会安装在项目内，不要求预先安装到系统。
+端口被本项目遗留进程占用时，可运行 `pwsh -NoProfile -File .\scripts\dev.ps1 -Restart`。脚本只停止经项目路径与启动命令确认属于本仓库的 API、Worker、Vite 及其子进程。根目录批处理启动器已移除。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\setup.ps1

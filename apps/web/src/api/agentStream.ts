@@ -63,7 +63,7 @@ export type AgentVerification = {
 
 export type AgentSuggestion =
   | { type: 'note_suggestion'; id: string; note_id: string; note_title: string; impact: string }
-  /** Notebook 结构化修改建议指针（ADR-0005）：完整操作列表经建议列表 API 加载后渲染 */
+  /** Notebook 结构化修改建议指针（ADR-0007）：完整操作列表经建议列表 API 加载后渲染 */
   | {
       type: 'notebook_edit_suggestion'
       id: string

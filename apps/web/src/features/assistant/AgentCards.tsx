@@ -118,7 +118,7 @@ export function NoteSuggestionCards({
 }
 
 /**
- * NotebookEditSuggestionCards（ADR-0005）：Notebook 结构化修改建议卡。
+ * NotebookEditSuggestionCards（ADR-0007）：Notebook 结构化修改建议卡。
  * 数据来自 useNotebookEditSuggestions（建议列表 API 加载的完整行，含 operations），
  * agent 流里的 notebook_edit_suggestion 只是「产生了新建议」的指针，触发 hook 重载。
  * 采纳走待审 review 端点（CAS + 可选操作序号），不直接改动正文。

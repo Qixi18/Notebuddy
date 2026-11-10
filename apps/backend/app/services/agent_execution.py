@@ -36,7 +36,7 @@ from app.services.conversations import (
 from app.services.course_scope import material_in_course
 from app.services.errors import ApplicationError
 
-# 思维链原文随 process_json 落库的截断上限（ADR-0005）。
+# 思维链原文随 process_json 落库的截断上限（ADR-0007）。
 _THINKING_STORE_LIMIT = 20000
 
 
@@ -373,7 +373,7 @@ def agent_message_events(
                     error_message = str(event.get("message") or "agent 执行失败")
                 else:
                     if event["type"] == "thinking":
-                        # 思维链原文实时外发并落库（ADR-0005）：仅供展示与回看，
+                        # 思维链原文实时外发并落库（ADR-0007）：仅供展示与回看，
                         # 不进入正文与证据；超过存储上限后只继续计数。
                         if thinking_started is None:
                             thinking_started = time.monotonic()
@@ -389,7 +389,7 @@ def agent_message_events(
                             yield (event)
                         continue
                     if event["type"] == "delta":
-                        # 门禁前实时下发草稿增量（ADR-0005）：仅供前端实时展示，
+                        # 门禁前实时下发草稿增量（ADR-0007）：仅供前端实时展示，
                         # 落库内容仍以 verify_answer 通过后的核验正文为准。
                         close_thinking()
                         draft_streamed = True

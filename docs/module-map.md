@@ -17,7 +17,7 @@
 | `apps/backend/app/services/` | 应用用例、跨模块编排和事务边界 | 按垂直业务用例分配文件；服务新增逻辑使用框架无关错误，不依赖 FastAPI Router/HTTP 异常。共享事务或公共服务签名变化先同步调用方 |
 | `apps/backend/app/notes/store.py` | Notebook 正文统一写入、revision/CAS 与历史维护 | 正文写入的高风险单点；不得增加平行写入路径。任何并行改动必须由技术把关者先审接口/事务方案，并指定单一主编辑者 |
 | `apps/backend/app/schemas/` | 后端请求/响应及数据校验契约 | 公共字段修改前先确定兼容窗口和调用方；协调人维护接口约定，前端 API 类型与文档应在同一切片同步 |
-| `apps/backend/app/db/models.py`、`apps/backend/alembic/versions/` | ORM 模型与数据库迁移 | 多人不得并行编辑同一个迁移文件；schema 变化先审 ADR/升级降级策略，迁移文件由一人生成并集成，其他人基于已确认字段开发 |
+| `apps/backend/app/db/models.py`、`apps/backend/migrations/versions/` | ORM 模型与数据库迁移 | 多人不得并行编辑同一个迁移文件；schema 变化先审 ADR/升级降级策略，迁移文件由一人生成并集成，其他人基于已确认字段开发 |
 | `apps/backend/app/document_processing/` | 原始资料解析与 DocumentIR 生成/读取能力 | 维护 Asset/ParseRun/DocumentIR 的来源契约和质量语义，不负责 Notebook 正文存储；涉及格式、质量状态或快照字段时先同步生成、检索和前端调用方 |
 | `apps/backend/app/workers/`、`generation/` | 持久任务执行、生成上下文与质量门禁 | 任务状态、重试、取消、幂等键及 revision/CAS 语义需先形成共享约定；避免 API、Worker 和生成逻辑由不同人按不同状态机并行实现 |
 | `apps/web/src/styles.css`、`redesign.css` | 全局主题和跨页面样式 | 多页面并行开发时由一人维护全局 token/基底；功能样式优先局部化，避免多个切片同时覆盖公共选择器 |

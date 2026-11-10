@@ -7,8 +7,8 @@
    <job-root>/<中文动作名>/frames/*.png  +  <job-root>/<中文动作名>/alpha/*.png
    脚本用 ffmpeg 的 alphamerge 把蒙版合回 RGB,得到透明序列再编码。
 
-输出:apps/web/public/assets/pet/<动作>.webp(透明动画、循环)、manifest.json、
-      preview.html。
+输出:apps/web/public/assets/pet/<动作>.webp(透明动画、循环)、manifest.json；
+      仅本地查看的 preview.html 位于 .runtime/previews/pet/。
 
 脚本只做四件事(去背/抠像由 matte-studio 完成,这里不碰):
 1. 按文件名自然排序,必要时重采样到 12fps;
@@ -18,8 +18,8 @@
 
 用法:
     # matte-studio 来源(推荐)
-    python scripts/build_pet_actions.py idle --job-root "D:/王金赛/matte-studio/jobs"
-    python scripts/build_pet_actions.py idle thinking explaining --job-root "..."
+    python scripts/build_pet_actions.py idle --job-root "<job-root>"
+    python scripts/build_pet_actions.py idle thinking explaining --job-root "<job-root>"
 
     # 透明 PNG 来源
     python scripts/build_pet_actions.py                  # 构建全部有帧的动作
@@ -250,11 +250,14 @@ def write_manifest(out_dir, character, built, canvas, fps):
 
 
 def write_preview(out_dir, character, manifest):
+    preview_dir = os.path.join(REPO, ".runtime", "previews", character)
+    os.makedirs(preview_dir, exist_ok=True)
+    asset_prefix = os.path.relpath(out_dir, preview_dir).replace(os.sep, "/")
     rows = []
     for action_id, item in manifest["actions"].items():
         rows.append(f"""
     <figure class="card">
-      <div class="stage"><img src="{item['file']}" alt="{action_id}" loading="lazy"></div>
+      <div class="stage"><img src="{asset_prefix}/{item['file']}" alt="{action_id}" loading="lazy"></div>
       <figcaption>
         <strong>{action_id}</strong>
         <span>{item.get('outputFrames', '?')} 帧 · {item.get('duration', '?')}s · {item['bytes'] / 1024:.0f} KB</span>
@@ -302,7 +305,7 @@ function replay(button) {{
 </script>
 </html>
 """
-    path = os.path.join(out_dir, "preview.html")
+    path = os.path.join(preview_dir, "preview.html")
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(html)
     return path

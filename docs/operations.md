@@ -4,7 +4,7 @@
 
 ## 启动
 
-已有服务占用端口或需要载入更新代码时，可双击 `restart-notebuddy.bat`，或执行 `start-notebuddy.bat -Restart` / `pwsh -NoProfile -File .\scripts\dev.ps1 -Restart`。重启前只结束由本仓库路径和 API/Worker/Vite 启动命令确认归属的进程及其子进程；其他程序占用的端口继续报错，不会被按端口强行清理。`-Check` 始终只检查依赖，即使同时传入 `-Restart` 也不停止服务。
+已有本项目服务占用端口时，可在仓库根目录运行 `pwsh -NoProfile -File .\scripts\dev.ps1 -Restart`。重启前只结束由本仓库路径和 API/Worker/Vite 启动命令确认归属的进程及其子进程；其他程序占用的端口继续报错，不会被按端口强行清理。`-Check` 始终只检查依赖，即使同时传入 `-Restart` 也不停止服务。根目录批处理启动器已移除。
 
 Windows 使用 PowerShell 7，从仓库根目录执行 `pwsh -NoProfile -File .\scripts\dev.ps1 -Check` 检查，再用 `pwsh -NoProfile -File .\scripts\dev.ps1` 启动。脚本启动前检查端口并迁移 SQLite，再启动 API、任务执行器和 Vite；服务进程绑定本机 `127.0.0.1:8000`、`127.0.0.1:5173`，浏览器访问使用 `http://localhost:5173`，退出时脚本结束自身子进程。迁移意味着必须确认当前 `NOTEBOOK_DATA_DIR` 指向预期的本地库；多个实例不能无控制地并发写同一 SQLite。手动运行只用于调试，且必须同时启动 Worker。环境准备和完整命令见 [README](../README.md)。
 

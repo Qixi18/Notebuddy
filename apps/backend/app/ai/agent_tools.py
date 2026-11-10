@@ -3,7 +3,7 @@
 安全边界：
 - 只读工具全部校验课程归属（经 Notebook.course_id）；
 - Agent 不直接改写 Notebook 正文：propose_notebook_edits 只创建待审
-  NotebookEditSuggestion（ADR-0005），应用必须经审核端点按 CAS 写入正文；
+  NotebookEditSuggestion（ADR-0007），应用必须经审核端点按 CAS 写入正文；
 - 仅当会话携带可编辑 Notebook（editable_notebook_id）时暴露编辑建议工具；
 - 工具回填文本一律截断，防止多轮循环撑爆上下文。
 """
@@ -159,7 +159,7 @@ def build_tool_specs(
             ["candidate_name", "candidate_summary", "rationale"],
         ))
     if editable_notebook and scope in ("note", "course", "global"):
-        # ADR-0005：编辑建议产生端重新开放；只创建待审建议，不直接改动正文。
+        # ADR-0007：编辑建议产生端重新开放；只创建待审建议，不直接改动正文。
         specs.append(_spec(
             "propose_notebook_edits",
             "对当前打开（或锁定）的笔记提交结构化修改建议，用户在前端逐块审核后才写入正文。"

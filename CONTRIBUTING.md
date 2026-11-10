@@ -4,6 +4,8 @@
 
 ## 分支职责
 
+团队共享的稳定入口放在 `scripts/`，隔离且可重复的检查放在 `scripts/tests/` 或 `scripts/qa/`。个人调试脚本放在被忽略的 `scripts/local/`、`scripts/scratch/` 或 `scripts/experiments/`；个人草稿放在 `docs/_drafts/` 或仓库外，运行输出放在 `.runtime/`。新增共享脚本须说明用途、输入输出、副作用、调用方和验证方式；不要把正式资源构建工具误当个人脚本清除。
+
 - `main`：长期固定的稳定基线，仅接收共享集成分支完成联调、Debug 和回归验收后的 PR；禁止直接或强制推送。
 - `fix/overall-debug-integration`：长期固定的共享集成分支，接收三位开发者的临时功能/修复分支 PR，负责跨模块集成、冲突处理、接口联调、整体 Debug 与回归测试。它不是 `main` 的替代品；禁止强制推送。
 - `feat/*`、具体任务的 `fix/*`：临时工作分支。完成后先向 `fix/overall-debug-integration` 提 PR，不直接向 `main` 提 PR。

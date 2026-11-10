@@ -50,7 +50,7 @@ const QUICK_PROMPTS: Array<{ label: string; prompt: string }> = [
  *   · 左边缘分界条可拖拽实时调宽（双击复位、拖太窄自动收合、宽度记忆）；
  *   · 上下文感知：说明当前挂在哪门课 / 哪份课件上，范围可手动收窄；
  *   · 检索显性化：回答后附来源清单，可跳回课件；
- *   · Notebook 编辑建议（ADR-0005）：待审建议在本坞展示，采纳经 CAS 写入并回灌编辑器。
+ *   · Notebook 编辑建议（ADR-0007）：待审建议在本坞展示，采纳经 CAS 写入并回灌编辑器。
  */
 export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChange, notebookAction, onNotebookActionConsumed }: AssistantDockProps) {
   const {
@@ -76,7 +76,7 @@ export function AssistantDock({ width, onWidthChange, onClose, onResizeStateChan
   const fellBackToRecent = Boolean(conversationCourseId) && !courseId
   const notebook = useNotebookBridge()
 
-  /* Notebook 编辑建议（ADR-0005）：目标 = 当前打开的 Notebook（经 bridge 拿到
+  /* Notebook 编辑建议（ADR-0007）：目标 = 当前打开的 Notebook（经 bridge 拿到
      revision/editVersion/isDirty/adoptDocument，采纳后回灌编辑器）。
      未分类 Notebook（courseId 为空）暂不走建议卡：列表与采纳入口依赖课程上下文。 */
   const notebookEditSuggestions = useNotebookEditSuggestions({

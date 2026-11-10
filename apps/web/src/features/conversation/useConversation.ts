@@ -38,7 +38,7 @@ export type AgentRunStep = AgentStepEvent & { startedAt?: number; durationMs?: n
 export type AgentRunState = {
   steps: AgentRunStep[]
   streamingText: string
-  /** 思维链累计文本（ADR-0005 起服务端恢复实时外发；历史旧消息不含该数据时为空） */
+  /** 思维链累计文本（ADR-0007 起服务端恢复实时外发；历史旧消息不含该数据时为空） */
   thinking: string
   notice?: string
   /** 服务端阶段状态（thinking/drafting/…/verified）：区分「还在核验」与「已核验」 */
@@ -585,7 +585,7 @@ export function useConversation(courseId?: string, notebookId?: string): Convers
         onError: (event: AgentErrorEvent) => {
           if (courseRef.current !== requestCourseId || historyRequestRef.current !== historyRequest) return
           setError(event.message)
-          /* 失败即丢弃未核验草稿：正文从未发布，界面不留残句（ADR-0005） */
+          /* 失败即丢弃未核验草稿：正文从未发布，界面不留残句（ADR-0007） */
           setAgentRun((current) => current ? { ...current, streamingText: '' } : current)
         },
         onFinal: (final: AgentFinalEvent) => {
